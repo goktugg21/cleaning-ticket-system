@@ -21,6 +21,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
 import { RoadTabs, TeachHead } from "../../components/guide/RoadTabs";
 import { StartHere } from "../../components/guide/StartHere";
+import { HowThisWorks } from "../../components/guide/HowThisWorks";
 import { TeachEmpty } from "../../components/guide/TeachEmpty";
 
 // P-12 E1 (§D.24 rule 3) — the rule's road: it runs, it can be paused
@@ -200,6 +201,13 @@ export function PlannedWorkListPage() {
           {error}
         </div>
       )}
+
+      {/* P-13 §D.24 rule 8 — what this page CAN do. */}
+      <HowThisWorks
+        pageKey="recurring"
+        testId="planned-work-how"
+        lines={[t("how.1"), t("how.2"), t("how.3"), t("how.4")]}
+      />
 
       {/* P-12 E1 (§D.24 rule 2) — the ONE thing waiting: this week's
           visits with no crew, with the door to the soonest one. */}

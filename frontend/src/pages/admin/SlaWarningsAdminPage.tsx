@@ -66,6 +66,8 @@ import type {
 } from "../../api/types";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/ToastProvider";
+import { HowThisWorks } from "../../components/guide/HowThisWorks";
+import { WhatHappens } from "../../components/guide/WhatHappens";
 import { formatDate } from "../../lib/intl";
 
 /**
@@ -474,18 +476,36 @@ export function SlaWarningsAdminPage() {
                 <RotateCcw size={15} strokeWidth={2} />
                 {t("sla_warnings.reset")}
               </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={handleSave}
-                disabled={saving}
-                data-testid="sla-warnings-save"
-              >
-                {t("save")}
-              </button>
+              <span style={{ textAlign: "right" }}>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleSave}
+                  disabled={saving}
+                  data-testid="sla-warnings-save"
+                >
+                  {t("save")}
+                </button>
+                {/* P-13 §D.24 rule 8 — the pre-read. */}
+                <WhatHappens testId="sla-warnings-save-what">
+                  {t("sla_warnings.what_save")}
+                </WhatHappens>
+              </span>
             </>
           ) : undefined
         }
+      />
+
+      {/* P-13 §D.24 rule 8 — what this page CAN do. */}
+      <HowThisWorks
+        pageKey="sla-warnings"
+        testId="sla-warnings-how"
+        lines={[
+          t("sla_warnings.how_1"),
+          t("sla_warnings.how_2"),
+          t("sla_warnings.how_3"),
+          t("sla_warnings.how_4"),
+        ]}
       />
 
       {/* The ACTION's failure, directly under the buttons that fired

@@ -95,5 +95,13 @@
   "road.at_risk_on_hold": "In de wacht sinds {{date}}",
   "road.at_risk_past_deadline_one": "Over de deadline, nog in uitvoering — {{count}} dag",
   "road.at_risk_past_deadline_other": "Over de deadline, nog in uitvoering — {{count}} dagen",
-  "road.at_risk_not_planned": "Nog niet ingepland — de dag was {{date}}"
+  "road.at_risk_not_planned": "Nog niet ingepland — de dag was {{date}}",
+  "how.1": "Concept maken verzamelt het afgeronde werk van een klant in een concept dat u nog kunt aanpassen — er wordt niets verzonden.",
+  "how.2": "Uitgeven legt de regels vast — de factuur heeft nog geen nummer.",
+  "how.3": "Verzenden geeft het nummer en mailt de PDF; vóór die stap bereikt niets de klant.",
+  "how.4": "Een creditnota draait een verzonden factuur terug, ernaast — het origineel verandert nooit.",
+  "how.5": "Voorbeeld toont de PDF bij elke stap, zonder iets op te slaan.",
+  "road.what_generate": "Maakt een concept dat u nog kunt aanpassen of verwijderen. Er wordt niets verzonden.",
+  "road.what_issue": "Legt de regels vast; het nummer komt bij verzenden.",
+  "road.what_send": "Geeft de factuur haar nummer en mailt de PDF — het eerste dat de klant ziet."
 }

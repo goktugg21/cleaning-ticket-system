@@ -272,5 +272,10 @@
   "generate.banner_title": "{{occurrences}} visit(s) planned and {{tickets}} ticket(s) made.",
   "generate.banner_body": "They sit on the calendar below and as tickets in the planning. Nothing was sent to the customer.",
   "money.mode_with_contract": "Invoiced with the contract, per period — the visits themselves are not separate invoice lines.",
-  "money.mode_per_visit": "Invoiced per visit, at this rule's fixed price."
+  "money.mode_per_visit": "Invoiced per visit, at this rule's fixed price.",
+  "how.1": "A rule makes visits on a schedule.",
+  "how.2": "A visit is a ticket like any other — planned, done, checked.",
+  "how.3": "Pause stops new visits and keeps the rule; Resume picks it back up.",
+  "how.4": "An end date closes it for good.",
+  "detail.what_pause": "Stops new visits; the rule stays and can resume."
 }

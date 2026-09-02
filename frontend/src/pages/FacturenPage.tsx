@@ -71,6 +71,8 @@ import { useDoneBanner } from "../components/guide/useDoneBanner";
 import { HIGHLIGHT_CLASS, HIGHLIGHT_MS } from "../components/guide/highlight";
 import { CompanyScopeSelect } from "../components/guide/CompanyScopeSelect";
 import { BillingDayDialog } from "../components/invoices/BillingDayDialog";
+import { HowThisWorks } from "../components/guide/HowThisWorks";
+import { WhatHappens } from "../components/guide/WhatHappens";
 import { pickSeedCompany, useCompanyScope } from "../lib/useCompanyScope";
 import { atRiskRowHref, dueRowHref } from "../lib/rowLink";
 import { BoundedList } from "../components/BoundedList";
@@ -827,6 +829,21 @@ export function FacturenPage({
         </div>
       )}
 
+      {/* P-13 §D.24 rule 8 — what this page CAN do, before what to do. */}
+      {!embedded && !customerScoped && (
+        <HowThisWorks
+          pageKey="invoices"
+          testId="facturen-how"
+          lines={[
+            t("invoices:how.1"),
+            t("invoices:how.2"),
+            t("invoices:how.3"),
+            t("invoices:how.4"),
+            t("invoices:how.5"),
+          ]}
+        />
+      )}
+
       {/* P-12 §D.24 rule 4 — what just happened, in place. */}
       {facDone.done && (
         <DoneBanner
@@ -836,8 +853,10 @@ export function FacturenPage({
         />
       )}
 
-      {/* P-12 §D.24 rule 2 — the ONE thing waiting, first step first. */}
-      {!dueLoading && !loading && !genRow && (
+      {/* P-12 §D.24 rule 2 — the ONE thing waiting, first step first.
+          P-13 J — while a Done banner is up, Start here stands down:
+          one voice at a time. */}
+      {!dueLoading && !loading && !genRow && !facDone.done && (
         startNoDayRow ? (
           <StartHere
             testId="facturen-start-here"
@@ -1349,6 +1368,10 @@ export function FacturenPage({
                     : t("facturen.gen_confirm_no_month")}
                 </button>
               </div>
+              {/* P-13 §D.24 rule 8 — the pre-read under the button. */}
+              <WhatHappens testId="facturen-generate-what">
+                {t("invoices:road.what_generate")}
+              </WhatHappens>
             </div>
           </div>
         )}

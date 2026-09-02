@@ -496,5 +496,11 @@
   "road.line_added_next_draft": "Nothing is invoiced yet. Next: activate the contract once it is complete.",
   "road.line_added_next_active": "The line counts from the revision it sits on.",
   "road.line_runs_as": "Runs as recurring work:",
-  "road.line_ran_as": "Ran as recurring work (paused):"
+  "road.line_ran_as": "Ran as recurring work (paused):",
+  "how.1": "A contract is what a customer pays on a fixed basis, per building.",
+  "how.2": "A line is one service, one amount, one period.",
+  "how.3": "Activate starts the invoices on the billing day — a draft invoices nothing.",
+  "how.4": "Revisions change amounts from a date without touching the past.",
+  "how.5": "Lines can run as recurring work — the visits become tickets.",
+  "road.what_activate": "Starts the invoices on the billing day; the past is untouched."
 }

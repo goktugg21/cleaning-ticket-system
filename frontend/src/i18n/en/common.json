@@ -2950,5 +2950,16 @@
   "guide.done": "Done",
   "guide.dismiss": "Dismiss",
   "guide.company": "Company",
-  "facturen.at_risk_see_which": "see which"
+  "facturen.at_risk_see_which": "see which",
+  "guide.how_this_works": "How this page works",
+  "hours_admin.how_1": "Enter hours types a person's week in one grid — nothing is saved until Save.",
+  "hours_admin.how_2": "A line is a building (standard hours) or a job.",
+  "hours_admin.how_3": "The hour type weighs the hours for the reports — it never changes the price.",
+  "hours_admin.how_4": "Close week hands the hours to the reports and the invoices; reopen undoes it.",
+  "hours_admin.what_enter": "Opens the grid for this week; nothing is saved until Save.",
+  "sla_warnings.how_1": "A threshold says how long a kind of wait may last — the customer's approval before the billing cutoff, a manager's check, a planned start that never started.",
+  "sla_warnings.how_2": "When a wait crosses its threshold, the person whose wait it is gets a warning by email; one escalation later it reaches the level above.",
+  "sla_warnings.how_3": "Changing a number applies from the next check, to running waits too — warnings already sent stay sent, and a cooldown keeps repeats quiet.",
+  "sla_warnings.how_4": "Empty fields follow the platform default — you override only what you fill in.",
+  "sla_warnings.what_save": "Applies from the next check, to running waits too. Nothing is recalculated backwards."
 }

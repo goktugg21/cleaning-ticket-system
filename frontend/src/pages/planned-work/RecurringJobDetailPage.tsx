@@ -57,6 +57,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { useToast } from "../../components/ToastProvider";
 import { DoneBanner } from "../../components/guide/DoneBanner";
 import { useDoneBanner } from "../../components/guide/useDoneBanner";
+import { WhatHappens } from "../../components/guide/WhatHappens";
 import { formatDate } from "../../lib/intl";
 import { OccurrenceStatusBadge } from "./OccurrenceStatusBadge";
 import { OccurrenceOverrideDialog } from "./OccurrenceOverrideDialog";
@@ -918,18 +919,24 @@ export function RecurringJobDetailPage() {
             >
               {t("detail.generate")}
             </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => {
-                setArchiveError("");
-                archiveRef.current?.open();
-              }}
-              disabled={actionBusy}
-              data-testid="recurring-job-archive"
-            >
-              {t("detail.archive")}
-            </button>
+            <span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setArchiveError("");
+                  archiveRef.current?.open();
+                }}
+                disabled={actionBusy}
+                data-testid="recurring-job-archive"
+              >
+                {t("detail.archive")}
+              </button>
+              {/* P-13 §D.24 rule 8 — the pre-read; the confirm stays. */}
+              <WhatHappens testId="recurring-pause-what">
+                {t("detail.what_pause")}
+              </WhatHappens>
+            </span>
           </div>
         )}
         <dl className="action-fold-raw">

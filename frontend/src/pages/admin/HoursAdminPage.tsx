@@ -50,6 +50,8 @@ import { DoneBanner } from "../../components/guide/DoneBanner";
 import { useDoneBanner } from "../../components/guide/useDoneBanner";
 import { TeachEmpty } from "../../components/guide/TeachEmpty";
 import { HIGHLIGHT_CLASS, HIGHLIGHT_MS } from "../../components/guide/highlight";
+import { HowThisWorks } from "../../components/guide/HowThisWorks";
+import { WhatHappens } from "../../components/guide/WhatHappens";
 import { useToast } from "../../components/ToastProvider";
 import {
   currentIsoWeek,
@@ -1081,6 +1083,18 @@ export function HoursAdminPage() {
 
       {!scheduleView && (
         <>
+          {/* P-13 §D.24 rule 8 — what this page CAN do. */}
+          <HowThisWorks
+            pageKey="hours"
+            testId="hours-how"
+            lines={[
+              t("hours_admin.how_1"),
+              t("hours_admin.how_2"),
+              t("hours_admin.how_3"),
+              t("hours_admin.how_4"),
+            ]}
+          />
+
           {/* P-12 §D.24 rule 4 — what just happened, what did not,
               and the one next step; survives one reload. */}
           {hoursDone.done && (
@@ -1093,8 +1107,10 @@ export function HoursAdminPage() {
 
           {/* P-12 §D.24 rule 2 — the ONE thing waiting: people whose
               week is still empty, else (everyone in) the close. Hidden
-              when the week is closed or nothing waits. */}
-          {!companyPending &&
+              when the week is closed or nothing waits.
+              P-13 J — and while the Done banner is up: one voice. */}
+          {!hoursDone.done &&
+            !companyPending &&
             !loading &&
             !weekStatusLoading &&
             !weekClosed &&
@@ -1249,19 +1265,25 @@ export function HoursAdminPage() {
                 className="hours-week-lock-actions"
               >
                 {!editing && (
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    data-testid="hours-enter-week-button"
-                    onClick={() => {
-                      setWeekModalPreselect([]);
-                      setWeekModalNote("");
-                      setWeekModalOpen(true);
-                    }}
-                    disabled={loading || activeHourTypes.length === 0}
-                  >
-                    {t("hours_admin.enter_week_button")}
-                  </button>
+                  <span style={{ textAlign: "right" }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      data-testid="hours-enter-week-button"
+                      onClick={() => {
+                        setWeekModalPreselect([]);
+                        setWeekModalNote("");
+                        setWeekModalOpen(true);
+                      }}
+                      disabled={loading || activeHourTypes.length === 0}
+                    >
+                      {t("hours_admin.enter_week_button")}
+                    </button>
+                    {/* P-13 §D.24 rule 8 — the pre-read. */}
+                    <WhatHappens testId="hours-enter-what">
+                      {t("hours_admin.what_enter")}
+                    </WhatHappens>
+                  </span>
                 )}
                 {weekClosed ? (
                   <button

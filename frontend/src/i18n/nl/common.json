@@ -2950,5 +2950,16 @@
   "guide.done": "Klaar",
   "guide.dismiss": "Sluiten",
   "guide.company": "Bedrijf",
-  "facturen.at_risk_see_which": "bekijk welke"
+  "facturen.at_risk_see_which": "bekijk welke",
+  "guide.how_this_works": "Hoe deze pagina werkt",
+  "hours_admin.how_1": "Uren invullen typt de week van een persoon in één raster — er wordt niets opgeslagen tot Opslaan.",
+  "hours_admin.how_2": "Een regel is een gebouw (standaarduren) of een klus.",
+  "hours_admin.how_3": "Het uurtype weegt de uren voor de rapporten — het verandert nooit de prijs.",
+  "hours_admin.how_4": "Week afsluiten geeft de uren door aan de rapporten en de facturen; heropenen maakt het ongedaan.",
+  "hours_admin.what_enter": "Opent het raster voor deze week; er wordt niets opgeslagen tot Opslaan.",
+  "sla_warnings.how_1": "Een drempel zegt hoe lang een soort wachten mag duren — de goedkeuring van de klant vóór de factuurgrens, de controle van een manager, een geplande start die nooit begon.",
+  "sla_warnings.how_2": "Passeert het wachten de drempel, dan krijgt degene van wie het wachten is een waarschuwing per e-mail; één escalatie later bereikt het het niveau erboven.",
+  "sla_warnings.how_3": "Een gewijzigd getal geldt vanaf de eerstvolgende controle, ook voor lopend wachten — al verzonden waarschuwingen blijven verzonden, en een afkoelperiode houdt herhalingen stil.",
+  "sla_warnings.how_4": "Lege velden volgen de platformstandaard — u overschrijft alleen wat u invult.",
+  "sla_warnings.what_save": "Geldt vanaf de eerstvolgende controle, ook voor lopend wachten. Er wordt niets met terugwerkende kracht herberekend."
 }

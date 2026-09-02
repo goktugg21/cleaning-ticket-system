@@ -95,5 +95,13 @@
   "road.at_risk_on_hold": "On hold since {{date}}",
   "road.at_risk_past_deadline_one": "Past its deadline, still in progress — {{count}} day",
   "road.at_risk_past_deadline_other": "Past its deadline, still in progress — {{count}} days",
-  "road.at_risk_not_planned": "Not planned yet — its day was {{date}}"
+  "road.at_risk_not_planned": "Not planned yet — its day was {{date}}",
+  "how.1": "Make a draft gathers a customer's finished work into a draft you can still change — nothing is sent.",
+  "how.2": "Issue freezes the lines — the invoice still has no number.",
+  "how.3": "Send gives the number and emails the PDF; nothing reaches the customer before this.",
+  "how.4": "A credit note reverses a sent invoice, next to it — the original never changes.",
+  "how.5": "Preview shows the PDF at any step, without storing anything.",
+  "road.what_generate": "Makes a draft you can still change or delete. Nothing is sent.",
+  "road.what_issue": "Freezes the lines; the number comes at Send.",
+  "road.what_send": "Gives the invoice its number and emails the PDF — the first thing the customer sees."
 }

@@ -272,5 +272,10 @@
   "generate.banner_title": "{{occurrences}} bezoek(en) gepland en {{tickets}} ticket(s) gemaakt.",
   "generate.banner_body": "Ze staan hieronder op de kalender en als tickets in de planning. Er is niets naar de klant gestuurd.",
   "money.mode_with_contract": "Gefactureerd met het contract, per periode — de bezoeken zelf staan niet apart op de factuur.",
-  "money.mode_per_visit": "Per bezoek gefactureerd, tegen de vaste prijs van deze regel."
+  "money.mode_per_visit": "Per bezoek gefactureerd, tegen de vaste prijs van deze regel.",
+  "how.1": "Een regel maakt bezoeken volgens een schema.",
+  "how.2": "Een bezoek is een ticket als elk ander — gepland, gedaan, gecontroleerd.",
+  "how.3": "Pauzeren stopt nieuwe bezoeken en bewaart de regel; Hervatten pakt hem weer op.",
+  "how.4": "Een einddatum sluit het definitief af.",
+  "detail.what_pause": "Stopt nieuwe bezoeken; de regel blijft bestaan en kan hervatten."
 }

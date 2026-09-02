@@ -35,6 +35,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { PageHeader } from "../components/PageHeader";
 import { RoadTabs } from "../components/guide/RoadTabs";
+import { WhatHappens } from "../components/guide/WhatHappens";
 import { useToast } from "../components/ToastProvider";
 import { formatDate, formatInvoiceGroupLabel, formatMoney } from "../lib/intl";
 import { monthName } from "../lib/billingSentence";
@@ -71,7 +72,7 @@ function formatPeriod(year: number | null, month: number | null): string | null 
 export function InvoiceDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { t } = useTranslation("common");
+  const { t } = useTranslation(["common", "invoices"]);
   const { push: pushToast } = useToast();
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
@@ -396,15 +397,21 @@ export function InvoiceDetailPage() {
         label: t("facturen.status_draft"),
         sub: t("invoice_detail.phase_draft_sub"),
         action: (
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => requestLifecycle("issue")}
-            disabled={busy}
-            data-testid="invoice-issue-button"
-          >
-            {t("invoice_detail.action_issue")}
-          </button>
+          <span>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => requestLifecycle("issue")}
+              disabled={busy}
+              data-testid="invoice-issue-button"
+            >
+              {t("invoice_detail.action_issue")}
+            </button>
+            {/* P-13 §D.24 rule 8 — the pre-read; the confirm stays. */}
+            <WhatHappens testId="invoice-issue-what">
+              {t("invoices:road.what_issue")}
+            </WhatHappens>
+          </span>
         ),
       };
     }
@@ -414,15 +421,21 @@ export function InvoiceDetailPage() {
         label: unsentCreditNote ? t("facturen.credit_note_unsent") : t("invoice_detail.phase_issued_label"),
         sub: unsentCreditNote ? t("invoice_detail.credit_note_unsent_note") : t("invoice_detail.phase_issued_sub"),
         action: (
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => requestLifecycle("send")}
-            disabled={busy}
-            data-testid="invoice-send-button"
-          >
-            {t("invoice_detail.action_send")}
-          </button>
+          <span>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => requestLifecycle("send")}
+              disabled={busy}
+              data-testid="invoice-send-button"
+            >
+              {t("invoice_detail.action_send")}
+            </button>
+            {/* P-13 §D.24 rule 8 — the pre-read; the confirm stays. */}
+            <WhatHappens testId="invoice-send-what">
+              {t("invoices:road.what_send")}
+            </WhatHappens>
+          </span>
         ),
       };
     }

@@ -496,5 +496,11 @@
   "road.line_added_next_draft": "Er wordt nog niets gefactureerd. Volgende: activeer het contract zodra het compleet is.",
   "road.line_added_next_active": "De regel telt mee vanaf de revisie waarin hij staat.",
   "road.line_runs_as": "Loopt als terugkerend werk:",
-  "road.line_ran_as": "Liep als terugkerend werk (gepauzeerd):"
+  "road.line_ran_as": "Liep als terugkerend werk (gepauzeerd):",
+  "how.1": "Een contract is wat een klant op vaste basis betaalt, per gebouw.",
+  "how.2": "Een regel is één dienst, één bedrag, één periode.",
+  "how.3": "Activeren start de facturen op de factuurdag — een concept factureert niets.",
+  "how.4": "Revisies wijzigen bedragen vanaf een datum zonder het verleden te raken.",
+  "how.5": "Regels kunnen als terugkerend werk lopen — de bezoeken worden tickets.",
+  "road.what_activate": "Start de facturen op de factuurdag; het verleden blijft onaangeroerd."
 }

@@ -38,6 +38,7 @@ import type { ContractRoadKey } from "../../../lib/contractRoad";
 import { RoadTabs, TeachHead } from "../../../components/guide/RoadTabs";
 import { StartHere } from "../../../components/guide/StartHere";
 import { ClickableRow } from "../../../components/ClickableRow";
+import { HowThisWorks } from "../../../components/guide/HowThisWorks";
 import { TeachEmpty } from "../../../components/guide/TeachEmpty";
 import { CompanyScopeSelect } from "../../../components/guide/CompanyScopeSelect";
 import {
@@ -421,6 +422,19 @@ export function ContractsAdminPage() {
           )}
         </div>
       </div>
+
+      {/* P-13 §D.24 rule 8 — what this page CAN do. */}
+      <HowThisWorks
+        pageKey="contracts"
+        testId="contracts-how"
+        lines={[
+          t("how.1"),
+          t("how.2"),
+          t("how.3"),
+          t("how.4"),
+          t("how.5"),
+        ]}
+      />
 
       {/* Sprint 168 §5 — the type CATALOG needs a screen, because a new
           company starts with an empty one and the type field on a

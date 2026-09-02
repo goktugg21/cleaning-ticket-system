@@ -207,3 +207,41 @@
   font-weight: 600;
   color: var(--text);
 }
+
+/* ---- P-13 rule 8: "How this page works" — the capabilities layer -- */
+.guide-how {
+  margin: 0 0 14px;
+  border: 1px solid var(--border, #e2e5ea);
+  border-radius: 8px;
+  background: var(--surface-2, #fafbfc);
+  padding: 0;
+}
+.guide-how-summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  list-style-position: inside;
+}
+.guide-how[open] .guide-how-summary {
+  border-bottom: 1px solid var(--border, #e2e5ea);
+}
+.guide-how-lines {
+  margin: 0;
+  padding: 8px 12px 10px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.guide-how-line {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+/* ---- P-13 rule 8: the one line under a primary button ------------- */
+.guide-what {
+  margin: 4px 0 0;
+  font-size: 12px;
+}

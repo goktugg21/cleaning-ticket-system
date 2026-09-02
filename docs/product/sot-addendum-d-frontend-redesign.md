@@ -1895,6 +1895,19 @@ candidate below. Docs only this sprint — no code on those pages.
     `phase.*`) — never a parallel set, never a synonym, in both locales
     (§D.2). "Busy" for `in_progress` is the P-10 example of what not to
     do.
+11. **Rows are links, everywhere** (P-13 O3; the P-13 brief calls this
+    "rule 9" — the number was taken, the rule is this one). Every
+    list/table row (and schedule card) whose object has a page is
+    clickable as a WHOLE row: pointer cursor, hover tint, Enter/Space
+    on focus. The name stays a real anchor inside it for middle-click
+    and the status bar; the row's own buttons/inputs stop the click
+    (one shared inner-control guard). ONE implementation:
+    `lib/useRowLink.ts` is the hook, `ClickableRow` its `<tr>`
+    packaging — no page hand-rolls a copy (the W14 §3 double-history
+    bug is what hand-rolled copies breed). A row whose object has no
+    page (a timesheet entry) stays inert; a row whose action is
+    in-place (the Hours per-person Edit) activates that action
+    instead of navigating.
 
 Also settled here: rows over a server collection are bounded
 (CLAUDE.md §8); nothing renders as empty before the server answered
@@ -2018,8 +2031,9 @@ fail the person who knows nothing — "you look at Hours or Contracts
 and you sigh; the customer's melding flow guides you and the admin
 pages don't." §D.22 made the list pages honest; §D.24 makes them
 TEACH. Reference mock: `invoices-redesign.html` (received with the
-P-12 prompt), which shows all seven rules on one page. A page meets
-§D.24 when all seven are true; §D.22 keeps applying underneath.
+P-12 prompt), which shows the first seven rules on one page. A page
+meets §D.24 when all eight are true (rule 8 joined in P-13); §D.22
+keeps applying underneath.
 
 1. **Purpose line.** One sentence under the title: what this page is,
    in the order things happen, and what the customer sees or doesn't.
@@ -2061,6 +2075,26 @@ P-12 prompt), which shows all seven rules on one page. A page meets
    will land. *Rationale: a button is a promise — name the promise,
    and say where the person goes so the move (rule 4) is never a
    surprise.*
+8. **"How this page works" — the capabilities layer** (P-13 H). Two
+   pieces, built once in `components/guide/`:
+   * **`HowThisWorks`** — a fold under the purpose line: 3–5 lines,
+     one per capability, verb first, in the order things happen, each
+     naming what it does and what it does NOT do. Open by default the
+     first time a user sees the page, then remembered closed
+     (localStorage, per page); the fold's summary line — "How this
+     page works" — stays beside the title, so it is always one click
+     away. Written per page in the locale files, both languages.
+   * **`WhatHappens`** — one line under every primary button and
+     destructive control, visible (never hover-only), in the
+     Permissions voice: "Freezes the lines; the number comes at
+     Send." / "Locks week 36 for everyone; you can reopen." Buttons
+     already covered by a confirm keep the confirm; the line is the
+     pre-read.
+   A page meets rule 8 when a person can read the fold and name every
+   button's effect before pressing one. *Rationale: the owner's
+   verdict on P-12 — the pages now say what to do next, and still
+   nobody can tell what the page CAN do. Permissions is the reference
+   page because every control explains itself where it sits.*
 
 ### D.24.1 The shared pieces
 

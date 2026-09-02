@@ -27,6 +27,7 @@ import { DoneBanner } from "../../../components/guide/DoneBanner";
 import { useDoneBanner } from "../../../components/guide/useDoneBanner";
 import { ConnectionLine } from "../../../components/guide/ConnectionLine";
 import { HIGHLIGHT_CLASS, HIGHLIGHT_MS } from "../../../components/guide/highlight";
+import { WhatHappens } from "../../../components/guide/WhatHappens";
 import {
   CONTRACT_ROAD,
   DEFAULT_ENDING_HORIZON_DAYS,
@@ -459,16 +460,22 @@ export function ContractDetailPage() {
     canManage && contract ? (
       <>
         {contract.lifecycle === "DRAFT" && (
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => void activate()}
-            disabled={activating}
-            title={activating ? t("actions.activating") : undefined}
-            data-testid="contract-activate"
-          >
-            {activating ? t("actions.activating") : t("actions.activate")}
-          </button>
+          <span style={{ textAlign: "right" }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => void activate()}
+              disabled={activating}
+              title={activating ? t("actions.activating") : undefined}
+              data-testid="contract-activate"
+            >
+              {activating ? t("actions.activating") : t("actions.activate")}
+            </button>
+            {/* P-13 §D.24 rule 8 — the pre-read. */}
+            <WhatHappens testId="contract-activate-what">
+              {t("road.what_activate")}
+            </WhatHappens>
+          </span>
         )}
         <button
           type="button"
@@ -547,8 +554,10 @@ export function ContractDetailPage() {
       )}
 
       {/* P-13 F (E2) — between the road's teach line and the banner:
-          the one missing thing on THIS contract, with its one door. */}
-      {startHere && (
+          the one missing thing on THIS contract, with its one door.
+          P-13 J — while the Done banner is up, Start here stands
+          down: one voice at a time. */}
+      {startHere && !contractDone.done && (
         <StartHere testId="contract-start-here" action={startHere.action}>
           {startHere.sentence}
         </StartHere>
