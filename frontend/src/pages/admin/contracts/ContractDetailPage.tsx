@@ -258,6 +258,36 @@ export function ContractDetailPage() {
     editableRevision ? lines.map((line) => line.id) : [],
   );
 
+  /* P-11 C — "has lines" reads BOTH counts: the shown revision's lines
+     (what the tabs render) and the served `line_count` (the revision in
+     force). A freshly drafted empty revision on a running contract must
+     not blank the tiles the active revision still earns; only a contract
+     with no lines ANYWHERE shows the one teaching card instead. */
+  const hasLines = (contract?.line_count ?? 0) > 0 || lines.length > 0;
+
+  /* P-11 C — the ONE card a line-less contract shows on the General and
+     Billing tabs, replacing the two old alert-info notices: what a line
+     IS (the owner's sentence), and the one door to adding the first one
+     (the Lines tab, where the add form lives). */
+  const emptyLinesCard = (
+    <EmptyState
+      icon={ClipboardList}
+      title={t("detail.noLinesTitle")}
+      description={t("detail.noLinesDesc")}
+      testId="contracts-empty-lines-card"
+      action={
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => setTab("projects")}
+          data-testid="contract-add-first-line"
+        >
+          {t("detail.addFirstLine")}
+        </button>
+      }
+    />
+  );
+
   /**
    * Sprint 167 §2 — the lines, grouped by LOCATION.
    *
@@ -493,27 +523,31 @@ export function ContractDetailPage() {
         </div>
       </div>
 
-      {/* Header tiles — all four DERIVED from the active revision. Zero
-          is a value (the "no lines yet" notice explains it); a contract
-          that is not loaded has no tiles at all. */}
-      <div className="summary-grid" data-testid="contract-tiles">
-        <Tile
-          label={<Term term="monthly" onOpen={setTerm}>{t("tiles.monthly")}</Term>}
-          value={formatMoney(contract.monthly_amount, locale)}
-        />
-        <Tile
-          label={<Term term="yearly" onOpen={setTerm}>{t("tiles.yearly")}</Term>}
-          value={formatMoney(contract.yearly_amount, locale)}
-        />
-        <Tile
-          label={<Term term="hours" onOpen={setTerm}>{t("tiles.hours")}</Term>}
-          value={formatNumber(contract.total_hours, locale)}
-        />
-        <Tile
-          label={<Term term="projects" onOpen={setTerm}>{t("tiles.lineCount")}</Term>}
-          value={String(contract.line_count)}
-        />
-      </div>
+      {/* Header tiles — all four DERIVED from the active revision.
+          P-11 C — with no lines anywhere they would be four zeros
+          dressed as facts, so at zero lines they do not render at all
+          (their Terms go with them, the §D.21 C7 rule) and the one
+          card on the tabs below says why instead. */}
+      {hasLines && (
+        <div className="summary-grid" data-testid="contract-tiles">
+          <Tile
+            label={<Term term="monthly" onOpen={setTerm}>{t("tiles.monthly")}</Term>}
+            value={formatMoney(contract.monthly_amount, locale)}
+          />
+          <Tile
+            label={<Term term="yearly" onOpen={setTerm}>{t("tiles.yearly")}</Term>}
+            value={formatMoney(contract.yearly_amount, locale)}
+          />
+          <Tile
+            label={<Term term="hours" onOpen={setTerm}>{t("tiles.hours")}</Term>}
+            value={formatNumber(contract.total_hours, locale)}
+          />
+          <Tile
+            label={<Term term="projects" onOpen={setTerm}>{t("tiles.lineCount")}</Term>}
+            value={String(contract.line_count)}
+          />
+        </div>
+      )}
 
       <div className="status-tabs" role="tablist" data-testid="contract-tabs">
         {(isRegister ? TABS.filter((key) => key !== "planning") : TABS).map((key) => (
@@ -533,19 +567,9 @@ export function ContractDetailPage() {
 
       {tab === "general" && contract && (
         <section className="card card-detail-pad" data-testid="contract-general">
-          {lines.length === 0 && (
-            <p className="alert-info" data-testid="contract-general-no-lines">
-              {t("general.noLines")}{" "}
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setTab("projects")}
-                data-testid="contract-general-go-projects"
-              >
-                {t("billing.goProjects")}
-              </button>
-            </p>
-          )}
+          {/* P-11 C — the old alert-info notice is replaced by the one
+              teaching card (same card as on the Billing tab). */}
+          {!hasLines && emptyLinesCard}
           <div className="section-head" style={{ marginBottom: 8 }}>
             <div>
               <div className="section-head-title">{t("general.title")}</div>
@@ -937,19 +961,9 @@ export function ContractDetailPage() {
               <div className="section-head-sub">{t("billing.desc")}</div>
             </div>
           </div>
-          {lines.length === 0 && (
-            <p className="alert-info" data-testid="contract-billing-no-lines">
-              {t("billing.noLines")}{" "}
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setTab("projects")}
-                data-testid="contract-billing-go-projects"
-              >
-                {t("billing.goProjects")}
-              </button>
-            </p>
-          )}
+          {/* P-11 C — the old alert-info notice is replaced by the one
+              teaching card (same card as on the General tab). */}
+          {!hasLines && emptyLinesCard}
           <dl className="detail-field-grid">
             <Field
               label={<Term term="billingPeriod" onOpen={setTerm}>{t("fields.billingPeriod")}</Term>}
@@ -974,7 +988,12 @@ export function ContractDetailPage() {
               }
             />
           </dl>
-          <ContractInvoicePreview contractId={contract.id} onTerm={setTerm} />
+          {/* P-11 C — no preview of invoices that would all be € 0.00:
+              with zero lines the card above already says what is
+              missing; the preview returns the moment a line exists. */}
+          {hasLines && (
+            <ContractInvoicePreview contractId={contract.id} onTerm={setTerm} />
+          )}
         </section>
       )}
 

@@ -6,7 +6,7 @@
     "title": "Contracten",
     "eyebrow": "Beheer",
     "loading": "Bezig met laden…",
-    "purpose": "Wat er met elke klant per locatie is afgesproken: bedragen, uren en looptijd."
+    "purpose": "Wat elke klant op vaste basis betaalt, per gebouw, en voor hoe lang."
   },
   "actions": {
     "refresh": "Vernieuwen",
@@ -20,16 +20,6 @@
     "saving": "Bezig met opslaan…",
     "remove": "Verwijderen",
     "open": "Openen"
-  },
-  "stats": {
-    "total": "Contracten",
-    "active": "Actief",
-    "draft": "Concept",
-    "expired": "Verlopen",
-    "monthlyTotal": "Per maand",
-    "yearlyTotal": "Per jaar",
-    "hoursPerMonth": "Uren per maand (getoond)",
-    "hoursPerYear": "Uren per jaar (getoond)"
   },
   "filters": {
     "search": "Zoeken",
@@ -51,42 +41,24 @@
     "fold_active_other": "{{count}} actief",
     "apply": "Zoeken"
   },
-  "views": {
-    "groupLabel": "Weergave",
-    "list": "Lijst",
-    "byCustomer": "Per klant",
-    "byBuilding": "Per locatie",
-    "measureLabel": "Toon",
-    "prices": "Prijzen",
-    "hours": "Uren",
-    "timeframeLabel": "Periode",
-    "monthly": "Per maand",
-    "yearly": "Per jaar"
-  },
   "table": {
     "contractNo": "Nummer",
-    "company": "Bedrijf",
     "customer": "Klant",
     "locations": "Locaties",
     "type": "Soort",
     "monthly": "Per maand",
-    "yearly": "Per jaar",
-    "hours": "Uren",
+    "period": "Periode",
+    "periodSince": "sinds {{start}}",
+    "monthlyAmount": "Bedrag per maand",
     "status": "Status",
-    "otherProjects": "Overig",
-    "projectsFolded": "{{count}} project samengevoegd in de kolom Overig.",
-    "projectsFolded_other": "{{count}} projecten samengevoegd in de kolom Overig.",
     "sortBy": "Sorteren op {{column}}",
     "selectRow": "{{name}} selecteren",
     "andMore": "+{{count}}",
-    "groupCount": "({{count}} contract)",
-    "groupCount_other": "({{count}} contracten)",
     "countLabel": "{{count}} contract",
     "countLabel_other": "{{count}} contracten",
     "empty": "Er zijn nog geen contracten.",
     "emptyFiltered": "Geen contracten die aan dit filter voldoen.",
-    "selectPage": "Alles op deze pagina selecteren",
-    "grandTotal": "Eindtotaal"
+    "selectPage": "Alles op deze pagina selecteren"
   },
   "status": {
     "DRAFT": "Concept",
@@ -105,7 +77,7 @@
   },
   "tabs": {
     "general": "Algemeen",
-    "projects": "Projecten",
+    "projects": "Regels",
     "planning": "Planning",
     "billing": "Facturatie",
     "revisions": "Versiegeschiedenis"
@@ -114,7 +86,7 @@
     "monthly": "Bedrag per maand",
     "yearly": "Bedrag per jaar",
     "hours": "Uren per periode",
-    "lineCount": "Projecten"
+    "lineCount": "Regels"
   },
   "fields": {
     "contractNo": "Contractnummer",
@@ -176,7 +148,7 @@
     "paymentTermsSentence": "De klant heeft {{days}} dagen om elke factuur te betalen."
   },
   "projects": {
-    "title": "Projecten",
+    "title": "Regels",
     "name": "Project",
     "building": "Locatie",
     "wholeContract": "Hele contract",
@@ -299,14 +271,10 @@
   "contract_type_slot.extra_work": "Meerwerk",
   "contract_type_slot.machine": "Machinewerk",
   "contract_type_slot.other": "Overig",
-  "stats.cancelled": "Geannuleerd",
   "form.statusDerivedHint": "Verlopen is geen keuze: die volgt uit de einddatum.",
   "form.statusNow": "Huidige status: {{status}}",
-  "projects.emptyTitle": "Nog geen projectregels",
+  "projects.emptyTitle": "Nog geen regels",
   "projects.emptyWhy": "Alle bedragen, uren en de factuurvoorspelling van dit contract worden uit deze regels berekend.",
-  "billing.noLines": "Dit contract heeft nog geen projectregels, dus elk bedrag hieronder is € 0,00.",
-  "billing.goProjects": "Naar Projecten",
-  "general.noLines": "Dit contract heeft nog geen projectregels; de bedragen en uren hieronder blijven nul totdat er één is.",
   "forecast.asOfToday": "Stand van vandaag",
   "forecast.noneInForce": "Nog niet van kracht",
   "register.title": "Meerwerk — register",
@@ -465,6 +433,9 @@
   "actions.backToList": "Terug naar contracten",
   "detail.unavailableTitle": "Dit contract kan niet worden getoond",
   "detail.unavailableBody": "Het kon niet worden gelezen voor uw account, of het bestaat niet meer.",
+  "detail.noLinesTitle": "Dit contract heeft nog geen regels.",
+  "detail.noLinesDesc": "Een regel is een dienst bij een gebouw voor een bedrag per periode.",
+  "detail.addFirstLine": "Voeg de eerste regel toe",
   "facts.period": "Periode",
   "facts.until": "tot {{date}}",
   "facts.locations_one": "{{count}} locatie",
