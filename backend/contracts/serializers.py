@@ -251,6 +251,23 @@ class ContractLineNestedSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(
         source="department.name", read_only=True, default=None
     )
+    # P-12 C3 (§D.24 rule 6) — which recurring work RUNS this line, in
+    # words the page can print: "Runs as recurring work {title} ·
+    # weekly". Bounded (a line realistically has 0 or 1 rules; the cap
+    # keeps a pathological row harmless) and served from the view's
+    # prefetch, so it costs no per-row query.
+    recurring = serializers.SerializerMethodField()
+
+    def get_recurring(self, obj):
+        return [
+            {
+                "id": job.id,
+                "title": job.title,
+                "frequency": job.frequency,
+                "is_active": job.is_active and job.archived_at is None,
+            }
+            for job in list(obj.recurring_jobs.all())[:3]
+        ]
 
     class Meta:
         model = ContractLine
@@ -270,6 +287,7 @@ class ContractLineNestedSerializer(serializers.ModelSerializer):
             "department_name",
             "amount",
             "vat_pct",
+            "recurring",
         ]
         read_only_fields = fields
 

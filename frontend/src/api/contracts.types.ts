@@ -92,6 +92,13 @@ export interface ContractLine {
    *  link is made by the server's sync, and the amount comes with it. */
   extra_work: number | null;
   extra_work_no: number | null;
+  /** P-12 C3 (§D.24 rule 6) — which recurring work runs this line. */
+  recurring?: {
+    id: number;
+    title: string;
+    frequency: string;
+    is_active: boolean;
+  }[];
 }
 
 /** W16 — one building's slice of a customer's extra work register. */
@@ -251,6 +258,28 @@ export interface ContractStats {
   cancelled: number;
   monthly_total: string;
   yearly_total: string;
+  /** P-12 C1 — the road's buckets and the Start-here facts. */
+  ending_soon: number;
+  draft_without_lines: number;
+  monthly_by_status: {
+    active: string;
+    ending_soon: string;
+    draft: string;
+    expired: string;
+    cancelled: string;
+  };
+  ending_soon_days: number;
+  start_here: {
+    draft_no_lines: ContractStartHereRow | null;
+    ending_soonest: ContractStartHereRow | null;
+  };
+}
+
+export interface ContractStartHereRow {
+  id: number;
+  contract_no: string;
+  customer_name: string;
+  end_date: string | null;
 }
 
 export interface ContractOptions {
@@ -265,7 +294,10 @@ export interface ContractFilters {
   search?: string;
   customer?: number | "";
   building?: number | "";
-  status?: ContractStatus | "";
+  status?: ContractStatus | "ENDING" | "";
+  /** P-12 C1 — "exclude" narrows an ACTIVE read to not-ending-soon,
+   *  so the Active and Ending tabs partition. */
+  ending?: "exclude";
   type?: number | "";
   sort?: string;
   page?: number;

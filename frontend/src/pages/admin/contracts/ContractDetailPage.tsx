@@ -21,6 +21,16 @@ import type {
 } from "../../../api/contracts.types";
 import { ContractTermDialog, Term } from "../../../components/contracts/ContractTerms";
 import { contractSentence } from "../../../components/contracts/contractSentence";
+import { RoadTabs } from "../../../components/guide/RoadTabs";
+import { DoneBanner } from "../../../components/guide/DoneBanner";
+import { useDoneBanner } from "../../../components/guide/useDoneBanner";
+import { ConnectionLine } from "../../../components/guide/ConnectionLine";
+import { HIGHLIGHT_CLASS, HIGHLIGHT_MS } from "../../../components/guide/highlight";
+import {
+  CONTRACT_ROAD,
+  DEFAULT_ENDING_HORIZON_DAYS,
+  contractRoadKeyOf,
+} from "../../../lib/contractRoad";
 import type { ContractTerm } from "../../../components/contracts/ContractTerms";
 import { listLabels } from "../../../api/customerLabels";
 import type { CustomerLabel } from "../../../api/types";
@@ -145,6 +155,16 @@ export function ContractDetailPage() {
 
   const reload = () => setReloadToken((current) => current + 1);
 
+  // P-12 C4 (§D.24 rule 4) — the after-action banner and the added
+  // line's ten-second tint.
+  const contractDone = useDoneBanner(`contract-${contractId}`);
+  const [addedLineId, setAddedLineId] = useState<number | null>(null);
+  useEffect(() => {
+    if (addedLineId === null) return;
+    const timer = window.setTimeout(() => setAddedLineId(null), HIGHLIGHT_MS);
+    return () => window.clearTimeout(timer);
+  }, [addedLineId]);
+
   useEffect(() => {
     if (!Number.isFinite(id)) return;
     let cancelled = false;
@@ -204,12 +224,11 @@ export function ContractDetailPage() {
     try {
       await updateContract(contract.id, { lifecycle: "ACTIVE" });
       reload();
-      toast.push({
-        variant: "success",
-        title: t("actions.activatedTitle"),
-        description: t("actions.activatedBody", {
-          contract: contract.contract_no,
-        }),
+      // P-12 C4 — a banner, not a toast: what happened, what it means
+      // for the money, and where the result will appear (§D.24 rule 4).
+      contractDone.announce({
+        title: t("road.activated_title", { no: contract.contract_no }),
+        body: t("road.activated_body"),
       });
     } catch (err) {
       toast.push({
@@ -223,6 +242,12 @@ export function ContractDetailPage() {
   }
 
   const locale = i18n.language;
+  // P-12 C2 — the road step, from the same facts the server's
+  // status_filter_q reads (the 60-day horizon is the server's
+  // ENDING_SOON_DAYS; /contracts/stats/ serves it as ending_soon_days).
+  const roadKey = contract
+    ? contractRoadKeyOf(contract, DEFAULT_ENDING_HORIZON_DAYS)
+    : null;
   const activeRevision =
     revisions.find((revision) => revision.is_active) ?? null;
   /**
@@ -446,6 +471,40 @@ export function ContractDetailPage() {
         }
         actions={headerActions}
       />
+
+      {/* P-12 C2 (§D.24 rule 3) — where this contract stands on its
+          road, and what the current step means. A cancelled contract
+          is off the road and shows none. */}
+      {contract && roadKey && (
+        <>
+          <RoadTabs
+            variant="progress"
+            steps={CONTRACT_ROAD.map((key) => ({
+              key,
+              step: t(`road.${key}_step`),
+              label: t(`road.${key}_label`),
+            }))}
+            activeKey={roadKey}
+            ariaLabel={t("road.aria")}
+            testIdPrefix="contract-road"
+          />
+          <p
+            className="muted small"
+            style={{ margin: "0 0 14px" }}
+            data-testid="contract-road-teach"
+          >
+            {t(`road.step_teach_${roadKey}`)}
+          </p>
+        </>
+      )}
+
+      {contractDone.done && (
+        <DoneBanner
+          done={contractDone.done}
+          onDismiss={contractDone.dismiss}
+          testId="contract-done"
+        />
+      )}
 
       {error && (
         <div className="alert-error" role="alert">
@@ -784,8 +843,31 @@ export function ContractDetailPage() {
                       {lineEdit.editMode && <td />}
                     </tr>
                     {group.lines.map((line) => (
-                  <tr key={line.id}>
-                    <td>{line.name}</td>
+                  <tr
+                    key={line.id}
+                    className={
+                      addedLineId === line.id ? HIGHLIGHT_CLASS : undefined
+                    }
+                  >
+                    <td>
+                      {line.name}
+                      {/* P-12 C3 (§D.24 rule 6) — which recurring work
+                          runs this line, in words with the one link. */}
+                      {(line.recurring ?? []).map((job) => (
+                        <ConnectionLine
+                          key={job.id}
+                          to={`/planned-work/${job.id}`}
+                          linkLabel={job.title}
+                          testId={`contract-line-recurring-${line.id}`}
+                        >
+                          {t(
+                            job.is_active
+                              ? "road.line_runs_as"
+                              : "road.line_ran_as",
+                          )}
+                        </ConnectionLine>
+                      ))}
+                    </td>
                     <td>{line.building_name ?? t("projects.wholeContract")}</td>
                     {!isRegister && (
                       <>
@@ -851,7 +933,23 @@ export function ContractDetailPage() {
               buildings={contract?.buildings ?? []}
               departments={isRegister ? [] : departments}
               showPlanning={!isRegister}
-              onAdded={reload}
+              onAdded={(created) => {
+                reload();
+                // P-12 C4 — say what happened and the one next step;
+                // tint the new line when the reload brings it in.
+                setAddedLineId(created.id);
+                contractDone.announce({
+                  title: t("road.line_added_title", {
+                    name: created.name,
+                    amount: formatMoney(created.amount, locale),
+                  }),
+                  body: t(
+                    contract?.lifecycle === "DRAFT"
+                      ? "road.line_added_next_draft"
+                      : "road.line_added_next_active",
+                  ),
+                });
+              }}
               onError={(message) => setError(message)}
             />
           )}
@@ -1195,7 +1293,7 @@ function AddLineForm({
   departments: CustomerLabel[];
   /** False on an EXTRA_WORK register, whose lines are projected. */
   showPlanning: boolean;
-  onAdded: () => void;
+  onAdded: (created: ContractLine) => void;
   onError: (message: string) => void;
 }) {
   const { t } = useTranslation("contracts");
@@ -1234,7 +1332,7 @@ function AddLineForm({
         payload.norm = norm.trim();
         payload.department = department === "" ? null : department;
       }
-      await createContractLine(revisionId, payload);
+      const created = await createContractLine(revisionId, payload);
       setName("");
       setHours("0.00");
       setAmount("0.00");
@@ -1243,7 +1341,7 @@ function AddLineForm({
       setFrequency("");
       setNorm("");
       setDepartment("");
-      onAdded();
+      onAdded(created);
     } catch (err) {
       onError(getApiError(err));
     } finally {

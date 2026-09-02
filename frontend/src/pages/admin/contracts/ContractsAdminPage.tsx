@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { SyntheticEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { FileSignature, Plus, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { EmptyState } from "../../../components/EmptyState";
 import { useTranslation } from "react-i18next";
@@ -8,12 +8,12 @@ import { useTranslation } from "react-i18next";
 import { listAllCompanies } from "../../../api/admin";
 import { getApiError } from "../../../api/client";
 import { CONTRACT_STATUS_TAG } from "../../../lib/contractStatusTag";
-import { deleteContract, listContracts } from "../../../api/contracts";
+import { deleteContract, getContractStats, listContracts } from "../../../api/contracts";
 import type {
   Contract,
   ContractBuildingRef,
   ContractFilters,
-  ContractStatus,
+  ContractStats,
 } from "../../../api/contracts.types";
 import type { CompanyAdmin } from "../../../api/types";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
@@ -34,18 +34,42 @@ import { ContractTypesTab } from "./ContractTypesTab";
 import { contractSentence } from "../../../components/contracts/contractSentence";
 import { contractTypeLabel } from "../../../lib/contractTypeLabel";
 import { formatDate, formatMoney } from "./contractTables";
+import { CONTRACT_ROAD } from "../../../lib/contractRoad";
+import type { ContractRoadKey } from "../../../lib/contractRoad";
+import { RoadTabs, TeachHead } from "../../../components/guide/RoadTabs";
+import { StartHere } from "../../../components/guide/StartHere";
+import { TeachEmpty } from "../../../components/guide/TeachEmpty";
+import { CompanyScopeSelect } from "../../../components/guide/CompanyScopeSelect";
+import {
+  readScopeCompany,
+  rememberScopeCompany,
+} from "../../../lib/useCompanyScope";
 
 const DEBOUNCE_MS = 300;
 
 type SortField = "customer" | "start_date" | "status";
 type SortDirection = "asc" | "desc";
 
-const STATUS_OPTIONS: ContractStatus[] = [
-  "ACTIVE",
-  "DRAFT",
-  "EXPIRED",
-  "CANCELLED",
-];
+type ContractListView = ContractRoadKey | "cancelled";
+
+/** What each tab asks the SERVER for. */
+const ROAD_QUERY: Record<
+  ContractListView,
+  { status: NonNullable<ContractFilters["status"]>; ending?: "exclude" }
+> = {
+  draft: { status: "DRAFT" },
+  active: { status: "ACTIVE", ending: "exclude" },
+  ending: { status: "ENDING" },
+  ended: { status: "EXPIRED" },
+  cancelled: { status: "CANCELLED" },
+};
+
+function parseListView(raw: string | null): ContractListView {
+  if (raw === "cancelled") return "cancelled";
+  return (CONTRACT_ROAD as readonly string[]).includes(raw ?? "")
+    ? (raw as ContractRoadKey)
+    : "active";
+}
 
 /**
  * Sprint 160 §3 / P-11 C — the contracts list.
@@ -91,7 +115,21 @@ export function ContractsAdminPage() {
   const [searchInput, setSearchInput] = useState("");
   const [searchActive, setSearchActive] = useState("");
   const [pageTab, setPageTab] = useState<"list" | "types">("list");
-  const [statusFilter, setStatusFilter] = useState<ContractStatus | "">("");
+  // P-12 C1 — the road tab lives in the URL, so a reload and Back land
+  // where the person was (§D.22 rule 3).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const listView = parseListView(searchParams.get("tab"));
+  const setListView = (next: ContractListView) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === "active") params.delete("tab");
+    else params.set("tab", next);
+    setSearchParams(params, { replace: true });
+    setPage(1);
+  };
+  // The guidance numbers: counts and money per road step, and the
+  // Start-here facts. Company-scoped, deliberately NOT search-scoped —
+  // the tabs describe the road, not the current narrowing.
+  const [stats, setStats] = useState<ContractStats | null>(null);
   // Sprint 187 §6c — WHICH provider company. `company_name` has been
   // in every row's JSON and `?company=` accepted by the endpoint
   // since contracts shipped, so this is frontend-only. The pattern
@@ -100,7 +138,6 @@ export function ContractsAdminPage() {
   // disabled state rather than storing it.
   const [companyFilter, setCompanyFilter] = useState<number | "">("");
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
-  const [companiesLoaded, setCompaniesLoaded] = useState(false);
   const [customerFilter, setCustomerFilter] = useState<number | "">("");
   const [buildingFilter, setBuildingFilter] = useState<number | "">("");
   const [typeFilter, setTypeFilter] = useState<number | "">("");
@@ -138,26 +175,33 @@ export function ContractsAdminPage() {
         if (cancelled) return;
         setCompanies(rows);
         // Auto-select for a COMPANY_ADMIN with exactly one company in
-        // scope: the filter is then a fact, not a question.
-        if (rows.length === 1) setCompanyFilter(rows[0].id);
+        // scope: the filter is then a fact, not a question. P-12
+        // §D.24.2: with more, the session's shared Finance-pages
+        // choice — else the lowest id — is the working company.
+        if (rows.length === 1) {
+          setCompanyFilter(rows[0].id);
+        } else if (rows.length > 1) {
+          const stored = readScopeCompany();
+          const chosen =
+            stored != null && rows.some((row) => row.id === stored)
+              ? stored
+              : [...rows].sort((a, b) => a.id - b.id)[0].id;
+          setCompanyFilter((current) => (current === "" ? chosen : current));
+        }
       })
       .catch(() => {
         if (!cancelled) setCompanies([]);
       })
-      .finally(() => {
-        if (!cancelled) setCompaniesLoaded(true);
-      });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const companyDropdownDisabled = companiesLoaded && companies.length <= 1;
-
   const filters: ContractFilters = useMemo(
     () => ({
       search: searchActive || undefined,
-      status: statusFilter || undefined,
+      status: ROAD_QUERY[listView].status,
+      ending: ROAD_QUERY[listView].ending,
       company: companyFilter || undefined,
       customer: customerFilter || undefined,
       building: buildingFilter || undefined,
@@ -167,7 +211,7 @@ export function ContractsAdminPage() {
     }),
     [
       searchActive,
-      statusFilter,
+      listView,
       companyFilter,
       customerFilter,
       buildingFilter,
@@ -213,6 +257,22 @@ export function ContractsAdminPage() {
 
   const reload = () => setReloadToken((current) => current + 1);
 
+  // P-12 C1 — the road's numbers, in one read beside the list.
+  useEffect(() => {
+    let cancelled = false;
+    getContractStats({ company: companyFilter || undefined })
+      .then((response) => {
+        if (!cancelled) setStats(response);
+      })
+      .catch(() => {
+        // The list still works; the tabs then show no counts.
+        if (!cancelled) setStats(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyFilter, reloadToken]);
+
   const sortStateFor = (field: SortField): SortState => {
     if (field !== sortField) return "none";
     return sortDirection === "asc" ? "ascending" : "descending";
@@ -257,18 +317,12 @@ export function ContractsAdminPage() {
 
   const filtersActive =
     Boolean(searchActive) ||
-    statusFilter !== "" ||
-    (companyFilter !== "" && !companyDropdownDisabled) ||
     customerFilter !== "" ||
     buildingFilter !== "" ||
     typeFilter !== "";
   /* P-4 (Part F) — the chips on the Filter button: one label per
      active filter, in the person's words. */
   const activeFilterChips: string[] = [
-    statusFilter !== "" ? t(`status.${statusFilter}`) : "",
-    companyFilter !== "" && !companyDropdownDisabled
-      ? (companies.find((row) => row.id === companyFilter)?.name ?? "")
-      : "",
     customerFilter !== ""
       ? (uniqueRefs(contracts.map((row) => ({ id: row.customer, name: row.customer_name ?? "" }))).find(
           (row) => String(row.id) === String(customerFilter),
@@ -280,12 +334,12 @@ export function ContractsAdminPage() {
   // P-2 §5 — nothing at all (not "nothing matches"): the one card.
   // P-11 C — `count` is the list's own total; the stats fetch that used
   // to answer this is gone with the tiles.
-  const showEmptyCard = !loading && !error && !filtersActive && count === 0;
+  const showEmptyCard =
+    !loading && !error && !filtersActive && stats !== null && stats.total === 0;
 
   const clearFilters = () => {
     setSearchInput("");
     setSearchActive("");
-    setStatusFilter("");
     setCustomerFilter("");
     setBuildingFilter("");
     setTypeFilter("");
@@ -296,6 +350,23 @@ export function ContractsAdminPage() {
   // Monthly amount · Status); the select column joins in edit mode.
   // Only the empty row spans them now.
   const totalColumnCount = 5 + (editMode.editMode ? 1 : 0);
+
+  // P-12 C1 — the road's counts and money lines, from the stats read.
+  // Active excludes ending-soon so the four tabs partition.
+  const roadCounts: Record<ContractListView, number> = {
+    draft: stats?.draft ?? 0,
+    active: Math.max((stats?.active ?? 0) - (stats?.ending_soon ?? 0), 0),
+    ending: stats?.ending_soon ?? 0,
+    ended: stats?.expired ?? 0,
+    cancelled: stats?.cancelled ?? 0,
+  };
+  const roadMoneyValue: Record<ContractListView, string> = {
+    draft: String(stats?.draft ?? 0),
+    active: formatMoney(stats?.monthly_by_status.active ?? "0.00", locale),
+    ending: formatMoney(stats?.monthly_by_status.ending_soon ?? "0.00", locale),
+    ended: String(stats?.expired ?? 0),
+    cancelled: String(stats?.cancelled ?? 0),
+  };
 
   return (
     <div>
@@ -312,6 +383,21 @@ export function ContractsAdminPage() {
           </p>
         </div>
         <div className="page-header-actions">
+          {/* P-12 §D.24.2 — one company at a time; the choice is the
+              session's, shared with the other Finance pages. */}
+          <CompanyScopeSelect
+            companies={companies}
+            companyId={companyFilter}
+            onChange={(id) => {
+              setCompanyFilter(id);
+              setCustomerFilter("");
+              setBuildingFilter("");
+              setTypeFilter("");
+              setPage(1);
+              rememberScopeCompany(id);
+            }}
+            testId="contracts-company-filter"
+          />
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -369,6 +455,113 @@ export function ContractsAdminPage() {
       </div>
 
       {pageTab === "types" && <ContractTypesTab />}
+
+      {/* P-12 C1 (§D.24 rule 2) — the ONE thing waiting: a draft
+          without lines beats the contract ending soonest. */}
+      {pageTab === "list" &&
+        stats?.start_here &&
+        (stats.start_here.draft_no_lines ? (
+          <StartHere
+            testId="contracts-start-here"
+            action={{
+              label: t("road.start_draft_action"),
+              to: `/admin/contracts/${stats.start_here.draft_no_lines.id}`,
+            }}
+          >
+            {t("road.start_draft", {
+              no: stats.start_here.draft_no_lines.contract_no,
+              customer: stats.start_here.draft_no_lines.customer_name,
+            })}
+          </StartHere>
+        ) : stats.start_here.ending_soonest ? (
+          <StartHere
+            testId="contracts-start-here"
+            action={{
+              label: t("road.start_ending_action"),
+              to: `/admin/contracts/${stats.start_here.ending_soonest.id}`,
+            }}
+          >
+            {t("road.start_ending", {
+              no: stats.start_here.ending_soonest.contract_no,
+              customer: stats.start_here.ending_soonest.customer_name,
+              date: stats.start_here.ending_soonest.end_date
+                ? formatDate(stats.start_here.ending_soonest.end_date, locale)
+                : "",
+            })}
+          </StartHere>
+        ) : null)}
+
+      {/* P-12 C1 (§D.24 rule 3) — the road: draft, active, ending,
+          ended, numbered in the order things happen. Cancelled is off
+          the road, behind the link at the foot of the last tab. */}
+      {pageTab === "list" && !showEmptyCard && (
+        <>
+          {listView === "cancelled" ? (
+            <div className="guide-teach" data-testid="contracts-cancelled-head">
+              <div className="guide-teach-words">
+                <h2 className="guide-teach-title">
+                  {t("road.cancelled_title")}
+                  {stats ? ` (${stats.cancelled})` : ""}
+                </h2>
+                <p className="guide-teach-body">{t("road.cancelled_body")}</p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setListView("ended")}
+                data-testid="contracts-cancelled-back"
+              >
+                {t("road.cancelled_back")}
+              </button>
+            </div>
+          ) : (
+            <>
+              <RoadTabs
+                steps={CONTRACT_ROAD.map((key) => ({
+                  key,
+                  step: t(`road.${key}_step`),
+                  label: t(`road.${key}_label`),
+                  count: stats ? roadCounts[key] : null,
+                }))}
+                activeKey={listView}
+                onSelect={(key) => setListView(key)}
+                ariaLabel={t("road.aria")}
+                testIdPrefix="contracts-road"
+              />
+              <TeachHead
+                testId="contracts-road-teach"
+                title={t(`road.${listView}_title`)}
+                body={t(`road.${listView}_body`)}
+                money={
+                  stats
+                    ? {
+                        value: roadMoneyValue[listView],
+                        label: t(`road.${listView}_money_label`, {
+                          count: roadCounts[listView],
+                          without_lines: stats.draft_without_lines,
+                        }),
+                      }
+                    : undefined
+                }
+              />
+              {/* §D.22 rule 9 — cancelled behind a link, at the foot of
+                  the last tab, never a tab of its own. */}
+              {listView === "ended" && (stats?.cancelled ?? 0) > 0 && (
+                <p className="muted small" style={{ margin: "-6px 0 10px" }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setListView("cancelled")}
+                    data-testid="contracts-cancelled-link"
+                  >
+                    {t("road.cancelled_link", { count: stats?.cancelled ?? 0 })}
+                  </button>
+                </p>
+              )}
+            </>
+          )}
+        </>
+      )}
 
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
@@ -459,59 +652,6 @@ export function ContractsAdminPage() {
               ))}
             </summary>
             <div className="filter-fold-body">
-          <div className="filter-field">
-            <span className="filter-label">{t("filters.status")}</span>
-            <select
-              className="filter-control"
-              value={statusFilter}
-              onChange={(event) => {
-                setStatusFilter(event.target.value as ContractStatus | "");
-                setPage(1);
-              }}
-              data-testid="contracts-status-filter"
-            >
-              <option value="">{t("filters.allStatuses")}</option>
-              {STATUS_OPTIONS.map((value) => (
-                <option key={value} value={value}>
-                  {t(`status.${value}`)}
-                </option>
-              ))}
-            </select>
-          </div>
-          {/* Sprint 187 §6c — placed BEFORE Customer because it scopes
-              it: a customer belongs to one provider company. Hidden
-              disabled rather than removed on a single-company
-              deployment, matching `BuildingsAdminPage`. */}
-          <div className="filter-field">
-            <span className="filter-label">{t("filters.company")}</span>
-            <select
-              className="filter-control"
-              style={{ maxWidth: 220 }}
-              value={companyFilter === "" ? "" : String(companyFilter)}
-              onChange={(event) => {
-                const value = event.target.value;
-                setCompanyFilter(value === "" ? "" : Number(value));
-                // Customer / building / type ids are all per company, so
-                // a leftover id would filter the new company's list by
-                // something it does not have and quietly return nothing
-                // — the trap `BuildingsAdminPage` records for its own
-                // building-type filter.
-                setCustomerFilter("");
-                setBuildingFilter("");
-                setTypeFilter("");
-                setPage(1);
-              }}
-              disabled={companyDropdownDisabled}
-              data-testid="contracts-company-filter"
-            >
-              <option value="">{t("filters.allCompanies")}</option>
-              {companies.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.name}
-                </option>
-              ))}
-            </select>
-          </div>
           <div className="filter-field">
             <span className="filter-label">{t("filters.customer")}</span>
             <select
@@ -802,10 +942,16 @@ export function ContractsAdminPage() {
               ))}
               {!loading && contracts.length === 0 && (
                 <tr>
-                  <td colSpan={totalColumnCount} className="muted">
-                    {filtersActive
-                      ? t("table.emptyFiltered")
-                      : t("table.empty")}
+                  <td colSpan={totalColumnCount}>
+                    {filtersActive || Boolean(searchActive) ? (
+                      <span className="muted">{t("table.emptyFiltered")}</span>
+                    ) : (
+                      <TeachEmpty
+                        testId={`contracts-road-empty-${listView}`}
+                        title={t(`road.${listView}_empty_title`)}
+                        body={t(`road.${listView}_empty_body`)}
+                      />
+                    )}
                   </td>
                 </tr>
               )}

@@ -21,6 +21,7 @@ exactly what a 2-row page costs.
 """
 from __future__ import annotations
 
+import datetime
 from decimal import Decimal
 
 from django.db import transaction
@@ -87,13 +88,28 @@ SORT_FIELDS = {
 }
 
 
+#: P-12 C1 — "Ending" on the contracts road: an ACTIVE contract whose
+#: end date falls within this many days. One constant, read by the
+#: filter, the stats and (through them) the tab that is named after it.
+ENDING_SOON_DAYS = 60
+
+
+def ending_soon_q(today):
+    """ACTIVE and ending within ENDING_SOON_DAYS (end date inclusive)."""
+    horizon = today + datetime.timedelta(days=ENDING_SOON_DAYS)
+    return Q(lifecycle=ContractLifecycle.ACTIVE) & Q(
+        end_date__isnull=False, end_date__gte=today, end_date__lte=horizon
+    )
+
+
 def status_filter_q(value, today):
     """Translate a DERIVED status into a queryset predicate.
 
     The mapping lives here, once, so the list filter, the stat tiles
     and `Contract.status` cannot answer differently about the same row.
     EXPIRED is the interesting one: it is `lifecycle=ACTIVE` plus a
-    past end date, never a stored value.
+    past end date, never a stored value. "ENDING" (P-12 C1) is a road
+    step, not a stored status: ACTIVE with the end inside the horizon.
     """
     if value == ContractStatus.DRAFT:
         return Q(lifecycle=ContractLifecycle.DRAFT)
@@ -103,6 +119,8 @@ def status_filter_q(value, today):
         return Q(lifecycle=ContractLifecycle.ACTIVE) & Q(
             end_date__isnull=False, end_date__lt=today
         )
+    if value == "ENDING":
+        return ending_soon_q(today)
     if value == ContractStatus.ACTIVE:
         return Q(lifecycle=ContractLifecycle.ACTIVE) & (
             Q(end_date__isnull=True) | Q(end_date__gte=today)
@@ -149,6 +167,12 @@ def apply_contract_filters(queryset, params, today):
         else:
             queryset = queryset.filter(predicate)
 
+    # P-12 C1 — the Active TAB excludes the rows the Ending tab owns
+    # (the road's tabs partition, §D.24 rule 3). `?ending=exclude` rides
+    # beside `?status=ACTIVE`; `?status=ENDING` is the other tab.
+    if (params.get("ending") or "").strip().lower() == "exclude":
+        queryset = queryset.exclude(ending_soon_q(today))
+
     return queryset
 
 
@@ -167,7 +191,14 @@ def contract_list_context(contracts, request):
             ContractRevision.objects.filter(id__in=list(resolved.values()))
         )
         .select_related("contract")
-        .prefetch_related("lines__building", "lines__department")
+        .prefetch_related(
+                "lines__building",
+                "lines__department",
+                # P-12 C3 - the line's recurring rules, one prefetch so the
+                # nested serializer's `recurring` field costs no per-row query
+                # (test_query_counts pins the page cost).
+                "lines__recurring_jobs",
+            )
     )
     by_id = {revision.id: revision for revision in revisions}
     return {
@@ -368,9 +399,14 @@ class ContractStatsView(APIView):
             cancelled=count_when(
                 status_filter_q(ContractStatus.CANCELLED, today)
             ),
+            # P-12 C1 — the road's Ending step (a subset of active).
+            ending_soon=count_when(ending_soon_q(today)),
         )
 
-        periods = dict(qs.values_list("id", "billing_period"))
+        rows = list(
+            qs.values_list("id", "billing_period", "lifecycle", "end_date")
+        )
+        periods = {row[0]: row[1] for row in rows}
         # Same display rule the list uses, so the tiles total exactly
         # what the table shows rather than quietly dropping the
         # contracts that have not started yet.
@@ -383,15 +419,80 @@ class ContractStatsView(APIView):
             )
             .values_list("id", "total")
         )
+        line_counts = dict(
+            ContractRevision.objects.filter(id__in=list(resolved.values()))
+            .values_list("id")
+            .annotate(n=Count("lines"))
+            .values_list("id", "n")
+        )
+
+        # P-12 C1 — the same bucketing the tabs use, derived in Python
+        # from the same facts `status_filter_q` reads, so a row lands in
+        # exactly one tab's money line.
+        horizon = today + datetime.timedelta(days=ENDING_SOON_DAYS)
+
+        def bucket_of(lifecycle, end_date):
+            if lifecycle == ContractLifecycle.DRAFT:
+                return "draft"
+            if lifecycle == ContractLifecycle.CANCELLED:
+                return "cancelled"
+            if end_date is not None and end_date < today:
+                return "expired"
+            if end_date is not None and end_date <= horizon:
+                return "ending_soon"
+            return "active"
 
         monthly = Decimal("0.00")
-        for contract_id, billing_period in periods.items():
+        monthly_by = {
+            "active": Decimal("0.00"),
+            "ending_soon": Decimal("0.00"),
+            "draft": Decimal("0.00"),
+            "expired": Decimal("0.00"),
+            "cancelled": Decimal("0.00"),
+        }
+        for contract_id, billing_period, lifecycle, end_date in rows:
             revision_id = resolved.get(contract_id)
             if revision_id is None:
                 continue
             period_amount = amounts.get(revision_id, Decimal("0.00"))
             months = MONTHS_PER_PERIOD[billing_period]
-            monthly += period_amount / Decimal(months)
+            per_month = period_amount / Decimal(months)
+            monthly += per_month
+            monthly_by[bucket_of(lifecycle, end_date)] += per_month
+
+        # P-12 C1 — the Start-here facts (§D.24 rule 2): the ONE thing
+        # waiting. A draft with no lines beats a contract ending soon.
+        draft_ids = [
+            row[0] for row in rows if row[2] == ContractLifecycle.DRAFT
+        ]
+        draft_without_lines = [
+            contract_id
+            for contract_id in draft_ids
+            if line_counts.get(resolved.get(contract_id), 0) == 0
+        ]
+
+        def start_here_row(contract):
+            return {
+                "id": contract.id,
+                "contract_no": contract.contract_no,
+                "customer_name": contract.customer.name,
+                "end_date": contract.end_date.isoformat()
+                if contract.end_date
+                else None,
+            }
+
+        draft_no_lines = (
+            qs.filter(id__in=draft_without_lines)
+            .select_related("customer")
+            .order_by("-id")
+            .first()
+        )
+        ending_soonest = (
+            qs.filter(ending_soon_q(today))
+            .select_related("customer")
+            .order_by("end_date", "id")
+            .first()
+        )
 
         return Response(
             {
@@ -400,8 +501,22 @@ class ContractStatsView(APIView):
                 "draft": counts["draft"],
                 "expired": counts["expired"],
                 "cancelled": counts["cancelled"],
+                "ending_soon": counts["ending_soon"],
+                "draft_without_lines": len(draft_without_lines),
                 "monthly_total": money(monthly),
                 "yearly_total": money(monthly * Decimal(12)),
+                "monthly_by_status": {
+                    key: money(value) for key, value in monthly_by.items()
+                },
+                "ending_soon_days": ENDING_SOON_DAYS,
+                "start_here": {
+                    "draft_no_lines": start_here_row(draft_no_lines)
+                    if draft_no_lines
+                    else None,
+                    "ending_soonest": start_here_row(ending_soonest)
+                    if ending_soonest
+                    else None,
+                },
             }
         )
 
