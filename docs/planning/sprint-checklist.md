@@ -13,9 +13,10 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p10-personal-schedule` — stacked on `feat/p9-find-your-way`,
-the head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10), each sprint stacked on the previous one and deployed to crmtest;
+**Branch:** `feat/p11-hours-and-the-rest` — stacked on
+`feat/p10-personal-schedule`, the head of the Addendum D redesign train
+(WP-1 → FE-1 → … → FE-7 → P-1
+→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -38,6 +39,66 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-11: Hours, and everything left (Addendum D §D.21.2 / §D.23, 2026-09-02)
+
+The owner's P-10 walk findings first, then the Hours rebuild he asked
+for, then the Contracts/Invoices calm-down §D.22 queued. Shipped on
+`feat/p11-hours-and-the-rest`:
+
+- **A — the walk fixes** (§D.21.2, all eleven): status words on every
+  schedule card/strip row (server-decided `display_phase` on extra-work
+  entries); Plan N's same-day switch; the deadline back on create
+  (reverses P-10 B6's over-cut); "Price and send"; search-in-tab with
+  the cross-tab line (both list pages); the spawned ticket's back link
+  (an FE-4 regex that matched no P-9 tab path, found under A6); the
+  dead Plan-it door (reproduced read-only on crmtest ticket 497 —
+  0 requests on click — and repinned in `lib/planDoor.ts`); **the plan
+  made on the request carries onto the spawned ticket** (`plan_seed`
+  on all three spawn paths + per-person slot dating;
+  `test_p11_plan_carries`; the post-spawn direction probed and holds);
+  Total planned hours follows the people's live sum (the P-10 B5
+  marker was a label lie — the server never required it); **on hold is
+  off the board** (dated or not, the fold is its only place —
+  `test_p7_parked` and the §D.15 matrix repinned); the lateness ladder
+  reads the provider's plan for extra work.
+- **B — Hours** (§D.23): the two hour concepts named and linked once
+  (timesheet hours vs billable hours; the Money tab pre-fills from the
+  timesheet through `GET /extra-work/<id>/timesheet-hours/`); the grid
+  is ONE table (the fill row is the first body row and lands on
+  standard lines only — `gridRules.ts`; person bands; job lines as
+  tagged children; the hour type a select on every line with its
+  multiplier; one add-line per person; Enter moves down the column);
+  the page gets the purpose sentence, the week card with per-person
+  standard/on-jobs split and Edit-on-that-person, the Earlier-weeks
+  table (people + closed-by from `weeks/with-hours/`), and one More
+  menu; report-done asks per-person hours (timesheet job lines); the
+  ticket's Enter-hours nudge lands the office on the grid
+  (`?week=&enter=`). Pins: `test_p11_grid_rows`,
+  `test_p11_billable_prefill`, `gridRules.test.ts`.
+- **C — Contracts, clarity only** (functional freeze holds): the list
+  is five columns (Customer · Buildings · Period · Monthly amount ·
+  Status) with the tile row and view pills gone; a draft with no lines
+  is ONE card and one button (no €0 tiles, no €0 preview — §D.6 rule
+  13); the "Projects" tab reads **Lines** / **Regels**.
+- **D — Invoices, nothing here is scary**: the purpose sentence; tabs
+  with counts (Due now · Drafts · Issued · Sent · All) instead of the
+  KPI tiles; "Generate" → **Make a draft** with the one line about the
+  number following on send; the creator e-mail off the rows; one
+  next-step button per row ("Check & issue" shared with the detail's
+  primary).
+- **E — SLA warnings: a DRIFT, reported, not built.** The brief (and
+  §D.22.1's row) describe a warnings LIST page with counters and
+  per-row actions; no such page exists — `/admin/sla-warnings` is the
+  thresholds settings form and is the only SLA surface
+  (`components/sla/` holds one badge). Recorded in §D.22.1; the
+  reference-page treatment already lives on the schedule's late strip.
+- **F — leftovers**: strips' "Show all N" expands the zone's own list
+  inline (bounded), the table modal stays for the day/Overdue doors;
+  "Not planned yet" lives in ONE key (`common:phase.ew.WAITING_PLANNING`);
+  the sprint-28/-6 spawn tests brought up to the W-EW1/P-5 contracts
+  (first run since — the failures predate the branch); the sophie
+  scoping case noted as a comment beside the manager-c pin.
 
 ### Done — P-10: personal schedule, honest words (Addendum D §D.21.1 / §D.22, 2026-09-01)
 
@@ -73,9 +134,11 @@ Shipped on `feat/p10-personal-schedule`:
   candidates (Tickets, Invoices, Contracts, Hours, SLA warnings,
   Recurring) and the two or three changes each needs.
 
-Queued for P-11: §D.22.1's six pages; §D.21 item 10's calm-down items
-(Contracts/Invoices, SLA warnings as a reference page, the guidance
-layer) are folded into that table.
+Queued for P-11 (now taken: Hours, Contracts, Invoices; the SLA row
+turned out to describe a page that does not exist — see P-11 E above).
+Queued for P-12: §D.22 applied to Tickets, Recurring work and People;
+the guidance layer on admin surfaces; notification localization (needs
+the owner's yes on one migration).
 
 ### Done — P-9: find your way (Addendum D §D.21, 2026-09-01)
 

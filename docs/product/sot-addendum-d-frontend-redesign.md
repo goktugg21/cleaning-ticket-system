@@ -1750,7 +1750,104 @@ item 1, 2, 5 or 7 above, this section wins.
    page as built and approved; the owner: *"this should be the standard
    everywhere in the system."*
 
-## D.22 List pages — the standard (P-10, 2026-09-01)
+### D.21.2 P-11 amendments — "Hours, and everything left", Part A (2026-09-02)
+
+What the owner hit on the P-10 walk, decided and shipped in
+`feat/p11-hours-and-the-rest`. Where this section disagrees with
+§D.21.1 or §D.15's matrix, this section wins.
+
+1. **Every schedule card and strip row wears its status word (A1).**
+   The owner: *"I see the deadline, I don't see where the job is."* A
+   coloured badge under the title: the ticket's own `ticket_status.*`
+   word on ticket and slot rows, and on an extra-work row the SAME
+   `display_phase` the Extra work list shows — stamped server-side on
+   the work-plan entry (`_ew_phase`), never inferred client-side. One
+   renderer (`EntryStatusBadge`) on cards, strip rows and the table
+   modal, so no surface can use a different vocabulary.
+2. **Plan N: one day for all, or a day each (A2).** The dialog opens on
+   **Same day for everyone** (one day + optional time, applied live to
+   every row); **A day per job** keeps the P-10 rows. Rows stay
+   editable under either; one Save.
+3. **The deadline is back on create (A3) — reverses §D.21.1's B6
+   over-cut.** P-10 removed the "Planning" fold and took the deadline
+   input with it; the fold was the over-cut, the deadline was not. The
+   provider create and the customer meerwerk flow ask **Wished date**
+   ("A wish; the plan follows") and, under it, **Must be done by**
+   (optional; "Leave empty if there is no hard date"). It writes
+   `deadline` — the wire and the W-EW1 create-time permission never
+   left — and shows where it always did: the request header, the list
+   rows, the schedule cards.
+4. **The To-price button says where the price goes (A4).** The quote
+   route's button is **Price and send** (nl "Prijzen en versturen");
+   the instant route's stays **Price and start** — and the detail
+   page's Next step uses the SAME words as the list row (the
+   `prepare_proposal_start` variant is gone). The route sentence under
+   the row stays.
+5. **Search searches the tab you are in (A5).** The tab is the
+   question; a search inside it stays inside it. Under the results one
+   line — "Also 3 matches in other tabs — show them" — opens a
+   cross-tab list with each row's tab named. On Extra work the one
+   predicate is `searchMatches`/`otherTabMatches`
+   (`lib/extraWorkTabs.ts`, pinned with a title that exists in two
+   phases); on Tickets the page asks the complement statuses in one
+   keyed request. Same rule, both pages.
+6. **A spawned ticket's back link never reads "Back to Tickets" (A6).**
+   Extra work is not on that page (§D.21.1 item 7). Found and fixed
+   underneath: the FE-4 origin test `/^\/extra-work(?:[?#]|$)/` matched
+   NO P-9 tab path, so every arrival from the Extra work list fell
+   through to the role home. The test is now built from
+   `EXTRA_WORK_TABS` itself, and a ticket with an extra-work origin
+   falls back to `/extra-work/approved` with a recorded `/tickets`
+   origin refused.
+7. **The dead "Plan it" door (A7), reproduced and repinned.** On the
+   P-10 build (crmtest, ticket 497, read-only): the click fired zero
+   requests, no scroll, no modal. The door pointed at the schedule
+   anchor without mounting it — the missing-piece pointer is decoupled
+   BY DESIGN (P-5), so pointing at another tab's anchor parks the
+   target silently. The rule, now in `lib/planDoor.ts` (vitest): a
+   door lands somewhere MOUNTED — the plan modal for a spawned ticket
+   the viewer may plan, else the Plan tab is switched FIRST and then
+   the anchor is pointed at.
+8. **The plan made on the request carries onto the ticket (A8).** The
+   owner planned the request (days, people, hours), priced it, started
+   it — and the ticket said "Not planned yet". All three spawn paths
+   now read `plan_seed`: born on `provider_planned_date`/`_end` (local
+   midnight, `SCHEDULED`) when a person planned the request, else
+   unplanned exactly as P-1 ruled; each worker's slot is dated from
+   their OWN `ExtraWorkPlannedHours` days (09:00/17:00 —
+   `_sync_slot_windows`'s clocks), a person planned without days
+   inherits the ticket's window; the hours stay in the one plan store
+   the ticket's Plan tab already reads. Provenance holds: with no
+   schedule-set history row, `ticket_plan_provenance` falls through to
+   the request's committed window. The other direction (plan made
+   after the spawn) already went through the plan door and is
+   unchanged. Pin: `extra_work/tests/test_p11_plan_carries.py`.
+9. **Total planned hours = the people's hours, shown (A9).** The
+   "bug" the owner reported was a label lie: the server has counted
+   the per-person hours as the plan's hours all along
+   (`plan_requirements`); P-10 B5 put "required for pricing" on a
+   field the server does not require. The field now FOLLOWS the live
+   sum until the operator overrides it ("differs from the people's
+   hours (9 h)"); the marker renders only while nothing supplies hours;
+   clearing an override clears it server-side. The other three markers
+   stay; the Money tab's gate list already named only what is missing.
+10. **On hold is off the board (A10) — reverses §D.15's matrix row and
+    the P-7 dated-parked ruling.** Ticket 460 was deliberately paused
+    and still rolled onto the owner's today as late. An on-hold job,
+    dated or not, lives ONLY in the On hold fold until someone takes
+    it off hold: it leaves the board, rolled, overdue, upcoming, stuck
+    and the late strips (`_TICKET_ACTIVE_Q` / `_SLOT_ACTIVE_Q`).
+    Pending still means "the work is undone" — the escalation sweep
+    keeps reading it. Pins: `test_p7_parked` (rewritten),
+    `test_p3_schedule_truth`'s matrix (`ON_HOLD → parked/parked/parked`).
+11. **The lateness ladder reads the provider's plan for extra work
+    (A11).** P-10 A6 moved every board predicate onto
+    `provider_planned_date` and left the ladder on the customer's
+    wish. `lateness_index` now reads the plan first (the same branch
+    `_ew_planned_window` takes), and both late-strip candidate filters
+    admit provider-planned rows. Pins in `test_p10_bulk_plan`.
+
+## D.22 List pages## D.22 List pages — the standard (P-10, 2026-09-01)
 
 Written from the Extra work page as built in P-9 and polished in P-10,
 which the owner approved with the words "this should be the standard
@@ -1807,6 +1904,15 @@ item 10's guidance layer).
 
 ### D.22.1 Pages that do not meet it yet — P-11 candidates
 
+P-11 took Hours (rebuilt to §D.23 — beyond this table's three
+changes), Invoices and Contracts (both below, as built, 2026-09-02).
+The **SLA warnings row was a drift**: no warnings list page exists —
+`/admin/sla-warnings` is the thresholds settings form and the only SLA
+surface (`components/sla/` holds one badge); the row described a page
+the code never had. The reference-page treatment it asked for already
+lives on the schedule's late strip (one row, one action, the rung
+explained). Tickets and Recurring stay queued for P-12.
+
 | page | what it needs (two or three changes each) |
 |---|---|
 | **Tickets** (`DashboardPage`, the Tickets queue) | (1) a purpose sentence and the period default named beside the tabs, not only in the empty state; (2) each tab opens on its chip with work to do (Open → the oldest first; Busy → without hours this week) and the URL carries the chip; (3) columns cut to six per tab (drop type/priority where the tab does not ask) and ONE next-step button per row from the ticket's own next step (Plan it / Start / Check the work), the status words from `ticket_status.*` only. |
@@ -1815,3 +1921,93 @@ item 10's guidance layer).
 | **Hours** (`MyHoursPage`, the admin Hours page) | (1) the week is the tab and the stepper says where the hours are (P-9 D3 did the empty week; the rest of the page still shows every column); (2) one summary line per week (booked / planned / missing) over the loaded rows; (3) ONE next step per row (Enter hours / Approve). |
 | **SLA warnings** (`components/sla/*`) | (1) one purpose sentence and tabs by rung (L1 · L2 · L3) with counts; (2) ≤6 columns; (3) one action per row (Open the job) — a reference page, per §D.21 item 10. |
 | **Recurring** (`pages/planned-work/*`) | (1) tabs by the plan's own state (Active · Paused · Ended) with counts, cancelled behind a link; (2) the purpose sentence and the rule sentence merged into one; (3) one next step per row (Plan the next visit / Open). |
+
+## D.23 Hours — the two hour concepts, said once, linked once (P-11, 2026-09-02)
+
+The owner on the old page: *"a user who doesn't know the system can't
+understand this."* Two causes, both structural: the grid's layout (a
+fill row floating above the table, "+ Add type" pseudo-rows, job rows
+that did not look like the person's), and two hour concepts nobody
+named. P-11 B rebuilt both. Reference mock: `hours-redesign.html`
+(received with the sprint prompt).
+
+### D.23.1 The words
+
+- **Timesheet hours** — who worked when, where, on what:
+  `timesheets.TimeEntry`. The Hours page. Payroll's fact.
+- **Billable hours** — what the customer pays: the quote line's
+  `actual_hours`. The Money tab. Invoicing's fact.
+
+They stay two things (payroll is not invoicing), but they know each
+other in exactly one direction: the Money tab's panel PRE-FILLS from
+the timesheet (`GET /extra-work/<id>/timesheet-hours/` — the query
+lives in `extra_work`, because `timesheets` imports nothing from
+`tickets`/`extra_work`; the other way is legal). "Ahmet 4 h · Gökhan
+1 h on the timesheet — bill 5 h?" with a **Use** button per line;
+overriding says "differs from the timesheet". The prefill maps
+timesheet hour types onto matching hourly quote lines (Weekend uren →
+"Regie uren weekend"; ordinary → the regular hourly line; ONE hourly
+line takes everything); hours with no line to land on become a
+sentence with a door to the line-items card.
+
+**The hour type never prices** (verified: `multiplier` is read nowhere
+in `extra_work` or `invoicing`). It weighs the person's hours for the
+reports; what the customer pays comes from the quote's lines. Said
+once, on the Enter-hours dialog's purpose sentence.
+
+### D.23.2 The page (B1)
+
+Purpose sentence: "Who worked how much, per week. Standard hours per
+building, and hours on a specific job. A closed week feeds the reports
+and the invoices." The week bar keeps the stepper, the Open/Closed
+chip, Close week and the one primary **Enter hours**. Under it, the
+**week card** — "{n} h across {m} people", one row per person
+(buildings under the name · standard hours · on jobs with the refs ·
+week total · **Edit**, which opens the grid ON that person), built
+from its own exhaustive read of the week so the numbers describe the
+week, not the filtered page below. **Earlier weeks** is a table
+(week + dates · people · hours · Closed by {who}, {date} · Open) fed
+by `weeks/with-hours/`'s new facts; it replaces the P-9 dot strip on
+this page (My hours keeps the strip). Export CSV and the Other-period
+fold live behind one **More** menu. The entries table below stays as
+the week's detail view.
+
+### D.23.3 The grid (B2)
+
+ONE `<table>` with a `<colgroup>` — Line · Hour type · Mon…Sun (short
+dates) · Week — and every row is a row OF it, so the columns line up
+by construction (the owner's alignment complaint was structural, not
+CSS). The **fill row is the first body row** (amber): "Fill every
+standard line — type once here; it lands on the {n} standard lines
+below, not on job lines" — the rule and the sentence share one
+predicate (`gridRules.isFillTarget`, vitest-pinned). One green
+**person band** per person with their week total; standard lines
+under it (building · "standard hours"); **job lines as children**
+(indent, a Ticket / Extra work kind tag; the extra-work line's
+sub-line: these hours are also what the customer is billed for); then
+ONE link — "+ Add a line for {person} — another hour type on the same
+job, another building, or a job". The **hour type is a select on
+every line**, from the company's `HourType` catalogue with the
+multiplier shown ("Weekend uren ×1.5"); changing it moves the line's
+typed and saved hours with it. Filled cells tint; the Week column and
+the footer sum live; the footer counts the empty standard lines
+("4 standard lines empty — not saved"). Tab moves along the row,
+Enter moves DOWN the column. The staff **My hours** page is the same
+grid with one person and no picker. "Building access checked — the
+rows are below" is gone (the system talking to itself; the skipped-
+pairs line stays). API-shape pin:
+`timesheets/tests/test_p11_grid_rows.py`.
+
+### D.23.4 The doors (B3)
+
+The worker's door is **Report done**: the ticket's completion modal
+asks per-person hours for the job (the visible crew, one number each,
+the day = the report day) and writes them as timesheet JOB lines after
+the transition stands — a failed hours write never unwinds the report.
+The office's door is **the grid**: the ticket page's Enter-hours nudge
+lands management on `/admin/hours?week=…&enter=…` — the Hours page
+with the dialog open on the job's week and crew. One record, two
+doors; the in-page book-hours dialog lost its opener. The grid shows
+lines written from the ticket exactly like typed ones. Prefill pin:
+`extra_work/tests/test_p11_billable_prefill.py`.
+
