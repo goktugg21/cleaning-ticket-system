@@ -79,7 +79,7 @@ import {
   type PdfPreviewDialogHandle,
 } from "../components/PdfPreviewDialog";
 import { monthName } from "../lib/billingSentence";
-import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
+import { formatDate, formatDateTime, formatMoney, formatOrdinal } from "../lib/intl";
 
 // P-12 D1 (§D.24 rule 3) — the tabs ARE the steps of the road, in
 // the order things happen, numbered: finished work becomes a draft,
@@ -937,7 +937,7 @@ export function FacturenPage({
                           <span className="muted small" style={{ display: "block" }}>
                             {t("invoices:road.due_today_sub", {
                               day: dayWords,
-                              today: new Date().getDate(),
+                              today: formatOrdinal(new Date().getDate()),
                             })}
                           </span>
                         )}

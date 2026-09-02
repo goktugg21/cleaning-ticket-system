@@ -64,7 +64,7 @@
   "road.due_col_waiting": "Wat er wacht",
   "road.due_waiting_jobs": "{{count}} afgeronde meerwerkklussen",
   "road.due_nothing_yet": "Nog niets",
-  "road.due_today_sub": "{{day}} · vandaag is het de {{today}}e",
+  "road.due_today_sub": "{{day}} · vandaag is het de {{today}}",
   "road.col_draft": "Concept",
   "road.col_lines": "Regels",
   "road.col_issued": "Uitgegeven",
