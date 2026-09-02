@@ -73,9 +73,11 @@ export function selectApprovedProposal(
 //   * INSTANT cart lines -> no persisted unit price exists on the row;
 //     `contract_unit_price` is the serializer's live resolve of the
 //     customer's contract, and is null for a NEEDS_PROPOSAL line.
-//   * legacy `pricing_line_items` -> these NEVER reach this function
-//     (the branch below returns []), so no hourly row is ever rendered
-//     for them and the question of their rate does not arise here.
+//   * legacy `pricing_line_items` -> `unit_price` (operator-typed; the
+//     backend bills exactly this — `_line_unit_price` falls through to
+//     `line.unit_price` for the legacy kind). Hourly rows on this path
+//     exist since P-13 I gave the legacy model its `actual_hours`
+//     column (before that the branch returned [] by design).
 // A line whose rate resolves to null keeps a plain input: no invented
 // rate, no invented arithmetic.
 //
@@ -123,7 +125,17 @@ export function deriveActiveHourlyLines(
         quantity: finiteOrNull(line.quantity),
       }));
   }
-  return [];
+  // P-13 I — the legacy pricing-items path, now that the column
+  // exists. Mirrors `final_amounts.active_priced_lines`' third arm.
+  return (ew.pricing_line_items ?? [])
+    .filter((line) => line.unit_type === "HOURS")
+    .map((line) => ({
+      id: line.id,
+      label: line.description,
+      actual_hours: line.actual_hours ?? null,
+      rate: finiteOrNull(line.unit_price),
+      quantity: finiteOrNull(line.quantity),
+    }));
 }
 
 // Remount key: changes whenever the persisted actual_hours change, so

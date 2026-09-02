@@ -2155,6 +2155,9 @@ export interface ExtraWorkPricingLineItem {
   total: string;
   customer_visible_note: string;
   internal_cost_note?: string;
+  // P-13 I — actual hours on an HOURS-unit legacy line (read-only;
+  // written via the actual-hours endpoint). NULL = bill `quantity`.
+  actual_hours: string | null;
   // Backend serializer emits these on every line shape. For free-form
   // pricing lines (no service FK by construction) `price_source` is
   // always "CUSTOM" and the contract fields are always null. Quoted by

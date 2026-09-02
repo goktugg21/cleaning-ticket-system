@@ -409,7 +409,6 @@ class BilledToAndProviderDateTests(_Fixture):
                     {
                         "custom_description": "ad-hoc",
                         "quantity": "1.00",
-                        "requested_date": str(date(2026, 5, 1)),
                     }
                 ],
             },
@@ -441,7 +440,6 @@ class BilledToAndProviderDateTests(_Fixture):
                     {
                         "custom_description": "ad-hoc",
                         "quantity": "1.00",
-                        "requested_date": str(date(2026, 5, 1)),
                     }
                 ],
             },
@@ -468,7 +466,6 @@ class BilledToAndProviderDateTests(_Fixture):
                     {
                         "custom_description": "ad-hoc",
                         "quantity": "1.00",
-                        "requested_date": str(date(2026, 5, 1)),
                     }
                 ],
             },

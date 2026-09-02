@@ -247,6 +247,9 @@ class ExtraWorkPricingLineItemSerializer(serializers.ModelSerializer):
             "total",
             "customer_visible_note",
             "internal_cost_note",
+            # P-13 I — actual hours (read-only; written only via the
+            # actual-hours endpoint, like the cart/proposal twins).
+            "actual_hours",
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",
@@ -261,6 +264,7 @@ class ExtraWorkPricingLineItemSerializer(serializers.ModelSerializer):
             "subtotal",
             "vat_amount",
             "total",
+            "actual_hours",
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",
@@ -320,6 +324,9 @@ class ExtraWorkPricingLineItemCustomerSerializer(serializers.ModelSerializer):
             "vat_amount",
             "total",
             "customer_visible_note",
+            # P-13 I — actual hours; customer-visible per SoT §5.12,
+            # matching the cart/proposal customer serializers.
+            "actual_hours",
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",

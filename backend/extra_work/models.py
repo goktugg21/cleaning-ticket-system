@@ -1015,6 +1015,32 @@ class ExtraWorkPricingLineItem(models.Model):
     customer_visible_note = models.TextField(blank=True)
     internal_cost_note = models.TextField(blank=True)
 
+    # P-13 I — actual hours worked on an HOURS-unit legacy pricing
+    # line, closing the D7 gap from P-12: this path deliberately had no
+    # such column (Sprint 8B brief) so "Save hours to bill" and the
+    # timesheet prefill could not exist on legacy-priced requests.
+    # Owner-approved additive migration (2026-09-02). Same contract as
+    # the cart/proposal twins: NULL = bill the agreed `quantity`
+    # (old behaviour unchanged); NEVER overwrites `quantity`;
+    # `final_amounts.billable_quantity` substitutes it only when
+    # computing the final billable total.
+    actual_hours = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    actual_hours_entered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    actual_hours_entered_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
