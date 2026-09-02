@@ -10,6 +10,7 @@ import { StatusBadge } from "../StatusBadge";
 import { cardFacts } from "./cardFacts";
 import type { CardFactLine } from "./cardFacts";
 import { detailPath, formatDay } from "./entryHelpers";
+import { useRowLink } from "../../lib/useRowLink";
 import { PartChips } from "./PartChips";
 
 /**
@@ -316,6 +317,10 @@ export function WorkPlanCard({
 }) {
   const { t } = useTranslation(["staff_slots", "common"]);
   const to = detailPath(entry, role);
+  // P-13 D (O3, §D.22 rule 9) — the WHOLE card opens the job; the
+  // title stays a real link for middle-click and the card's buttons
+  // stop the click through the shared inner-control guard.
+  const { interactive, rowProps } = useRowLink({ to: to ?? undefined });
   const isExtraWork = entry.kind === "EXTRA_WORK";
   const isHost = hostParts !== undefined;
   const todayIso = today ?? toDateString(new Date());
@@ -337,10 +342,11 @@ export function WorkPlanCard({
   if (isHost) {
     return (
       <li
-        className="wp-card wp-card-host"
+        className={`wp-card wp-card-host${interactive ? " clickable-row" : ""}`}
         data-testid="agenda-part-host-card"
         data-kind={entry.kind}
         data-job={entry.ticket_id !== null ? `ticket-${entry.ticket_id}` : entry.key}
+        {...rowProps}
       >
         <span className="wp-kind-tag wp-kind-tag-ticket" data-testid="agenda-card-kind">
           {t("agenda.part_host")}
@@ -363,12 +369,13 @@ export function WorkPlanCard({
       // W-VIEWER §5 — a card with nothing left for THIS reader to do is
       // calm: it stays on the board (a manager may still withdraw a job
       // sitting with the customer) and stops demanding action.
-      className={`wp-card${entry.viewer_settled ? " wp-card-settled" : ""}${isCheck ? " wp-card-check" : ""}`}
+      className={`wp-card${entry.viewer_settled ? " wp-card-settled" : ""}${isCheck ? " wp-card-check" : ""}${interactive ? " clickable-row" : ""}`}
       data-testid="agenda-slot-card"
       data-kind={entry.kind}
       data-placement={entry.placement}
       data-settled={entry.viewer_settled ? "1" : "0"}
       data-state={facts.state}
+      {...rowProps}
     >
       <span
         className={`wp-kind-tag${isExtraWork ? "" : " wp-kind-tag-ticket"}`}

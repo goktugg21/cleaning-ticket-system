@@ -1815,7 +1815,16 @@ export function ExtraWorkDetailPage() {
     if (pending) {
       announceDone(safeSessionStorage(), `ticket-${earliest.id}`, pending);
     }
-    return <Navigate replace to={`/tickets/${earliest.id}`} />;
+    // P-13 J — a `?tab=` deep link (the Money tab, typically) keeps
+    // its tab through the redirect: the ticket page reads the same
+    // param.
+    const deepTab = searchParams.get("tab");
+    return (
+      <Navigate
+        replace
+        to={`/tickets/${earliest.id}${deepTab ? `?tab=${deepTab}` : ""}`}
+      />
+    );
   }
 
   const allowed = ew.allowed_next_statuses;

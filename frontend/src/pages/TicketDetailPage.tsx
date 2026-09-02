@@ -139,7 +139,6 @@ import { PhaseBanner } from "../components/customer/PhaseBadge";
 import { DoneBanner } from "../components/guide/DoneBanner";
 import { useDoneBanner } from "../components/guide/useDoneBanner";
 import { DueChipCore } from "../components/workplan/WorkPlanCard";
-import { RouteBadge } from "../components/RouteBadge";
 import { UnifiedTimeline } from "../components/UnifiedTimeline";
 import { SLABadge } from "../components/sla/SLABadge";
 import { describeTicketChange } from "../lib/describeTicketChange";
@@ -3328,8 +3327,21 @@ export function TicketDetailPage() {
   // Archive is the primary only when no forward move is (W-H §1: on a
   // finished ticket it is the one thing left to do); otherwise it waits
   // in "Andere stappen" with the other doors.
+  // P-13 D (W5) — while MONEY waits (`extra_work_billing`), Archive is
+  // never the celebrated green button: the banner says the money fact
+  // with a "Go to invoices" door, and Archive moves behind Advanced
+  // with the C2 confirm.
+  // P-13 D (W5) — a finished job's facts are PAST-TENSE facts:
+  // "Not planned yet" and "No staff assigned yet" are live-job words.
+  const jobFinished = ticket.display_phase === "DONE";
+  // Only on the FINISHED phase: an earned-but-waiting job (customer
+  // approval) keeps its own workflow sentence and buttons.
+  const moneyWaits = Boolean(ticket.extra_work_billing) && jobFinished;
   const archiveIsPrimary =
-    canArchive && primaryButtons.length === 0 && !canShowCompleteWorkButton;
+    canArchive &&
+    primaryButtons.length === 0 &&
+    !canShowCompleteWorkButton &&
+    !moneyWaits;
   // Declared above the banner because the "Plan it" door reads it too
   // (P-11 A7): the door and the Actions card must agree on who may
   // open the extra-work plan modal.
@@ -3397,6 +3409,16 @@ export function TicketDetailPage() {
       <Archive size={14} strokeWidth={2.2} aria-hidden="true" />
       <span style={{ marginLeft: 6 }}>{t("common:archive.button")}</span>
     </button>
+  ) : moneyWaits && primaryButtons.length === 0 && !canShowCompleteWorkButton ? (
+    // P-13 D (W5) — the finished, unbilled job's one green door goes
+    // where the money goes.
+    <Link
+      className="btn btn-primary"
+      to={`/invoices?tab=due&customer=${ticket.customer}`}
+      data-testid="ticket-go-to-invoices"
+    >
+      {t("facts.go_to_invoices")}
+    </Link>
   ) : null;
 
   const otherStepNodes: ReactNode[] = [
@@ -3433,7 +3455,7 @@ export function TicketDetailPage() {
           </button>,
         ]
       : []),
-    ...(canArchive && !archiveIsPrimary
+    ...(canArchive && !archiveIsPrimary && !moneyWaits
       ? [
           <button
             key="archive"
@@ -3560,18 +3582,10 @@ export function TicketDetailPage() {
             </Link>
           </div>
         )}
-        {ticket.extra_work_origin && (
-          <div
-            className="ticket-extra-work-origin"
-            data-testid="ticket-extra-work-origin"
-            data-origin={ticket.extra_work_origin.origin}
-          >
-            <span className="muted small">
-              {t("detail.spawned_from_label")}
-            </span>{" "}
-            <RouteBadge value={ticket.extra_work_origin.origin} />
-          </div>
-        )}
+        {/* P-13 D (W5) — the Instant/Quote chip left the header: how
+            the work was routed is block 1's provenance sentence in the
+            Money tab ("started by … — no approval needed" /
+            "approved by … on …"), not a header badge. */}
 
         {/* W6-H — MY PLANNED DAYS.
             The worker's answer to "which days am I on this job, and for
@@ -3665,7 +3679,35 @@ export function TicketDetailPage() {
             phase={ticket.display_phase}
             testId="ticket-phase-banner"
             sub={
-              isCustomerUser(me?.role) ? undefined : (
+              isCustomerUser(me?.role) ? undefined : moneyWaits &&
+                ticket.extra_work_billing ? (
+                // P-13 D (W5) — a finished, unbilled job's banner says
+                // the MONEY fact, never "nothing further happens"
+                // while €330.33 waits.
+                <span data-testid="ticket-header-status-sentence">
+                  {ticket.extra_work_billing.customer_invoice_day != null
+                    ? t("facts.done_money_day", {
+                        amount: formatMoney(
+                          ticket.extra_work_billing.unbilled_total,
+                        ),
+                        customer: ticket.extra_work_billing.customer_name,
+                        day:
+                          ticket.extra_work_billing.customer_invoice_day ===
+                          "LAST_OF_MONTH"
+                            ? t("common:facturatie.day_last")
+                            : t("common:facturatie.day_of_month", {
+                                day: ticket.extra_work_billing
+                                  .customer_invoice_day,
+                              }),
+                      })
+                    : t("facts.done_money_no_day", {
+                        amount: formatMoney(
+                          ticket.extra_work_billing.unbilled_total,
+                        ),
+                        customer: ticket.extra_work_billing.customer_name,
+                      })}
+                </span>
+              ) : (
                 <span data-testid="ticket-header-status-sentence">
                   {t(`workflow_state.${ticket.status}`)}
                   {currentStatusSince
@@ -3748,7 +3790,9 @@ export function TicketDetailPage() {
                 <div className="ew-ctx-sub" data-testid="ticket-fact-crew">
                   {t("facts.crew_label")}:{" "}
                   {crewNames.length === 0
-                    ? t("assigned_staff_empty")
+                    ? jobFinished
+                      ? t("facts.no_crew_recorded")
+                      : t("assigned_staff_empty")
                     : crewNames.slice(0, 4).join(", ") +
                       (crewNames.length > 4
                         ? " " +
@@ -3840,8 +3884,16 @@ export function TicketDetailPage() {
                     ingepland · al N dagen". */}
                 <div className="ew-ctx-strong" data-testid="ticket-fact-planned">
                   {/* P-3 §A.3 — the DAY as the server states it (its own
-                      zone), never the instant read in the browser's. */}
-                  {ticket.has_real_plan && ticket.scheduled_start_day
+                      zone), never the instant read in the browser's.
+                      P-13 D (W5) — a FINISHED job's headline is when it
+                      finished; "Not planned yet" is a live-job fact. */}
+                  {jobFinished
+                    ? t("facts.finished_on", {
+                        date: formatDay(
+                          ticket.settled_at ?? ticket.updated_at,
+                        ),
+                      })
+                    : ticket.has_real_plan && ticket.scheduled_start_day
                     ? ticket.scheduled_end_day &&
                       ticket.scheduled_end_day !== ticket.scheduled_start_day
                       ? t("facts.planned_for_range", {
@@ -3855,6 +3907,17 @@ export function TicketDetailPage() {
                       ? t("facts.planned_for", { date: formatDay(ticket.due_date) })
                       : t("schedule.not_scheduled")}
                 </div>
+                {jobFinished && (
+                  <div className="ew-ctx-sub" data-testid="ticket-fact-finished-plan">
+                    {ticket.has_real_plan && ticket.scheduled_start_day
+                      ? t("facts.finished_planned", {
+                          date: formatDay(
+                            `${ticket.scheduled_start_day}T00:00:00`,
+                          ),
+                        })
+                      : t("facts.finished_never_planned")}
+                  </div>
+                )}
                 {ticket.has_real_plan && ticket.scheduled_start_time && (
                   <div className="ew-ctx-sub" data-testid="ticket-fact-clock">
                     {ticket.scheduled_end_time
@@ -3894,7 +3957,8 @@ export function TicketDetailPage() {
                     date: formatDate(ticket.created_at),
                     name: ticket.created_by_name || ticket.created_by_email,
                   })}
-                  {!ticket.has_real_plan &&
+                  {!jobFinished &&
+                  !ticket.has_real_plan &&
                   ticket.unplanned_age_days !== null &&
                   ticket.unplanned_age_days > 0
                     ? ` — ${t("facts.not_planned_yet_age", { count: ticket.unplanned_age_days })}`
@@ -3980,7 +4044,9 @@ export function TicketDetailPage() {
                     for everyone else. Offers the WHOLE active catalog,
                     "Ongegrond" included: this is the screen where that
                     verdict is reached. */}
-                {isProviderManagementRole(me?.role) ? (
+                {/* P-13 D (W5) — a FINISHED job's department is a past
+                    fact: read-only text, no live select. */}
+                {isProviderManagementRole(me?.role) && !jobFinished ? (
                   <>
                     <select
                       className="field-select"
@@ -4824,6 +4890,25 @@ export function TicketDetailPage() {
                   </button>
                   {correctionsOpen && (
                     <div data-testid="ticket-advanced">
+                      {/* P-13 D (W5) — while money waits, Archive lives
+                          HERE, with the C2 money confirm on its dialog:
+                          the banner's green door goes to the invoices,
+                          not to the archive. */}
+                      {canArchive && moneyWaits && (
+                        <div style={{ marginBottom: 10 }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setArchiveMode("archive")}
+                            data-testid="ticket-archive-button"
+                          >
+                            <Archive size={14} strokeWidth={2.2} aria-hidden="true" />
+                            <span style={{ marginLeft: 6 }}>
+                              {t("common:archive.button")}
+                            </span>
+                          </button>
+                        </div>
+                      )}
                       {/* W9 §2 / W10 §5 — the undo of the step just
                           taken, amber, separate. */}
                       {correctionForRender.length > 0 && (

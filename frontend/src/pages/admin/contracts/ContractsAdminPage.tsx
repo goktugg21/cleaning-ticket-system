@@ -1,5 +1,4 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import type { SyntheticEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { FileSignature, Plus, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { EmptyState } from "../../../components/EmptyState";
@@ -38,6 +37,7 @@ import { CONTRACT_ROAD } from "../../../lib/contractRoad";
 import type { ContractRoadKey } from "../../../lib/contractRoad";
 import { RoadTabs, TeachHead } from "../../../components/guide/RoadTabs";
 import { StartHere } from "../../../components/guide/StartHere";
+import { ClickableRow } from "../../../components/ClickableRow";
 import { TeachEmpty } from "../../../components/guide/TeachEmpty";
 import { CompanyScopeSelect } from "../../../components/guide/CompanyScopeSelect";
 import {
@@ -857,27 +857,13 @@ export function ContractsAdminPage() {
             </thead>
             <tbody>
               {contracts.map((row) => (
-                <tr
+                // P-8R F built this row's guard by hand; P-13 D (O3)
+                // folds it onto the ONE hook via ClickableRow — same
+                // behaviour, one owner.
+                <ClickableRow
                   key={row.id}
-                  className="admin-row-clickable"
-                  role="link"
-                  tabIndex={0}
-                  aria-label={`${t("actions.open")}: ${row.contract_no}`}
-                  onClick={(event) => {
-                    // P-8R F — the row carries inline links; a click or
-                    // an Enter on one of them must open THAT page and
-                    // not also the contract (the `ClickableRow` rule,
-                    // applied to this row).
-                    if (fromInnerControl(event)) return;
-                    navigate(`/admin/contracts/${row.id}`);
-                  }}
-                  onKeyDown={(event) => {
-                    if (fromInnerControl(event)) return;
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      navigate(`/admin/contracts/${row.id}`);
-                    }
-                  }}
+                  to={`/admin/contracts/${row.id}`}
+                  ariaLabel={`${t("actions.open")}: ${row.contract_no}`}
                 >
                   {editMode.editMode && (
                     <td
@@ -938,7 +924,7 @@ export function ContractsAdminPage() {
                       {t(`status.${row.status}`)}
                     </span>
                   </td>
-                </tr>
+                </ClickableRow>
               ))}
               {!loading && contracts.length === 0 && (
                 <tr>
@@ -1120,16 +1106,5 @@ function BuildingsCell({
   );
 }
 
-/**
- * P-8R F — did this event start on a control INSIDE the row (a link, a
- * button, the edit-mode checkbox)? Then the row must not also react:
- * `ClickableRow` makes the same check, and this table's rows are not
- * `ClickableRow` yet. Covers keyboard too — an Enter on a focused inline
- * link bubbles to the row, and without this the row would open the
- * contract on top of the page the link opened.
- */
-function fromInnerControl(event: SyntheticEvent<HTMLTableRowElement>): boolean {
-  if (!(event.target instanceof HTMLElement)) return false;
-  const inner = event.target.closest("a,button,input,select,textarea,label");
-  return inner !== null && inner !== event.currentTarget;
-}
+// P-13 D (O3) — `fromInnerControl` is gone: the rows are `ClickableRow`
+// now and the guard lives once, in `lib/useRowLink.ts`.

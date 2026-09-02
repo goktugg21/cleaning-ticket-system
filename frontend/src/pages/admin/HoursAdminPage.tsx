@@ -36,6 +36,7 @@ import type {
 } from "../../api/timesheets.types";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { ClickableRow } from "../../components/ClickableRow";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
@@ -1346,14 +1347,23 @@ export function HoursAdminPage() {
                     </thead>
                     <tbody>
                       {weekPeople.map((person) => (
-                        <tr
+                        /* P-13 D (O3, §D.22 rule 9) — the whole row
+                           opens the grid ON this person, exactly what
+                           its Edit button does. */
+                        <ClickableRow
                           key={person.id}
                           className={
                             savedHighlight.includes(person.id)
                               ? HIGHLIGHT_CLASS
                               : undefined
                           }
-                          data-testid={`hours-week-card-row-${person.id}`}
+                          testId={`hours-week-card-row-${person.id}`}
+                          inert={loading || activeHourTypes.length === 0}
+                          onActivate={() => {
+                            setWeekModalPreselect([person.id]);
+                            setWeekModalNote("");
+                            setWeekModalOpen(true);
+                          }}
                         >
                           <td className="td-subject">
                             {person.name}
@@ -1418,7 +1428,7 @@ export function HoursAdminPage() {
                               {t("hours_admin.week_card_edit")}
                             </button>
                           </td>
-                        </tr>
+                        </ClickableRow>
                       ))}
                     </tbody>
                   </table>
@@ -1468,9 +1478,17 @@ export function HoursAdminPage() {
                   </thead>
                   <tbody>
                     {earlierWeeks.map((row) => (
-                      <tr
+                      /* P-13 D (O3, §D.22 rule 9) — the whole row opens
+                         the week; the Open button stays for the eye. */
+                      <ClickableRow
                         key={`${row.iso_year}-${row.iso_week}`}
-                        data-testid={`hours-earlier-week-${row.iso_year}-${row.iso_week}`}
+                        testId={`hours-earlier-week-${row.iso_year}-${row.iso_week}`}
+                        onActivate={() =>
+                          goToWeek({
+                            isoYear: row.iso_year,
+                            isoWeek: row.iso_week,
+                          })
+                        }
                       >
                         <td className="td-subject">
                           {t("hours_admin.earlier_weeks_label", {
@@ -1530,7 +1548,7 @@ export function HoursAdminPage() {
                             {t("hours_admin.earlier_weeks_open")}
                           </button>
                         </td>
-                      </tr>
+                      </ClickableRow>
                     ))}
                   </tbody>
                 </table>

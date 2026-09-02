@@ -36,6 +36,7 @@ import {
   isProviderManagementRole,
 } from "../auth/permissions";
 import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
+import { ClickableRow } from "../components/ClickableRow";
 import { EditModeToggle } from "../components/EditModeToggle";
 import { FinancialStrip } from "../components/extra-work/FinancialStrip";
 import { SLABadge } from "../components/sla/SLABadge";
@@ -2792,44 +2793,21 @@ export function DashboardPage({
                     </thead>
                     <tbody>
                       {tickets.map((ticket) => (
-                        <tr
+                        /* W14 §3 — ONE CLICK, ONE HISTORY ENTRY: the
+                           anchors stay anchors; the row handles only
+                           the cells that are not one. P-13 D (O3) —
+                           the hand-rolled copy of that guard folded
+                           onto the ONE hook (`useRowLink`, via
+                           ClickableRow); `onActivate` carries the
+                           back-state the plain `to` cannot. */
+                        <ClickableRow
                           key={ticket.id}
                           className="ticket-row-clickable"
-                          role="link"
-                          tabIndex={0}
-                          /* W14 §3 — ONE CLICK, ONE HISTORY ENTRY.
-                             The row is clickable AND contains `<Link>`s
-                             to the same ticket. Clicking a link
-                             navigated, the click then bubbled to here,
-                             and this navigated again. Instrumenting
-                             `history.pushState` on crmtest, one click
-                             on ticket 343 logged `PUSH /tickets/343`
-                             TWICE and `history.state.idx` went 1 -> 3 —
-                             so one press of the browser's Back landed
-                             back on the ticket it was pressed from, and
-                             only for the cells that happen to be links.
-                             The anchor is left to be an anchor
-                             (open-in-new-tab, middle click, the status
-                             bar showing where it goes); the row handles
-                             only the cells that are not one. */
-                          onClick={(event) => {
-                            if (
-                              (event.target as HTMLElement).closest("a,button")
-                            ) {
-                              return;
-                            }
+                          onActivate={() =>
                             navigate(`/tickets/${ticket.id}`, {
                               state: chargeableBackState,
-                            });
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              navigate(`/tickets/${ticket.id}`, {
-                                state: chargeableBackState,
-                              });
-                            }
-                          }}
+                            })
+                          }
                         >
                           {bulkMode && (
                             <td
@@ -3036,7 +3014,7 @@ export function DashboardPage({
                           <td className="td-date">
                             {formatDate(ticket.created_at)}
                           </td>
-                        </tr>
+                        </ClickableRow>
                       ))}
                     </tbody>
                   </table>
