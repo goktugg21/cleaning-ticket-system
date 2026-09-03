@@ -91,7 +91,12 @@ the in-sprint part-A/B6 work.
   wants it; the fold and the road teach then change one word.
   (sweep, C2)
 
-- **My hours · STAFF (ahmet, both widths) · the worker is blamed for
+- **P-15: FIXED (Part 2)** — MyHoursPage resolves a company (the one
+  when there is one; remembered/first with a picker when the scope
+  has more than one — the admin Hours page's shape, names read from
+  the scoped /companies/) and sends it on fill-week and weeks/status;
+  the two silent 400s are gone structurally. ·
+  **My hours · STAFF (ahmet, both widths) · the worker is blamed for
   input he never gave** — the page loads, he types nothing, and a red
   banner says "Dat is niet geaccepteerd. Controleer wat u invulde…".
   Cause (response-captured): `POST /api/timesheets/entries/fill-week/`
@@ -117,7 +122,14 @@ the in-sprint part-A/B6 work.
   WAITING_MANAGER_CHECK with Dutch group labels; the next new phase
   is a compile error. (W3)
 
-- **Ticket detail › Assign people · BUILDING_MANAGER · the people
+- **P-15: FIXED (Part 2)** — `eligible_users_for_building` stops
+  narrowing a BUILDING_MANAGER by `manageable_user_ids_for` (an empty
+  set for the role): a BM assigned to the building reads the raw
+  building set — exactly what the validator accepts — and an
+  unassigned BM reads nothing. Pinned in `test_p15_bm_candidates`
+  (picker == admin's answer; what it offers, the write accepts);
+  sprint158 eligibility + bulk-assign neighbours green. ·
+  **Ticket detail › Assign people · BUILDING_MANAGER · the people
   picker is empty on a ticket he can staff** —
   `GET /tickets/{id}/assignments/candidates/?role=WORKER` returns `[]`
   for a BM while CA/SA get both eligible staff, the same BM's direct
@@ -137,7 +149,11 @@ the in-sprint part-A/B6 work.
   **FIXED (P-14)** — all three now point at `/admin/contracts/:id`,
   the routed detail (ContractsRoute even admits BM). (W2)
 
-- **Tickets · all management roles · every count is silently
+- **P-15: FIXED (Part 2)** — the header subtitle and the headline
+  cards say the scope out loud whenever the period narrows
+  ("aantallen in september" beside the tabs and in the subtitle,
+  from the existing periodPhrase); no fold needs opening. ·
+  **Tickets · all management roles · every count is silently
   this-month-scoped** — headline cards read "OPEN 0 · IN PROGRESS 1"
   and the header "0 total tickets" while 32 open tickets exist; the
   period select sits inside the COLLAPSED Filter fold, and only the
@@ -148,7 +164,11 @@ the in-sprint part-A/B6 work.
   the header; a stranger must not open a fold to learn the numbers
   are month-only. (W1, W2)
 
-- **Dashboard · CA · a confident zero renders before data exists** —
+- **P-15: FIXED (Part 2)** — `attentionSettled`: the greeting makes
+  no claim and the attention card is a skeleton until the probes have
+  ANSWERED (success or failure); "nothing needs you right now" can
+  no longer render ahead of the data. ·
+  **Dashboard · CA · a confident zero renders before data exists** —
   while the attention probes load, the page already asserts "nothing
   needs you right now" (greeting AND card) though the API returns 24
   OPEN tickets and 3 WAITING_MANAGER_REVIEW for his company. Captured
@@ -165,7 +185,11 @@ the in-sprint part-A/B6 work.
   cannot see which rows are locked. Fix: plain text outside edit
   mode; move STATUS beside VALID. (W1)
 
-- **SLA warnings · SA + CA · "Use the standard values" reads like a
+- **P-15: FIXED (Part 2)** — a ConfirmDialog stands before the
+  DELETE and the WhatHappens pre-read says the consequence ("Removes
+  this company's own numbers; the platform standard applies from the
+  next check."). ·
+  **SLA warnings · SA + CA · "Use the standard values" reads like a
   form reset; it is a server-side DELETE** —
   `DELETE /api/sla/warning-thresholds/{companyId}/` discards the
   company's own numbers, live from the next check. Guessed wrong on

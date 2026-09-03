@@ -8,6 +8,7 @@
   "tickets_page.title": "Tickets",
   "tickets_page.breadcrumb_current": "Tickets",
   "subtitle_counts": "{{count}} totaal · {{visible}} zichtbaar · pagina {{page}} van {{pages}}",
+  "subtitle_period": "aantallen {{period}}",
   "new_ticket": "Nieuw ticket",
   "new_extra_work": "Nieuw meerwerk",
   "admin_required_banner": "Dit gedeelte is alleen voor beheerders.",

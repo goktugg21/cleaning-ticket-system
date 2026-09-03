@@ -1209,6 +1209,11 @@ export function DashboardPage({
   // RF-16 (#106) — attention-card data: the manager-review queue, the
   // unassigned-open queue (count + top rows each, via the established
   // count-query pattern) and the recent-activity feed. Dashboard only.
+  /** P-15 — true once the attention probes have ANSWERED (either way).
+   *  Until then the greeting makes no claim and the card is a
+   *  skeleton: "nothing needs you right now" was rendered while the
+   *  API was still bringing back 24 OPEN tickets (S2). */
+  const [attentionSettled, setAttentionSettled] = useState(false);
   const [attnReview, setAttnReview] = useState<{
     count: number;
     rows: TicketList[];
@@ -1337,8 +1342,12 @@ export function DashboardPage({
     // loader is dashboard-gated.
     loadStats();
     loadExtraWorkStats();
-    loadAttention();
-    loadGuardCounts();
+    // P-15 — the page may not assert "nothing needs you" before these
+    // two have ANSWERED (success or failure): the settled flag is what
+    // lets the greeting and the attention card stop being skeletons.
+    void Promise.allSettled([loadAttention(), loadGuardCounts()]).then(() =>
+      setAttentionSettled(true),
+    );
     loadWidgets();
   }, [
     loadStats,
@@ -1736,10 +1745,17 @@ export function DashboardPage({
           ) : (
             <p className="dash-greeting" data-testid="dashboard-greeting">
               {t(greetingKey, { name: greetingName })}
-              {" — "}
-              {needsYouCount > 0
-                ? t("greeting.count", { count: needsYouCount })
-                : t("greeting.clear")}
+              {/* P-15 — the greeting claims nothing until the probes
+                  have answered; "nothing needs you" was asserted while
+                  24 open tickets were still loading. */}
+              {attentionSettled ? (
+                <>
+                  {" — "}
+                  {needsYouCount > 0
+                    ? t("greeting.count", { count: needsYouCount })
+                    : t("greeting.clear")}
+                </>
+              ) : null}
             </p>
           )}
           <h2 className="page-title">
@@ -1768,12 +1784,25 @@ export function DashboardPage({
             ) : loading && tickets.length === 0 ? (
               ""
             ) : (
-              t("subtitle_counts", {
-                count,
-                visible: tickets.length,
-                page,
-                pages: pageCount,
-              })
+              <>
+                {t("subtitle_counts", {
+                  count,
+                  visible: tickets.length,
+                  page,
+                  pages: pageCount,
+                })}
+                {/* P-15 (P-14's S2 finding) — every number on this page
+                    is silently period-scoped while the period select
+                    sits in a COLLAPSED fold. The header says the scope
+                    out loud; the stranger never has to open a fold to
+                    learn the numbers are month-only. */}
+                {periodNarrows && periodPhrase ? (
+                  <span data-testid="tickets-subtitle-period">
+                    {" · "}
+                    {t("subtitle_period", { period: periodPhrase })}
+                  </span>
+                ) : null}
+              </>
             )}
           </p>
         </div>
@@ -1949,7 +1978,14 @@ export function DashboardPage({
                     {t("attention_panel.title")}
                   </span>
                 </div>
-                {attentionRows.length === 0 ? (
+                {/* P-15 (P-14's S2 finding) — no confident zero before
+                    data exists: while the probes are in flight the card
+                    is a skeleton, never "nothing needs you". */}
+                {!attentionSettled && attentionRows.length === 0 ? (
+                  <p className="muted attn-clear" data-testid="attention-loading">
+                    <span className="skeleton-line skeleton-inline" aria-hidden="true" />
+                  </p>
+                ) : attentionRows.length === 0 ? (
                   <p className="muted attn-clear" data-testid="attention-all-clear">
                     {t("attention.all_clear")}
                   </p>
@@ -2168,6 +2204,17 @@ export function DashboardPage({
              behaviour stays: it appears only while there IS reopened
              work, or while it is the filter, so it can be cleared. */
           <div className="ticket-tabs-row" data-testid="tickets-tabs">
+            {/* P-15 — the cards say WHAT they count ("Counts in
+                September") whenever the period narrows them. */}
+            {periodNarrows && periodPhrase && (
+              <span
+                className="muted small"
+                data-testid="tickets-tabs-period"
+                style={{ alignSelf: "center" }}
+              >
+                {t("subtitle_period", { period: periodPhrase })}
+              </span>
+            )}
             <div className="status-tile-row ticket-tabs" role="tablist">
               {([...TICKET_TABS, ""] as (TicketTabKey | "")[]).map((tab) => {
                 const statuses = tab ? ticketTabStatuses(tab) : TICKET_LIST_STATUSES;

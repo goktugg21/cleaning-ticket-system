@@ -45,7 +45,7 @@
  * here reads them by any route other than the `t()` calls already
  * present.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { RotateCcw } from "lucide-react";
@@ -64,6 +64,8 @@ import type {
   SlaThresholdRow,
   SlaWarningKey,
 } from "../../api/types";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/ToastProvider";
 import { HowThisWorks } from "../../components/guide/HowThisWorks";
@@ -433,6 +435,10 @@ export function SlaWarningsAdminPage() {
     }
   }, [selected, draft, choices, applyResult, pushToast, t]);
 
+  // P-15 — the reset's confirm (rendered unconditionally, driven
+  // through the ref — CLAUDE.md §3 / Sprint 128).
+  const resetDialogRef = useRef<ConfirmDialogHandle>(null);
+
   const handleReset = useCallback(async () => {
     if (!selected) return;
     setSaving(true);
@@ -466,16 +472,25 @@ export function SlaWarningsAdminPage() {
         actions={
           selected ? (
             <>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={handleReset}
-                disabled={saving || !selected.is_customized}
-                data-testid="sla-warnings-reset"
-              >
-                <RotateCcw size={15} strokeWidth={2} />
-                {t("sla_warnings.reset")}
-              </button>
+              <span style={{ textAlign: "right" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => resetDialogRef.current?.open()}
+                  disabled={saving || !selected.is_customized}
+                  data-testid="sla-warnings-reset"
+                >
+                  <RotateCcw size={15} strokeWidth={2} />
+                  {t("sla_warnings.reset")}
+                </button>
+                {/* P-15 (P-14's S2 finding) — "Use the standard
+                    values" read like a form reset; it is a server-side
+                    DELETE, live from the next check. The pre-read says
+                    so and a confirm now stands before it. */}
+                <WhatHappens testId="sla-warnings-reset-what">
+                  {t("sla_warnings.what_reset")}
+                </WhatHappens>
+              </span>
               <span style={{ textAlign: "right" }}>
                 <button
                   type="button"
@@ -887,6 +902,21 @@ export function SlaWarningsAdminPage() {
           </div>
         </>
       )}
+
+      <ConfirmDialog
+        ref={resetDialogRef}
+        title={t("sla_warnings.reset_confirm_title")}
+        body={t("sla_warnings.reset_confirm_body", {
+          company: selected?.company_name ?? "",
+        })}
+        confirmLabel={t("sla_warnings.reset")}
+        destructive
+        busy={saving}
+        onConfirm={() => {
+          resetDialogRef.current?.close();
+          void handleReset();
+        }}
+      />
     </div>
   );
 }

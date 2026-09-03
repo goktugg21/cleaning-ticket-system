@@ -8,6 +8,7 @@
   "tickets_page.title": "Tickets",
   "tickets_page.breadcrumb_current": "Tickets",
   "subtitle_counts": "{{count}} total tickets · {{visible}} visible · page {{page}} of {{pages}}",
+  "subtitle_period": "counts {{period}}",
   "new_ticket": "New ticket",
   "new_extra_work": "New extra work",
   "admin_required_banner": "This area is for admins only.",

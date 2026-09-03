@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../api/client";
-import { listAllBuildings } from "../api/admin";
+import { listAllBuildings, listAllCompanies } from "../api/admin";
 import { listHourSources } from "../api/reports";
 import type { HourSourceOption } from "../api/reports";
 import {
@@ -67,6 +67,10 @@ interface EntryFormState {
   source: string;
 }
 
+/** P-15 — the remembered company pick for a multi-company worker, in
+ *  the `osius.<module>.company` shape the other modules use. */
+const MY_HOURS_COMPANY_KEY = "osius.myhours.company";
+
 function emptyForm(date: string): EntryFormState {
   return { date, hour_type: "", hours: "", building: "", note: "", source: "" };
 }
@@ -113,6 +117,52 @@ export function MyHoursPage() {
   // mechanic to understand before a single hour could be typed. It is
   // the page now, and the table below it is the record.
   const { me } = useAuth();
+  /** P-15 (P-14's S2 finding) — a worker whose timesheet scope spans
+   *  MORE THAN ONE provider company (building assignments in two
+   *  tenants) hit "company is required…" on every load: the
+   *  contract-hours prefill and the closed-week status silently failed
+   *  and the red banner blamed the worker for input they never gave.
+   *  The page now RESOLVES a company — the only one when there is one,
+   *  the remembered/first otherwise, with a picker when the scope has
+   *  more than one (the admin Hours page's shape) — and sends it on
+   *  the two calls that need it. */
+  const companyIds = useMemo(() => me?.company_ids ?? [], [me?.company_ids]);
+  const [companyPick, setCompanyPick] = useState<number | "">(() => {
+    try {
+      const stored = Number(
+        window.localStorage.getItem(MY_HOURS_COMPANY_KEY),
+      );
+      return Number.isFinite(stored) && stored > 0 ? stored : "";
+    } catch {
+      return "";
+    }
+  });
+  const company =
+    companyIds.length === 0
+      ? undefined
+      : companyIds.length === 1
+        ? companyIds[0]
+        : companyIds.includes(companyPick as number)
+          ? (companyPick as number)
+          : companyIds[0];
+  /** Names for the picker — read only when there is a choice to make;
+   *  `/companies/` is scoped, so a worker reads exactly their own. */
+  const [companyNames, setCompanyNames] = useState<Record<number, string>>({});
+  useEffect(() => {
+    if (companyIds.length <= 1) return;
+    let cancelled = false;
+    listAllCompanies()
+      .then((rows) => {
+        if (cancelled) return;
+        const names: Record<number, string> = {};
+        for (const row of rows) names[row.id] = row.name;
+        setCompanyNames(names);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [companyIds]);
   // On THIS page the employee is always the signed-in user. The server
   // enforces that independently (a non-manager naming someone else is a
   // 403), so this only decides what the grid writes, never what it may.
@@ -226,7 +276,13 @@ export function MyHoursPage() {
           iso_week: week.isoWeek,
           page_size: 200,
         }),
-        fetchWeekStatus({ iso_year: week.isoYear, iso_week: week.isoWeek }),
+        // P-15 — the resolved company rides along; without it a
+        // two-company worker's status read 400s on every load.
+        fetchWeekStatus({
+          iso_year: week.isoYear,
+          iso_week: week.isoWeek,
+          ...(company !== undefined ? { company } : {}),
+        }),
         // P-9 D3 — non-fatal: the strip then shows no marks.
         listWeeksWithHours({ iso_year: week.isoYear }).catch(() => null),
       ]);
@@ -237,7 +293,7 @@ export function MyHoursPage() {
     } catch (err) {
       setLoadError(getApiError(err));
     }
-  }, [week]);
+  }, [week, company]);
 
   // Week navigation reloads the week. The lock status is fetched
   // ALONGSIDE the entries rather than derived from them: an empty week
@@ -275,6 +331,8 @@ export function MyHoursPage() {
           iso_year: week.isoYear,
           iso_week: week.isoWeek,
           employee: myEmployeeId,
+          // P-15 — a two-company worker's fill 400'd without it.
+          ...(company !== undefined ? { company } : {}),
         })
     )
       .catch(() => undefined)
@@ -285,7 +343,11 @@ export function MyHoursPage() {
         iso_week: week.isoWeek,
         page_size: 200,
       }),
-      fetchWeekStatus({ iso_year: week.isoYear, iso_week: week.isoWeek }),
+      fetchWeekStatus({
+        iso_year: week.isoYear,
+        iso_week: week.isoWeek,
+        ...(company !== undefined ? { company } : {}),
+      }),
       // P-9 D3 — the year's weeks with hours, read with the week so a
       // saved week is marked as soon as the sheet re-reads. Non-fatal.
       listWeeksWithHours({ iso_year: week.isoYear }).catch(() => null),
@@ -306,7 +368,7 @@ export function MyHoursPage() {
     return () => {
       cancelled = true;
     };
-  }, [week, weekKey, myEmployeeId]);
+  }, [week, weekKey, myEmployeeId, company]);
 
   /**
    * W12 §5 — the weekly PATTERN behind the day columns.
@@ -690,6 +752,40 @@ export function MyHoursPage() {
             flexWrap: "wrap",
           }}
         >
+          {/* P-15 — the two-company worker picks WHICH company's week
+              administration this page asks about (fill, closed-state).
+              One company: no control, resolved silently. */}
+          {companyIds.length > 1 && (
+            <label
+              className="muted small"
+              data-testid="my-hours-company-picker"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              {t("my_hours.company_label")}
+              <select
+                className="field-select"
+                value={company}
+                onChange={(event) => {
+                  const picked = Number(event.target.value);
+                  setCompanyPick(picked);
+                  try {
+                    window.localStorage.setItem(
+                      MY_HOURS_COMPANY_KEY,
+                      String(picked),
+                    );
+                  } catch {
+                    /* storage unavailable — the pick still applies */
+                  }
+                }}
+              >
+                {companyIds.map((id) => (
+                  <option key={id} value={id}>
+                    {companyNames[id] ?? `#${id}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <button
             type="button"
             className="btn btn-ghost btn-sm"

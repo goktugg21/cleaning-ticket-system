@@ -83,12 +83,31 @@ def eligible_users_for_building(building, role: str, actor=None):
     ).filter(eligible)
 
     if actor is not None:
-        allowed = manageable_user_ids_for(actor)
-        # `None` means unrestricted (SUPER_ADMIN). Treating it as an
-        # empty set would lock out exactly the role that can do
-        # everything — the trap this helper's siblings documented.
-        if allowed is not None:
-            qs = qs.filter(id__in=allowed)
+        if getattr(actor, "role", None) == UserRole.BUILDING_MANAGER:
+            # P-15 (P-14's S2 finding, repro ticket 311 / users 6-5-12)
+            # — a building manager ADMINISTERS nobody
+            # (`manageable_user_ids_for` answers an empty set for the
+            # role), but assignment eligibility is a BUILDING fact and
+            # the write validators judge the TARGET against the
+            # building alone. Narrowing this read by user-
+            # administration emptied the BM's picker on tickets they
+            # can staff — picker ⊂ validator, the Sprint 152.1 §1a
+            # class. A BM assigned to THIS building reads the raw
+            # building set (exactly what the validator accepts); one
+            # who is not assigned gets nothing.
+            from .models import BuildingManagerAssignment
+
+            if not BuildingManagerAssignment.objects.filter(
+                user=actor, building=building
+            ).exists():
+                return User.objects.none()
+        else:
+            allowed = manageable_user_ids_for(actor)
+            # `None` means unrestricted (SUPER_ADMIN). Treating it as an
+            # empty set would lock out exactly the role that can do
+            # everything — the trap this helper's siblings documented.
+            if allowed is not None:
+                qs = qs.filter(id__in=allowed)
 
     # `distinct()` is load-bearing: a manager of one building matched
     # through two link rows, or an admin matching both legs of the OR,
