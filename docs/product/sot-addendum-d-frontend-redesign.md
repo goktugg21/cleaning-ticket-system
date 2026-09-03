@@ -2384,3 +2384,58 @@ board"). Struck here so no later sprint re-litigates them.
    captioned-phantom pins are rewritten to assert the strip
    (`test_fe4_honest_dates`, `test_p1_honest_dates`,
    `test_p14_wish_not_plan.SpawnedTicketWishTests`).
+
+---
+
+## D.25 The open decisions, closed in writing (P-16, 2026-09-03)
+
+P-16's brief was an empty queue: every question that had floated
+unanswered since FE-7 is answered here, each with who ruled it and
+what changed. Nothing in this section proposes; it records.
+
+1. **"Settled" / "Afgehandeld" stays as the closed-work tab name.**
+   Live since FE-7, never confirmed. Web-Claude's ruling (P-16): keep —
+   it is the ticket's own status word, and the tab that holds settled
+   work should wear the word the rows inside it wear. No change.
+
+2. **The extra-work register placement is closed.** The P-9 tab split
+   (Finished → To invoice / Invoiced) IS the register: the money's
+   whereabouts is a tab you stand on, not a page you hunt for. Closed
+   by the P-9 rulings (§D.21); recorded here so the question stops
+   reappearing.
+
+3. **No deadline hard-block toggle is built — closed as NO.** The
+   proposal was a company policy switch that would refuse work past a
+   deadline. The P-13 over-quote ruling set the principle: the system
+   warns in amber and lets the person decide; a block teaches people
+   to falsify dates, a warning teaches the system to be believed. The
+   lateness ladder (L1 strip → L2 mail → L3 quarantine) is the
+   escalation path and it is already built. Anyone re-raising this
+   starts from that principle, not from zero.
+
+4. **Go-live data import: plan written, no code until the data
+   exists.** The plan is
+   [docs/planning/go-live-import.md](../planning/go-live-import.md) —
+   what Ramazan's real records are, the dependency order, what the
+   seed already proves, and the questions only the owner can answer.
+   Post-merge work by the owner's earlier decision.
+
+5. **Turkish is the next translation sprint, post-merge.** The i18n
+   layer is ready for it: 13 namespaces per language, nl/en in strict
+   lockstep, and (since P-16 Part D) every notification's words in one
+   server-side catalogue — adding `tr` is a copy task (13 frontend
+   namespace files + the catalogue's third column + the status-label
+   mirror), not a code task. The lockstep rule extends to three
+   languages the day the first `tr` bundle lands: identical key sets
+   across all three, no partial namespace ships.
+
+6. **The stray untracked files on the dev server are dispositioned**
+   (P-16 Part E6): `PRODUCTION_READINESS_AUDIT.md`,
+   `cleaning-ticket-system.code-workspace`, the repo-root `logo.png`
+   and `frontend/preview.config.mjs` are all in CLAUDE.md §3's
+   never-stage list; none belongs in the repo. The preview config is a
+   walk-harness artifact recreated by the e2e recipe
+   ([docs/testing/e2e-harness.md](../testing/e2e-harness.md)); the
+   audit file is web-Claude's working document; the workspace file and
+   logo are the owner's local conveniences. Deleted from the working
+   tree in P-16; the never-stage rule stands for any reappearance.

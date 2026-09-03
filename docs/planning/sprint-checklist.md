@@ -13,14 +13,53 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p15-close-the-list` — stacked on
-`feat/p14-everything-end-to-end` (origin tip `de91f31`, verified by
+**Branch:** `feat/p16-nothing-left` — stacked on
+`feat/p15-close-the-list` (origin tip `ff1f227`, verified by
 web-Claude), the head of the Addendum D redesign train
 (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11 → P-12 → P-13 → P-14 → P-15), each sprint stacked on the previous one and deployed to crmtest;
+→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11 → P-12 → P-13 → P-14 → P-15 → P-16), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
-first time CI runs on any of it. The owner opens and merges both.
+first time CI runs on any of it. The owner opens and merges both (or
+merges the train tip alone — it contains the ew-gap-closing history;
+see [merge-recipe.md](merge-recipe.md)).
+
+### P-16 — "Nothing left, then merge" (2026-09-03, in flight)
+
+The owner's instruction: finish everything undone and left; if nothing
+is queued after this, we merge. The deliverable is an EMPTY queue —
+every item FIXED or CLOSED with the ruling written down
+(Addendum D §D.25) — and a merge that is one command away
+([merge-recipe.md](merge-recipe.md), prepared, NOT run; the owner has
+not said "merge"). One migration allowed and used: `notifications/0022`
+(Part D, additive, nullable). Explicitly post-merge (the owner's own
+earlier decisions, not blockers): the Turkish locale, the go-live data
+import ([go-live-import.md](go-live-import.md), plan only), the
+contracts model (his father's meeting decides; the P-15 guard stands).
+
+- **Part A** — the 51 pre-existing backend reds: each repaired,
+  repinned or deleted (`docs/testing/p16-suite-repair.md`); full suite
+  on Postgres ends `OK`. **Standing rule (from this sprint on): the
+  full backend suite runs at the close of every sprint; a red is a
+  sprint item, not a note.**
+- **Part B** — the e2e suite green in the FE-7 harness
+  (`docs/testing/e2e-harness.md`); same three outcomes per red.
+- **Part C** — the eleven deferred S4s fixed/closed (statuses inline
+  in `p14-findings.md`; pins: `test_p16_part_c`,
+  `test_p16_future_flag`, `test_p16_generate_through`).
+- **Part D** — notification language (§D.13.3 hybrid): the keyed
+  catalogue (`notifications/copy.py`), ~28 kinds × nl/en, per-recipient
+  email render, per-viewer bell render, key-based digest dedupe, the
+  SPA title map gone (`test_p16_copy_catalogue`).
+- **Part E** — the open decisions closed in §D.25; the stray dev-server
+  files dispositioned.
+- **Part F** — `docs/walkthrough/` (one page per role, nl+en).
+- **Part G** — merge prepared: dry run zero conflicts, recipe written,
+  CLAUDE.md notes post-merge branching. RUNS ONLY on the owner's word.
+
+**P-16 queue after this sprint: EMPTY.** Remaining work is post-merge
+by the owner's own decisions (Turkish, go-live import, contracts
+model) — nothing else is deferred.
 
 ### P-15 — "Close the list" (2026-09-03, in flight)
 

@@ -27,6 +27,9 @@ The **owner does not write code.** The workflow is:
   verifies the pushed commits from `origin`** — never from CC's self-report —
   and issues a merge verdict. **A CC self-report is never the basis for a merge
   verdict.**
+- **After the redesign-train merge (v2026.09-redesign), sprints branch
+  from `main`** — the stacked-branch train ended with P-16; see
+  [docs/planning/merge-recipe.md](docs/planning/merge-recipe.md).
 - The owner performs all GitHub UI actions. CC pushes branches — **pushed
   before the report is written. A report about commits that are not on
   `origin` is a report about nothing — web-Claude verifies from `origin`
