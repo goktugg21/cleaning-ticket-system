@@ -153,18 +153,18 @@ test("People tab groups Users + Contacts; no Employees tab; Permissions survives
     page.locator("[data-testid='customer-subtab-employees']"),
   ).toHaveCount(0);
 
-  // The deleted routes never render a page of their own: the SPA's
-  // catch-all bounces them off the customer path entirely.
+  // The deleted routes never render a people surface of their own.
+  // P-16 repin: since the P-4 never-void work the catch-all renders a
+  // not-found page AT the URL instead of bouncing the path — the fact
+  // to pin is "no customer surface here", not the redirect mechanics.
   await page.goto(`/admin/customers/${customerId}/people`);
   await page.waitForLoadState("networkidle");
-  expect(new URL(page.url()).pathname).not.toBe(
-    `/admin/customers/${customerId}/people`,
-  );
+  await expect(page.locator("[data-testid='not-found-page']")).toBeVisible();
+  await expect(page.locator("[data-testid='customer-tabs']")).toHaveCount(0);
   await page.goto(`/admin/customers/${customerId}/employees`);
   await page.waitForLoadState("networkidle");
-  expect(new URL(page.url()).pathname).not.toBe(
-    `/admin/customers/${customerId}/employees`,
-  );
+  await expect(page.locator("[data-testid='not-found-page']")).toBeVisible();
+  await expect(page.locator("[data-testid='customer-tabs']")).toHaveCount(0);
 });
 
 test("Users filters narrow the list (server-side access-role + building)", async ({

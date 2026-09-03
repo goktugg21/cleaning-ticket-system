@@ -86,6 +86,21 @@ async function resolveOsiusCompanyId(api: APIRequestContext): Promise<number> {
   return match!.id;
 }
 
+/** P-16 repin — Sprint 149/150 made the SA catalog ONE company at a
+ *  time, opening on the remembered / lowest-id company. These specs
+ *  seed under "Osius Demo", so they pick it the way an operator does
+ *  (the selector only renders when more than one company exists). */
+async function pickCatalogCompany(
+  page: import("@playwright/test").Page,
+  companyId: number,
+): Promise<void> {
+  const selector = page.locator('[data-testid="catalog-company-selector"]');
+  if (await selector.isVisible().catch(() => false)) {
+    await selector.selectOption(String(companyId));
+    await page.waitForLoadState("networkidle");
+  }
+}
+
 interface CategoryRow {
   id: number;
   name: string;
@@ -235,6 +250,7 @@ test("Sprint 28 B5 — Add service modal: save shows row on Services tab", async
     await loginAs(page, DEMO_USERS.super);
     await page.goto("/admin/services");
     await page.waitForLoadState("networkidle");
+    await pickCatalogCompany(page, companyId);
 
     await page.locator("[data-testid='services-add-service-button']").click();
 
@@ -313,6 +329,7 @@ test("Sprint 28 B5 — Edit service: change name, list reflects new name", async
     await loginAs(page, DEMO_USERS.super);
     await page.goto("/admin/services");
     await page.waitForLoadState("networkidle");
+    await pickCatalogCompany(page, companyId);
 
     const row = page
       .locator("[data-testid='services-service-row']", {
@@ -391,6 +408,7 @@ test("Sprint 28 B5 — Deleting a category with services attached fails graceful
     await loginAs(page, DEMO_USERS.super);
     await page.goto("/admin/services");
     await page.waitForLoadState("networkidle");
+    await pickCatalogCompany(page, companyId);
 
     await page.locator("[data-testid='services-tab-categories']").click();
 
@@ -405,21 +423,25 @@ test("Sprint 28 B5 — Deleting a category with services attached fails graceful
     const detail = page.locator("[data-testid='services-category-detail']");
     await expect(detail).toBeVisible({ timeout: 5_000 });
 
-    await detail
-      .locator("[data-testid='services-category-delete-button']")
-      .click();
+    // P-16 REPIN — Sprint 138 §2c: `Service.category` is PROTECT, so
+    // the Delete button only renders on an EMPTY category. "Fails
+    // gracefully" became STRUCTURAL: the UI never offers the press
+    // that would 400 (the control-that-lies class, removed).
+    await expect(
+      detail.locator("[data-testid='services-category-delete-button']"),
+    ).toHaveCount(0);
 
-    // The ConfirmDialog is a native <dialog>. Confirm via the button
-    // whose text matches the "Delete" label.
-    const confirmDialog = page.locator("dialog");
-    await expect(confirmDialog).toBeVisible({ timeout: 5_000 });
-    await confirmDialog.locator(".btn-primary").click();
+    // The server floor still refuses a direct delete — the half of
+    // the old pin that survives belongs to the API.
+    const apiDelete = await sa.delete(
+      `/api/services/categories/${createdCat.id}/`,
+    );
+    expect([400, 409]).toContain(apiDelete.status());
 
-    // After the failed delete, the category should still be present.
-    // The dialog closes regardless (the page surfaces the error via
-    // an alert banner). Reload to take the cleanest read.
+    // And the category is still present.
     await page.reload();
     await page.waitForLoadState("networkidle");
+    await pickCatalogCompany(page, companyId);
     await page.locator("[data-testid='services-tab-categories']").click();
     await expect(
       page

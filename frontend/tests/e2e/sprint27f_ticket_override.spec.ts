@@ -242,13 +242,14 @@ test("COMPANY_ADMIN — typed reason confirms override and tags the timeline", a
   // Modal closes after success and the page reloads the ticket.
   await expect(modal).toBeHidden({ timeout: 10_000 });
 
-  // The workflow card reflects APPROVED.
-  // FE-3 — the header status chip is gone (the phase banner states
-  // the phase in words); the workflow card body carries the raw
-  // status as `data-status`. Same assertion, new home.
+  // The workflow card reflects the settled state. P-16 repin: since
+  // the customer-approval AUTO-CLOSE (tickets/auto_close.py) an
+  // approval — on-behalf included — rides straight through APPROVED to
+  // CLOSED, so CLOSED is what the card truthfully shows. The override
+  // history row below is unchanged and still carries the badge.
   await expect(
     page.locator("[data-testid='side-card-workflow'] [data-status]").first(),
-  ).toHaveAttribute("data-status", "APPROVED", { timeout: 10_000 });
+  ).toHaveAttribute("data-status", "CLOSED", { timeout: 10_000 });
 
   // The new timeline row carries the override badge + the reason. The
   // activity timeline is folded by default — open it.

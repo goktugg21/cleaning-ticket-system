@@ -67,6 +67,25 @@ P-16's option-load re-pin. The eleven, dispositioned:
   agreement card + the ticket's Money-tab extra-work card; the
   landing pin is now the redirect + `ticket-extra-work-money`
   visible (the ticket IS the spawned job's home).
+
+The verification re-runs surfaced three more layers under the
+services family and one fresh flake:
+
+- **repinned** `sprint28_services` ×3, second layer — Sprint 149/150
+  made the SA catalog ONE company at a time (opens on the
+  remembered/lowest-id company); the specs seed under "Osius Demo"
+  and now pick it in the `catalog-company-selector` the way an
+  operator does. (The exhaustive-paging repair above was real too —
+  both stood between the specs and green.)
+- **repinned** `sprint28_services` › delete-category, third layer —
+  Sprint 138 §2c renders the category Delete button ONLY on an empty
+  category (`Service.category` is PROTECT): "fails gracefully" became
+  structural. The spec asserts the button's absence AND that a direct
+  API delete still refuses (the server floor half of the old pin).
+- **repinned** `cross_company_isolation` › facility cells — rows
+  render client-side after networkidle under load; the helper waits
+  for the first `.td-facility` before counting (a one-shot count read
+  a phantom empty list on a saturated box).
 - **deleted** — nothing: every red pinned something that still exists
   in some form.
 

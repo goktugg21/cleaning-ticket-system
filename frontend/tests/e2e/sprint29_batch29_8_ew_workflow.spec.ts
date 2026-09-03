@@ -65,16 +65,19 @@ async function expectLandingOnSpawnedJob(
   await expect(page.locator('[data-testid="ticket-facts"]')).toBeVisible({
     timeout: 10_000,
   });
-  const origin = page.locator('[data-testid="ticket-extra-work-origin"]');
-  await expect(origin).toBeVisible({ timeout: 10_000 });
-  // P-11 F1 — REPINNED: the origin block has carried the route word
-  // (`RouteBadge`), never a raw /extra-work/<id> anchor — the block is
-  // byte-identical back to PR #61, so the old assertion described a
-  // door that does not exist (and for STAFF must not: a direct
-  // /extra-work link is a 404 for them). The landing pin is the
-  // redirect + the origin block; the road back is the page's own back
-  // link (P-11 A6) and the Money tab.
-  await expect(origin).toHaveAttribute("data-origin", /.+/);
+  // P-16 REPIN (the P-13 break): the standalone origin block
+  // (`ticket-extra-work-origin`) was replaced by the W21 agreement
+  // card + the P-13 money card — "everything the request page was
+  // opened for lives here". The landing pin is now the redirect + the
+  // ticket carrying its extra-work MONEY surface: the proof this
+  // ticket IS the spawned job's home.
+  await page
+    .locator('[data-testid="ticket-tab-money"]')
+    .click()
+    .catch(() => {});
+  await expect(
+    page.locator('[data-testid="ticket-extra-work-money"]'),
+  ).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('[data-testid="extra-work-detail-page"]')).toHaveCount(0);
   return landedId;
 }

@@ -216,7 +216,11 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     const allowRadio = firstRow.locator(
       '[data-testid="customer-overrides-radio"][value="allow"]',
     );
-    await allowRadio.check();
+    // P-16 repin (harness mechanics, not the app): the radio is
+    // `.visually-hidden` behind its optical bubble, so `.check()` on
+    // the input is intercepted by the bubble span. A person clicks the
+    // LABEL — so does the spec.
+    await allowRadio.locator("xpath=ancestor::label[1]").click();
     await expect(allowRadio).toBeChecked();
 
     await expect(

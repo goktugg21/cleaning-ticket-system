@@ -47,6 +47,15 @@ async function listFacilityCells(
 ): Promise<string[]> {
   await page.waitForLoadState("networkidle");
   const rows = page.locator(".data-table tbody tr");
+  // P-16 repin — rows render client-side AFTER networkidle under
+  // load; a one-shot count read zero and failed as a phantom empty
+  // list. Every caller expects at least one row, so wait for the
+  // first `.td-facility` before counting.
+  await rows
+    .locator(".td-facility")
+    .first()
+    .waitFor({ state: "visible", timeout: 15_000 })
+    .catch(() => {});
   const rowCount = await rows.count();
   const cells: string[] = [];
   for (let i = 0; i < rowCount; i++) {
@@ -161,10 +170,19 @@ test("Company B customer's /tickets/new building dropdown lists only R1/R2", asy
   await page.goto("/tickets/new");
   const select = page.locator('[data-testid="melding-building"]');
   await expect(select).toBeVisible({ timeout: 10_000 });
+  // P-16 (P-15's re-pin) — the select renders BEFORE its options land
+  // (the option-load race): poll until every expected building is
+  // present, THEN assert the absences. The P-15 failure snapshot
+  // showed exactly R1+R2 and nothing foreign — a flake, not a leak.
+  await expect
+    .poll(async () => {
+      const labels = await select.locator("option").allTextContents();
+      return COMPANY_B_BUILDINGS.every((b) =>
+        labels.some((t) => t.includes(b)),
+      );
+    }, { timeout: 10_000 })
+    .toBe(true);
   const optionLabels = await select.locator("option").allTextContents();
-  for (const b of COMPANY_B_BUILDINGS) {
-    expect(optionLabels.some((t) => t.includes(b))).toBe(true);
-  }
   for (const b of COMPANY_A_BUILDINGS) {
     expect(optionLabels.some((t) => t.includes(b))).toBe(false);
   }
