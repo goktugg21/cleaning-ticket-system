@@ -53,6 +53,9 @@
     "status": "Status",
     "sortBy": "Sorteren op {{column}}",
     "selectRow": "{{name}} selecteren",
+    "rowHasInvoices": "Dit contract heeft facturen en kan niet worden verwijderd — annuleer het in plaats daarvan.",
+    "deleteFailedSome": "Niet verwijderd: {{list}}. {{reason}}",
+    "whatBulkDelete": "Verwijdert de geselecteerde contracten definitief — al gemaakte facturen blijven. Een contract met facturen kunt u hier niet aanvinken; annuleer het op zijn eigen pagina.",
     "andMore": "+{{count}}",
     "countLabel": "{{count}} contract",
     "countLabel_other": "{{count}} contracten",
@@ -299,6 +302,13 @@
   "actions.activatedTitle": "Contract geactiveerd",
   "actions.activatedBody": "{{contract}} is actief en wordt vanaf nu gefactureerd.",
   "actions.activateFailed": "Activeren mislukt",
+  "actions.cancelContract": "Contract annuleren",
+  "actions.cancelFailed": "Annuleren mislukt",
+  "detail.advanced": "Geavanceerd",
+  "detail.cancelTitle": "Contract {{no}} annuleren?",
+  "detail.cancelBody": "Nieuwe facturen stoppen; al gemaakte facturen blijven. Geannuleerd is definitief — een nieuwe afspraak is een nieuw contract.",
+  "road.cancelled_title": "Contract {{no}} is geannuleerd.",
+  "road.cancelled_body": "Nieuwe facturen stoppen; al gemaakte facturen blijven. Geannuleerd is definitief.",
   "planning.title": "Planning",
   "planning.prev_year": "Vorig jaar",
   "planning.next_year": "Volgend jaar",
@@ -502,5 +512,6 @@
   "how.3": "Activeren start de facturen op de factuurdag — een concept factureert niets.",
   "how.4": "Revisies wijzigen bedragen vanaf een datum zonder het verleden te raken.",
   "how.5": "Regels kunnen als terugkerend werk lopen — de bezoeken worden tickets.",
-  "road.what_activate": "Start de facturen op de factuurdag; het verleden blijft onaangeroerd."
+  "road.what_activate": "Start de facturen op de factuurdag; het verleden blijft onaangeroerd.",
+  "road.what_cancel": "Stopt nieuwe facturen; de al gemaakte facturen blijven. Geannuleerd is definitief."
 }

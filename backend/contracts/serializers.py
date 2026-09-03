@@ -417,6 +417,13 @@ class ContractSerializer(serializers.ModelSerializer):
     )
     buildings = serializers.SerializerMethodField()
 
+    # P-15 §1.2 — money-bearing: this contract has generated invoices,
+    # so the list's Delete cannot take it (the row says why) and the
+    # server refuses (`contract_has_invoices`). Reads the list's
+    # `Exists` annotation; a single-instance read falls back to one
+    # query.
+    has_invoices = serializers.SerializerMethodField()
+
     active_revision = serializers.SerializerMethodField()
     monthly_amount = serializers.SerializerMethodField()
     yearly_amount = serializers.SerializerMethodField()
@@ -458,6 +465,8 @@ class ContractSerializer(serializers.ModelSerializer):
             "end_date",
             "lifecycle",
             "status",
+            # P-15 §1.2 — the list's delete gate reads this.
+            "has_invoices",
             "description",
             "notes",
             "billing_period",
@@ -480,7 +489,19 @@ class ContractSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "contract_no", "created_at", "updated_at"]
+        # P-15 §1.1 — `lifecycle` is READ-ONLY here: every move goes
+        # through POST /contracts/<id>/transition/ and its
+        # ALLOWED_TRANSITIONS guard (`contracts/state_machine.py`).
+        # A writable ChoiceField let any PATCH jump anywhere with a 200
+        # (a CANCELLED contract back to ACTIVE) — P-14's S1 finding.
+        # A new contract is born DRAFT, which is what the UI always did.
+        read_only_fields = [
+            "id",
+            "contract_no",
+            "lifecycle",
+            "created_at",
+            "updated_at",
+        ]
         extra_kwargs = {"company": {"required": False}}
 
     def __init__(self, *args, **kwargs):
@@ -531,6 +552,12 @@ class ContractSerializer(serializers.ModelSerializer):
 
     def get_kind(self, obj) -> str:
         return obj.kind
+
+    def get_has_invoices(self, obj) -> bool:
+        annotated = getattr(obj, "annotated_has_invoices", None)
+        if annotated is not None:
+            return bool(annotated)
+        return obj.generated_invoices.exists()
 
     def get_buildings(self, obj):
         # P-5 S7 — THE CONNECTED FACTS. A building on a contract is a

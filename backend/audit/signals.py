@@ -1735,8 +1735,11 @@ def _connect():
         # The generic introspection covers every field on all four —
         # they carry no FileField (the reason `Document` needs
         # hand-written handlers) and no `*StatusHistory` to double-write
-        # against (H-11): this module has no state machine, and a
-        # revision is a business version rather than a status history.
+        # against (H-11): the P-15 lifecycle guard
+        # (`contracts/state_machine.py`) deliberately has NO history
+        # model — THIS diff row, stamped with the `contract_transition`
+        # reason, IS its history surface — and a revision is a business
+        # version rather than a status history.
         ContractType,
         Contract,
         ContractRevision,

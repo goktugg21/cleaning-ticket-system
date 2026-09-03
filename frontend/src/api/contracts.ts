@@ -86,6 +86,22 @@ export async function deleteContract(id: number): Promise<void> {
 }
 
 /**
+ * P-15 §1.1 — the ONE door for lifecycle moves. The serializer's
+ * `lifecycle` is read-only; the server's ALLOWED_TRANSITIONS guard
+ * refuses illegal jumps with `{detail, code}` (`invalid_transition`,
+ * `no_op_transition`, …).
+ */
+export async function transitionContract(
+  id: number,
+  lifecycle: "ACTIVE" | "CANCELLED",
+): Promise<Contract> {
+  const { data } = await api.post<Contract>(`/contracts/${id}/transition/`, {
+    lifecycle,
+  });
+  return data;
+}
+
+/**
  * The stat tiles, computed over the SAME filters the list uses — pass
  * the filters through so the tiles describe what the table is showing
  * rather than the whole tenant.

@@ -53,6 +53,9 @@
     "status": "Status",
     "sortBy": "Sort by {{column}}",
     "selectRow": "Select {{name}}",
+    "rowHasInvoices": "This contract has invoices and cannot be deleted — cancel it instead.",
+    "deleteFailedSome": "Not deleted: {{list}}. {{reason}}",
+    "whatBulkDelete": "Deletes the selected contracts permanently — invoices already made stay. A contract with invoices cannot be picked here; cancel it on its own page instead.",
     "andMore": "+{{count}}",
     "countLabel": "{{count}} contract",
     "countLabel_other": "{{count}} contracts",
@@ -299,6 +302,13 @@
   "actions.activatedTitle": "Contract activated",
   "actions.activatedBody": "{{contract}} is active and will be invoiced from now on.",
   "actions.activateFailed": "Could not activate",
+  "actions.cancelContract": "Cancel contract",
+  "actions.cancelFailed": "Could not cancel",
+  "detail.advanced": "Advanced",
+  "detail.cancelTitle": "Cancel contract {{no}}?",
+  "detail.cancelBody": "New invoices stop; invoices already made stay. Cancelled is final — a new agreement is a new contract.",
+  "road.cancelled_title": "Contract {{no}} is cancelled.",
+  "road.cancelled_body": "New invoices stop; invoices already made stay. Cancelled is final.",
   "planning.title": "Planning",
   "planning.prev_year": "Previous year",
   "planning.next_year": "Next year",
@@ -502,5 +512,6 @@
   "how.3": "Activate starts the invoices on the billing day — a draft invoices nothing.",
   "how.4": "Revisions change amounts from a date without touching the past.",
   "how.5": "Lines can run as recurring work — the visits become tickets.",
-  "road.what_activate": "Starts the invoices on the billing day; the past is untouched."
+  "road.what_activate": "Starts the invoices on the billing day; the past is untouched.",
+  "road.what_cancel": "Stops new invoices; the invoices already made stay. Cancelled is final."
 }

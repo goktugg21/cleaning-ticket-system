@@ -11,7 +11,7 @@ import {
   getContract,
   getContractForecast,
   listContractRevisions,
-  updateContract,
+  transitionContract,
 } from "../../../api/contracts";
 import type {
   Contract,
@@ -126,6 +126,9 @@ export function ContractDetailPage() {
   const [forecast, setForecast] = useState<ContractForecast | null>(null);
   const toast = useToast();
   const deleteLineRef = useRef<ConfirmDialogHandle>(null);
+  // P-15 §1.1 — the Cancel door's confirm (rendered unconditionally,
+  // driven through the ref — CLAUDE.md §3 / Sprint 128).
+  const cancelDialogRef = useRef<ConfirmDialogHandle>(null);
   const [lineToDelete, setLineToDelete] = useState<ContractLine | null>(null);
 
   // Derived rather than set in the effect body — see the note in
@@ -224,7 +227,10 @@ export function ContractDetailPage() {
     if (!contract) return;
     setActivating(true);
     try {
-      await updateContract(contract.id, { lifecycle: "ACTIVE" });
+      // P-15 §1.1 — through the transition door; the serializer's
+      // `lifecycle` is read-only now and the server's
+      // ALLOWED_TRANSITIONS guard judges the move.
+      await transitionContract(contract.id, "ACTIVE");
       reload();
       // P-12 C4 — a banner, not a toast: what happened, what it means
       // for the money, and where the result will appear (§D.24 rule 4).
@@ -236,6 +242,30 @@ export function ContractDetailPage() {
       toast.push({
         variant: "error",
         title: t("actions.activateFailed"),
+        description: getApiError(err),
+      });
+    } finally {
+      setActivating(false);
+    }
+  }
+
+  /** P-15 §1.1 — Cancel, the other door: DRAFT/ACTIVE → CANCELLED,
+   *  terminal (nothing leaves cancelled). Behind Geavanceerd with its
+   *  confirm; the pre-read states the consequence. */
+  async function cancelContract() {
+    if (!contract) return;
+    setActivating(true);
+    try {
+      await transitionContract(contract.id, "CANCELLED");
+      reload();
+      contractDone.announce({
+        title: t("road.cancelled_title", { no: contract.contract_no }),
+        body: t("road.cancelled_body"),
+      });
+    } catch (err) {
+      toast.push({
+        variant: "error",
+        title: t("actions.cancelFailed"),
         description: getApiError(err),
       });
     } finally {
@@ -1247,11 +1277,47 @@ export function ContractDetailPage() {
         </section>
       )}
 
+      {/* P-15 §1.1 — Geavanceerd: the Cancel door. Terminal (nothing
+          leaves cancelled — the server's ALLOWED_TRANSITIONS refuses),
+          so it sits behind the fold with its confirm and pre-read. */}
+      {canManage && contract && contract.lifecycle !== "CANCELLED" && (
+        <details className="action-fold" data-testid="contract-advanced">
+          <summary className="form-fold-summary">{t("detail.advanced")}</summary>
+          <div className="action-fold-list">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ color: "var(--red)" }}
+              onClick={() => cancelDialogRef.current?.open()}
+              disabled={activating}
+              data-testid="contract-cancel"
+            >
+              {t("actions.cancelContract")}
+            </button>
+          </div>
+          <WhatHappens testId="contract-cancel-what">
+            {t("road.what_cancel")}
+          </WhatHappens>
+        </details>
+      )}
+
         </>
       )}
 
       {/* Both dialogs render unconditionally and are driven through the
           ref — CLAUDE.md §3 / Sprint 128. */}
+      <ConfirmDialog
+        ref={cancelDialogRef}
+        title={t("detail.cancelTitle", { no: contract?.contract_no ?? "" })}
+        body={t("detail.cancelBody")}
+        confirmLabel={t("actions.cancelContract")}
+        destructive
+        busy={activating}
+        onConfirm={() => {
+          cancelDialogRef.current?.close();
+          void cancelContract();
+        }}
+      />
       <ConfirmDialog
         ref={deleteLineRef}
         title={t("projects.deleteTitle")}

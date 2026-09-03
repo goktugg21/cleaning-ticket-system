@@ -15,7 +15,6 @@ import type {
   BillingPeriod,
   BillingType,
   Contract,
-  ContractLifecycle,
   ContractOptions,
 } from "../../../api/contracts.types";
 import type { CompanyAdmin } from "../../../api/types";
@@ -34,7 +33,6 @@ interface FormState {
   contract_type: number | "";
   start_date: string;
   end_date: string;
-  lifecycle: ContractLifecycle;
   description: string;
   notes: string;
   billing_period: BillingPeriod;
@@ -51,7 +49,6 @@ function initialState(contract?: Contract | null): FormState {
     contract_type: contract?.contract_type ?? "",
     start_date: contract?.start_date ?? "",
     end_date: contract?.end_date ?? "",
-    lifecycle: contract?.lifecycle ?? "DRAFT",
     description: contract?.description ?? "",
     notes: contract?.notes ?? "",
     billing_period: contract?.billing_period ?? "MONTHLY",
@@ -102,7 +99,6 @@ const FIELD_ORDER = [
   "building_ids",
   "start_date",
   "end_date",
-  "lifecycle",
   "billing_period",
   "billing_day",
   "billing_type",
@@ -327,7 +323,9 @@ export function ContractFormDialog({
         contract_type: form.contract_type === "" ? null : form.contract_type,
         start_date: form.start_date,
         end_date: form.end_date || null,
-        lifecycle: form.lifecycle,
+        // P-15 §1.1 — `lifecycle` is read-only on the serializer and is
+        // NOT sent: every move goes through the transition door on the
+        // detail page (Activate / Cancel), never through an edit save.
         description: form.description,
         notes: form.notes,
         billing_period: form.billing_period,
@@ -622,34 +620,15 @@ export function ContractFormDialog({
             <span className="muted small">{t("form.endDateHint")}</span>
           {fieldError("end_date")}
           </div>
-          <div className="field" {...bind("lifecycle")}>
-            <label className="field-label" htmlFor="contract-lifecycle">
-              {t("form.status")}
-            </label>
-            <select
-              id="contract-lifecycle"
-              className="field-select"
-              value={form.lifecycle}
-              disabled={busy}
-              onChange={(event) =>
-                set("lifecycle", event.target.value as ContractLifecycle)
-              }
-              data-testid="contract-form-lifecycle"
-            >
-              <option value="DRAFT">{t("status.DRAFT")}</option>
-              <option value="ACTIVE">{t("status.ACTIVE")}</option>
-              <option value="CANCELLED">{t("status.CANCELLED")}</option>
-            </select>
-            {/* Sprint 170 §6 — why this list has three entries and the
-                filter has four. Expired is DERIVED from the end date
-                and is deliberately not choosable: a stored EXPIRED
-                could contradict the dates, and then the list, the
-                tiles and the badge would each be able to answer
-                differently about the same contract. */}
-            <p className="muted small" style={{ margin: "6px 0 0" }}>
-              {t("form.statusDerivedHint")}
-            </p>
-            {contract && (
+          {/* P-15 §1.1 — the lifecycle select LEFT this form: a hidden
+              CANCELLED→ACTIVE jump inside an edit save was the S1
+              finding. The lifecycle moves through the detail page's own
+              doors (Activate, and Cancel under Geavanceerd), each with
+              its pre-read and the server's ALLOWED_TRANSITIONS guard.
+              The derived status still shows on an edit, read-only. */}
+          {contract && (
+            <div className="field">
+              <label className="field-label">{t("form.status")}</label>
               <p
                 className="muted small"
                 style={{ margin: "2px 0 0" }}
@@ -657,12 +636,9 @@ export function ContractFormDialog({
               >
                 {t("form.statusNow", { status: t(`status.${contract.status}`) })}
               </p>
-            )}
-            {/* EXPIRED is deliberately absent: it follows from the end
-                date and is not a choice. */}
-            <span className="muted small">{t("form.statusHint")}</span>
-          {fieldError("lifecycle")}
-          </div>
+              <span className="muted small">{t("form.statusDerivedHint")}</span>
+            </div>
+          )}
           </div>
             </>)}
         </div>

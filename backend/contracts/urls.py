@@ -19,6 +19,7 @@ from .views_contracts import (
     ContractOptionsView,
     ContractPlanningView,
     ContractStatsView,
+    ContractTransitionView,
     ContractTypeDetailView,
     ContractTypeListCreateView,
 )
@@ -103,6 +104,13 @@ urlpatterns = [
         "<int:contract_id>/planning/",
         ContractPlanningView.as_view(),
         name="contract-planning",
+    ),
+    # P-15 §1.1 — the ONE door for lifecycle moves; the serializer's
+    # `lifecycle` is read-only. See `contracts/state_machine.py`.
+    path(
+        "<int:contract_id>/transition/",
+        ContractTransitionView.as_view(),
+        name="contract-transition",
     ),
     path(
         "<int:contract_id>/",

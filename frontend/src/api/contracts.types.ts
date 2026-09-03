@@ -186,6 +186,10 @@ export interface Contract {
   end_date: string | null;
   lifecycle: ContractLifecycle;
   status: ContractStatus;
+  /** P-15 §1.2 — money-bearing: has generated invoices, so the list's
+   *  Delete cannot take it (the row says why; the server refuses with
+   *  `contract_has_invoices`). */
+  has_invoices: boolean;
   description: string;
   notes: string;
   billing_period: BillingPeriod;

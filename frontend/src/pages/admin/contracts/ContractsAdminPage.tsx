@@ -39,6 +39,7 @@ import { RoadTabs, TeachHead } from "../../../components/guide/RoadTabs";
 import { StartHere } from "../../../components/guide/StartHere";
 import { ClickableRow } from "../../../components/ClickableRow";
 import { HowThisWorks } from "../../../components/guide/HowThisWorks";
+import { WhatHappens } from "../../../components/guide/WhatHappens";
 import { TeachEmpty } from "../../../components/guide/TeachEmpty";
 import { CompanyScopeSelect } from "../../../components/guide/CompanyScopeSelect";
 import {
@@ -154,7 +155,12 @@ export function ContractsAdminPage() {
   const [reloadToken, setReloadToken] = useState(0);
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
 
-  const editMode = useEditMode<number>(contracts.map((row) => row.id));
+  // P-15 §1.2 — a money-bearing contract (it has invoices) cannot be
+  // deleted from the list at all: its row is not selectable, and the
+  // checkbox says why. The server refuses too (`contract_has_invoices`).
+  const editMode = useEditMode<number>(
+    contracts.filter((row) => !row.has_invoices).map((row) => row.id),
+  );
 
   // The search box debounces into `searchActive`; the fetch depends on
   // the debounced value only, so a keystroke does not fire a request.
@@ -301,16 +307,32 @@ export function ContractsAdminPage() {
 
   const removeSelected = async () => {
     setBusy(true);
+    // P-15 §1.2 — per-row failure collection (the Services pattern): a
+    // refusal partway must not silently strand the rest of the pick,
+    // and the report names WHICH rows stayed and why.
+    const failed: string[] = [];
+    let firstReason = "";
     try {
       for (const id of editMode.selection) {
-        await deleteContract(id);
+        try {
+          await deleteContract(id);
+        } catch (err) {
+          const row = contracts.find((r) => r.id === id);
+          failed.push(row?.contract_no ?? String(id));
+          if (!firstReason) firstReason = getApiError(err);
+        }
       }
       deleteDialogRef.current?.close();
       editMode.exit();
       reload();
-    } catch (err) {
-      setError(getApiError(err));
-      deleteDialogRef.current?.close();
+      if (failed.length > 0) {
+        setError(
+          t("table.deleteFailedSome", {
+            list: failed.join(", "),
+            reason: firstReason,
+          }),
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -811,6 +833,12 @@ export function ContractsAdminPage() {
                 },
               ]}
             />
+            {/* P-15 §1.2 — the pre-read under the one destructive
+                action: what goes, what stays, and why some rows
+                cannot be picked at all. */}
+            <WhatHappens testId="contracts-bulk-delete-what">
+              {t("table.whatBulkDelete")}
+            </WhatHappens>
           </div>
         )}
 
@@ -890,7 +918,17 @@ export function ContractsAdminPage() {
                         type="checkbox"
                         checked={editMode.isSelected(row.id)}
                         onChange={() => editMode.toggle(row.id)}
-                        aria-label={t("table.selectRow", { name: row.contract_no })}
+                        disabled={row.has_invoices}
+                        title={
+                          row.has_invoices
+                            ? t("table.rowHasInvoices")
+                            : undefined
+                        }
+                        aria-label={
+                          row.has_invoices
+                            ? t("table.rowHasInvoices")
+                            : t("table.selectRow", { name: row.contract_no })
+                        }
                         data-testid={`contracts-select-${row.id}`}
                       />
                     </td>

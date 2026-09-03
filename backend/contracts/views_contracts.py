@@ -25,7 +25,16 @@ import datetime
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Case, Count, IntegerField, Q, Sum, When
+from django.db.models import (
+    Case,
+    Count,
+    Exists,
+    IntegerField,
+    OuterRef,
+    Q,
+    Sum,
+    When,
+)
 from django.db.models.functions import Coalesce, Lower, Trim
 from django.utils import timezone
 from rest_framework import generics, status
@@ -42,6 +51,7 @@ from .billing import money
 from .models import (
     MONTHS_PER_PERIOD,
     Contract,
+    ContractInvoice,
     ContractKind,
     ContractLifecycle,
     ContractRevision,
@@ -49,6 +59,7 @@ from .models import (
     ContractType,
 )
 from .permissions import IsContractManager, IsContractReader, enforce_contract_management
+from .state_machine import ContractTransitionError, transition_contract
 from .revisions import annotate_revision_totals, display_revision_ids
 from .standard_types import (
     normalise_name as normalise_type_name,
@@ -233,7 +244,15 @@ class ContractListCreateView(generics.ListCreateAPIView):
         today = timezone.localdate()
         qs = Contract.objects.select_related(
             "company", "customer", "contract_type"
-        ).prefetch_related("building_links__building")
+        ).prefetch_related("building_links__building").annotate(
+            # P-15 §1.2 — money-bearing rows cannot be deleted from the
+            # list; the row must know WHY its checkbox is off. An
+            # `Exists` rather than a Count: no join, no GROUP BY, safe
+            # beside the search's `.distinct()`.
+            annotated_has_invoices=Exists(
+                ContractInvoice.objects.filter(contract_id=OuterRef("id"))
+            )
+        )
 
         company_id = parse_int_param(self.request.query_params.get("company"))
         if company_id is not None:
@@ -356,8 +375,72 @@ class ContractDetailView(generics.RetrieveUpdateDestroyAPIView):
                 sync_contract_buildings(serializer.instance, buildings)
 
     def perform_destroy(self, instance):
+        from rest_framework import serializers as drf_serializers
+
         enforce_contract_management(self.request.user, instance.company)
+        # P-15 §1.2 — a money-bearing record cannot be deleted from a
+        # list at all: a contract that has generated invoices is part
+        # of the books. The refusal is a sentence with a stable code,
+        # like every other machine's.
+        if ContractInvoice.objects.filter(contract=instance).exists():
+            raise drf_serializers.ValidationError(
+                {
+                    "detail": [
+                        drf_serializers.ErrorDetail(
+                            "This contract has invoices and cannot be "
+                            "deleted. Cancel it instead — the invoices "
+                            "already made stay.",
+                            code="contract_has_invoices",
+                        )
+                    ]
+                }
+            )
         instance.delete()
+
+
+class ContractTransitionView(APIView):
+    """POST /api/contracts/<id>/transition/ {"lifecycle": "..."}.
+
+    P-15 §1.1 — THE ONE DOOR through which a contract's lifecycle
+    moves. `ALLOWED_TRANSITIONS` in `contracts/state_machine.py` is the
+    authority (exactly the moves the UI's own buttons offer); the
+    serializer's `lifecycle` is read-only, so a PATCH can no longer
+    jump a CANCELLED contract back to ACTIVE with a 200. The history
+    row per move is the generic AuditLog diff `Contract` already
+    writes, stamped with the `contract_transition` reason — a
+    dedicated history model is a migration and this sprint writes
+    none.
+
+    Refusal shape: HTTP 400 `{"detail": <sentence>, "code": <stable>}`
+    — `invalid_transition` / `no_op_transition` / `unknown_lifecycle` /
+    `register_lifecycle_locked`, the machine standard.
+    """
+
+    permission_classes = [IsContractManager]
+
+    def post(self, request, contract_id):
+        contract = generics.get_object_or_404(
+            filter_contracts_for(
+                request.user,
+                Contract.objects.select_related(
+                    "company", "customer", "contract_type"
+                ),
+            ),
+            pk=contract_id,
+        )
+        enforce_contract_management(request.user, contract.company)
+        try:
+            contract = transition_contract(
+                request.user, contract, str(request.data.get("lifecycle"))
+            )
+        except ContractTransitionError as exc:
+            return Response(
+                {"detail": exc.message, "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        context = {"request": request, "connected": True}
+        context.update(contract_list_context([contract], request))
+        return Response(ContractSerializer(contract, context=context).data)
 
 
 class ContractStatsView(APIView):

@@ -29,6 +29,7 @@ const base: Contract = {
   start_date: "2026-01-15",
   end_date: null,
   lifecycle: "ACTIVE",
+  has_invoices: false,
   status: "ACTIVE",
   description: "",
   notes: "",
