@@ -2054,6 +2054,8 @@
   "documents.empty_folder_hint": "Drag files here, or use the Upload button above. PDFs, images and Office files are supported.",
   "documents.empty_folder_hint_readonly": "There are no files in this folder yet.",
   "edit_mode.edit": "Select rows",
+  "people.tab_users_sub": "Sign-in accounts and what each may open — the access side of a person.",
+  "people.tab_employees_sub": "Employment facts: type, rate, credentials — the HR side of the same people.",
   "edit_mode.done": "Done",
   "hours_week_grid.no_employees": "No employees available.",
   "hours_week_grid.cell_label_person": "{{person}} — {{hourType}} on {{day}}",

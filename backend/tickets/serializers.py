@@ -2681,8 +2681,13 @@ class TicketStatusChangeSerializer(serializers.Serializer):
                     is_override=self.validated_data.get("is_override", False),
                     override_reason=self.validated_data.get("override_reason", ""),
                 )
-        except TransitionError as exc:
-            raise serializers.ValidationError({"detail": str(exc), "code": exc.code})
+        except TransitionError:
+            # P-15 (P-14's S4 refusal-shape finding) — re-raised as-is:
+            # the view renders the machine-standard FLAT
+            # `{"detail", "code"}` body. Converting to a
+            # serializers.ValidationError here wrapped both keys in
+            # one-element lists, the one endpoint whose shape drifted.
+            raise
 
     #: W-PLANTRUTH §3b — the moves that mean "the work is done", the
     #: only ones that close open parts. Mirrors the frontend's

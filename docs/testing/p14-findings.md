@@ -430,6 +430,49 @@ the in-sprint part-A/B6 work.
 
 ## S4
 
+**P-15 status, by title (Part 5 unless noted; nothing silently
+dropped):**
+
+- FIXED — refusal shape drift (codes on every invoice transition
+  refusal: `invoice_sent_immutable`, `invalid_transition`,
+  `billing_address_required`, `reversal_not_unissuable`,
+  `numbered_not_unissuable`, `reversal_terminal`, `already_reversed`;
+  the ticket status endpoint answers the flat `{detail, code}` body).
+- FIXED — Hours Start-here name list (a colliding first name prints
+  the full name; an email fallback prints whole).
+- FIXED — error/loading UX (the tickets footer skeletons instead of
+  "Showing 0 of 0"; the EW list gets skeleton rows; the board's real
+  failure path landed in Part 3).
+- FIXED — "My schedule" over the team's week ("Team schedule /
+  Werkplanning van het team"); the CA empty TEAM week speaks team
+  scope; the /agenda guard sentence rewritten (it named an admit set
+  two roles short); the stuck strip's worker title ("your manager is
+  on it"); nl `day_count` says klus/klussen (§D.2 one noun).
+- FIXED — app boot "Loading…" translated in all eleven route guards;
+  /my/employees "jouw"→"uw"; My hours onto the u-register (5
+  strings); "across 1 active contracts" pluralised (`_one/_other`,
+  active + ending); People Users/Employees tab subtitles divide the
+  labour; /my/facturen PERIODE says the send month instead of "—";
+  /extra-work/new stops asking the provider-only pricing questions it
+  knows the answer to (the 403 console noise).
+- FIXED — recurring PATCH answers the READ shape (create's P-12 E2
+  fix, completed for update).
+- FIXED — the STAFF slot-roster READ gets a read-shaped refusal
+  naming My schedule; the crew carry stamps the PLANNER
+  (`assignment.assigned_by`), never the transition's actor — a
+  customer approving a quote never assigned staff.
+- RECORDED, no change — recurring archive idempotence; the
+  numbered-but-unsent credit note (terminal mirror by design); the
+  behaviors-confirmed list.
+- DEFERRED (P-16, by title) — notifications localization (owner's
+  migration yes); customers RELATIONSHIP lifecycle words; "Price and
+  send" pre-read on the detail; dashboard's three reconciling
+  numbers; CA sidebar Hours/My-hours divider; /my/facturen mobile
+  card list (the send-month fallback landed); the native date input
+  (browser-controlled, note only); future-dated hours flagging;
+  preview-vs-generate month question; proposal plan-gate refusal
+  order; EW cancel-note requirement.
+
 - **Invoices · API · refusal shape drift** — an illegal invoice
   transition returns a 400 with a human sentence but NO stable
   `code`, unlike every other machine's `{"detail", "code"}` shape;

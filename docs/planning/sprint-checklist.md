@@ -13,14 +13,82 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p14-everything-end-to-end` — stacked on
-`feat/p13-money-never-invisible` (origin tip `47d9998`, verified by
+**Branch:** `feat/p15-close-the-list` — stacked on
+`feat/p14-everything-end-to-end` (origin tip `de91f31`, verified by
 web-Claude), the head of the Addendum D redesign train
 (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11 → P-12 → P-13 → P-14), each sprint stacked on the previous one and deployed to crmtest;
+→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11 → P-12 → P-13 → P-14 → P-15), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
+
+### P-15 — "Close the list" (2026-09-03, in flight)
+
+The product of P-14 was the list; the product of P-15 is the list
+CLOSED: every S1 and S2 fixed and pinned, every S3 on the owner's
+eight pages, S4 as far as the sprint reaches, each fix tied to its
+finding by title in `docs/testing/p14-findings.md` (now carrying
+inline **P-15: FIXED / RULED / DEFERRED** statuses). Zero migrations.
+Rulings in Addendum D §D.24.7; the new security invariant is
+rbac-matrix §3 **H-12**.
+
+- **Part 0 (rulings, owner one-word veto each):** 0.1 invoice
+  issue/send/un-issue/reverse are CA/SA-only (H-12, double-gated,
+  `invoice_admin_only`); 0.2 only APPROVED patterns fill the sheet
+  (`test_p15_approved_fill`, the grid says why a person's lines are
+  empty); 0.3 the on-behalf sign-off says so ("Checked by {manager} —
+  counts as approved (this customer cannot approve online)"); 0.4 a
+  customer's wish never places a ticket — the Not-planned strip wears
+  `wished_day`, the lateness ladder keeps the wish
+  (`job_wish_window`), the P-1 captioned-phantom pins rewritten.
+- **Part 1 (S1):** the contract lifecycle machine
+  (`contracts/state_machine.py`, `/contracts/<id>/transition/`,
+  serializer read-only, AuditLog diff as history, the form dialog's
+  lifecycle select gone, Cancel behind Geavanceerd); no hidden delete
+  behind a pencil ("Select rows" everywhere, Deactivate called
+  Deactivate, the contracts Delete carries its WhatHappens and a
+  money-bearing row is unselectable AND refused —
+  `contract_has_invoices`).
+- **Part 2 (S2):** BM candidates picker answers like the validator;
+  the two-company worker's My hours resolves + sends `company`; the
+  Tickets page says its counts' period out loud; the CA dashboard's
+  confident zero waits for the probes; the SLA reset gets its confirm
+  + pre-read.
+- **Part 3 (S3, the eight pages):** board failure state + Retry; BM
+  Contracts Start-here in the read voice; BM Invoices doors that
+  work; the EW intent default judged by the intent validator
+  (`intent_required`, preview default honest); + the small
+  off-page S3s (customer-worded notification toggles, audit-log
+  model#id, hour-types subtitle, the EW bulk line).
+- **Part 4 (web-Claude's additions):** the board never shows a half
+  column (width snaps to whole 210px columns — the floor holds); the
+  "Afgerond: Afgerond" fact fixed (missing date → no line; the
+  placement is rule 1 by design); the Agreed hours tab on §D.22
+  (six columns, compressed Pattern, filters folded, one button per
+  row, per-row editor); folds-closed confirmed; "Kind of work / Soort
+  werk" split from the customer's "Work type", the pattern dialog
+  de-week-ified with the fixed-work default pinned.
+- **Part 5:** invoice refusals carry stable codes; the ticket status
+  endpoint's flat refusal body; recurring PATCH answers the read
+  shape; the crew carry stamps the PLANNER; the STAFF roster read
+  gets a read-shaped refusal; `pageApiGet` same-origin (the six e2e
+  specs it failed); Amanda's second customer membership (data only);
+  the S4 word/loading batch (team titles, u-register, klus, boot
+  Loading…, plurals, people-tab subtitles, tickets footer, EW
+  skeleton, /my/facturen send-month fallback, pricing-403 precheck).
+
+**P-16 queue (deferred by title):** the 51 pre-existing backend reds
+in untouched modules (sprint-28-era audit pins; sprint-109/123/127/142
+extra-work modules; seed-demo isolation pins; the sprint-179
+week-grid-source quartet; b7/w3g/sprint7b — a monthly full-suite run
+would have caught them the sprint they broke); notification payload
+localization (behind the owner's migration yes); the customers
+RELATIONSHIP lifecycle words; the dashboard's three reconciling
+numbers; "Price and send" pre-read on the detail; /my/facturen's
+mobile card list; the CA sidebar Hours/My-hours divider; the EW
+cancel-note requirement; future-dated hours flagging; the
+preview-vs-generate month question; the proposal plan-gate refusal
+order.
 
 Sprint 189 runs as THREE parallel Claude Code chats on this one branch,
 on disjoint file sets: chat 1 the two detail pages, chat 2 the backend,

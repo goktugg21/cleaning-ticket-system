@@ -151,7 +151,11 @@ export async function pageApiGet<T>(page: Page, path: string): Promise<T> {
     if (!token) {
       throw new Error("pageApiGet: no accessToken in localStorage; call loginAs first");
     }
-    const response = await fetch(`http://localhost:8000${apiPath}`, {
+    // P-15 — same-origin, like `resolveDemoTicketId` above: the page's
+    // own origin proxies /api in every harness. FE-7 fixed the sibling
+    // helper and missed this one; the hardcoded host 400'd against
+    // ALLOWED_HOSTS and failed six specs deterministically.
+    const response = await fetch(apiPath, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {

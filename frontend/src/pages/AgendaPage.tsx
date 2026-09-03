@@ -927,7 +927,12 @@ function WorkPlanWeek() {
     <div data-testid="agenda-page">
       <PageHeader
         eyebrow={t("common:ops")}
-        title={t("agenda.page_title")}
+        /* P-15 (P-14's S4 finding) — the title stops calling the whole
+           team's week "My schedule" for a management reader; the
+           subtitle already branched, the title now does too. */
+        title={
+          teamWeek ? t("agenda.page_title_team") : t("agenda.page_title")
+        }
         subtitle={
           teamWeek ? t("agenda.page_subtitle_team") : t("agenda.page_subtitle")
         }
@@ -1220,7 +1225,14 @@ function WorkPlanWeek() {
           id="stuck"
           tone="red"
           count={data.counts.stuck}
-          title={t("agenda.stuck_title")}
+          /* P-15 (P-14's S4 finding) — the worker's strip title stops
+             pointing "actie nodig" at a reader whose body says the
+             manager decides. */
+          title={
+            role === "STAFF"
+              ? t("agenda.stuck_title_worker")
+              : t("agenda.stuck_title")
+          }
           summary={
             role === "STAFF"
               ? t("agenda.stuck_desc_worker")
@@ -1432,8 +1444,14 @@ function WorkPlanWeek() {
       {!loading && !error && planIsEmpty ? (
         <EmptyState
           icon={CalendarClock}
-          title={t("agenda.empty_title")}
-          description={t("agenda.empty_desc")}
+          /* P-15 (P-14's S4 finding) — the TEAM week's empty state
+             speaks team scope, not "when a manager assigns YOU…". */
+          title={
+            teamWeek ? t("agenda.empty_title_team") : t("agenda.empty_title")
+          }
+          description={
+            teamWeek ? t("agenda.empty_desc_team") : t("agenda.empty_desc")
+          }
           testId="agenda-empty"
         />
       ) : !data ? (

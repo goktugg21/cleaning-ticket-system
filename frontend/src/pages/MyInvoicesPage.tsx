@@ -17,10 +17,20 @@ import { PageHeader } from "../components/PageHeader";
 import { formatMoney } from "../lib/intl";
 import { monthName } from "../lib/billingSentence";
 
-/** P-7 S4.1 — the period as words ("augustus 2026"). */
-function formatPeriod(year: number | null, month: number | null): string {
-  if (!year || !month) return "—";
-  return monthName(`${year}-${String(month).padStart(2, "0")}`);
+/** P-7 S4.1 — the period as words ("augustus 2026").
+ *  P-15 (P-14's S4 finding) — a SENT invoice with no stored period
+ *  says its SEND month instead of a dash: a dash on a money row reads
+ *  like an error beside neighbours that say "juni 2026". */
+function formatPeriod(
+  year: number | null,
+  month: number | null,
+  sentAt: string | null,
+): string {
+  if (year && month) {
+    return monthName(`${year}-${String(month).padStart(2, "0")}`);
+  }
+  if (sentAt) return monthName(sentAt.slice(0, 7));
+  return "—";
 }
 
 export function MyInvoicesPage() {
@@ -118,7 +128,7 @@ export function MyInvoicesPage() {
                     {inv.building_name ?? t("facturen.all_buildings")}
                   </td>
                   <td className="muted small">
-                    {formatPeriod(inv.period_year, inv.period_month)}
+                    {formatPeriod(inv.period_year, inv.period_month, inv.sent_at)}
                   </td>
                   <td>
                     <span className="cell-tag cell-tag-open">

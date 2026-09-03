@@ -3293,12 +3293,22 @@ export function DashboardPage({
 
                 <div className="pagination">
                   <span className="pagination-info">
-                    {t("pagination_info", {
-                      visible: tickets.length,
-                      count,
-                      page,
-                      pages: pageCount,
-                    })}
+                    {/* P-15 (P-14's S4 finding) — never "Showing 0 of
+                        0 tickets" while the first load is in flight;
+                        the file's own skeleton test, applied here. */}
+                    {loading && tickets.length === 0 ? (
+                      <span
+                        className="skeleton-line skeleton-inline"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      t("pagination_info", {
+                        visible: tickets.length,
+                        count,
+                        page,
+                        pages: pageCount,
+                      })
+                    )}
                   </span>
                   <div className="pagination-controls">
                     <button

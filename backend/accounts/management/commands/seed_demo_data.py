@@ -279,6 +279,17 @@ COMPANIES = [
                 "language": "nl",
             },
         ],
+        # P-15 Part 5 — the two-customer switch was untestable on this
+        # seed (P-14's observation: Amanda held exactly ONE membership,
+        # so the /my/documents picker never rendered and the pages that
+        # hardcode customer_ids[0] could never be caught showing only
+        # the first customer). A SECOND customer of the same provider,
+        # with Amanda as its one member. Data only; idempotent.
+        "second_customer": {
+            "name": "B Amsterdam Zuid",
+            "member_email": "amanda-customer-b-amsterdam@b-amsterdam.demo",
+            "buildings": ["B3 Amsterdam"],
+        },
         # Sprint 23B: one STAFF persona per company with a
         # StaffProfile and visibility on every building of the
         # company. Lets the demo show the "Request assignment"
@@ -594,6 +605,39 @@ class Command(BaseCommand):
                     membership=membership, building=buildings[bname]
                 )
             customer_user_lookup[cu_spec["email"]] = cu
+
+        # P-15 Part 5 — the optional SECOND customer (see the spec).
+        second_spec = spec.get("second_customer")
+        if second_spec:
+            second = Customer.objects.filter(
+                company=company, name=second_spec["name"]
+            ).first()
+            if second is None:
+                second = Customer.objects.create(
+                    company=company,
+                    name=second_spec["name"],
+                    building=None,
+                    contact_email="",
+                    phone="",
+                    language="nl",
+                    is_active=True,
+                )
+            for bname in second_spec["buildings"]:
+                CustomerBuildingMembership.objects.get_or_create(
+                    customer=second, building=buildings[bname]
+                )
+            member = customer_user_lookup.get(second_spec["member_email"])
+            if member is not None:
+                second_membership, _ = (
+                    CustomerUserMembership.objects.get_or_create(
+                        customer=second, user=member
+                    )
+                )
+                for bname in second_spec["buildings"]:
+                    CustomerUserBuildingAccess.objects.get_or_create(
+                        membership=second_membership,
+                        building=buildings[bname],
+                    )
 
         # Sprint 23B — STAFF persona per company. Idempotent: re-runs
         # do not duplicate the StaffProfile or visibility rows. Each

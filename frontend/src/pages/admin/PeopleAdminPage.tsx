@@ -69,6 +69,16 @@ export function PeopleAdminPage() {
       <PageHeader
         eyebrow={t("nav.group_klanten_mensen")}
         title={t("nav.people")}
+        /* P-15 (P-14's S4 finding) — the same names sit on both tabs;
+           one sentence divides the labour: accounts & access vs HR
+           facts. */
+        subtitle={
+          current.key === "users"
+            ? t("people.tab_users_sub")
+            : current.key === "employees"
+              ? t("people.tab_employees_sub")
+              : undefined
+        }
         testId="people-page-header"
       />
       <div

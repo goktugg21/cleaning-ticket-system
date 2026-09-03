@@ -352,11 +352,17 @@ def _resolve_ticket(request, ticket_id: int) -> Ticket:
     return ticket
 
 
-def _gate_actor(request, ticket: Ticket):
+def _gate_actor(request, ticket: Ticket, *, reading: bool = False):
     """
     Sprint 23A permission gate. The actor must be on the service-
     provider side AND hold `osius.ticket.assign_staff` for the
     ticket's building. STAFF and CUSTOMER_USER never pass.
+
+    P-15 (P-14's S4 finding) — `reading=True` shapes the refusal for a
+    GET: a worker reading their own ticket's roster was told "Staff
+    cannot assign other staff to tickets." about an act that did not
+    happen. The refusal now describes the read that was refused and
+    points at the surface that carries their own answer.
     """
     if not is_staff_role(request.user):
         return Response(
@@ -370,7 +376,14 @@ def _gate_actor(request, ticket: Ticket):
         # also blocks STAFF, but checking here gives a cleaner error
         # message than a generic 403.
         return Response(
-            {"detail": "Staff cannot assign other staff to tickets."},
+            {
+                "detail": (
+                    "The crew roster is a management surface; your own "
+                    "days on this job are on My schedule."
+                    if reading
+                    else "Staff cannot assign other staff to tickets."
+                )
+            },
             status=status.HTTP_403_FORBIDDEN,
         )
     if not user_has_osius_permission(
@@ -538,9 +551,9 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticatedAndActive]
     serializer_class = _TicketStaffAssignmentSerializer
 
-    def _resolve(self):
+    def _resolve(self, *, reading: bool = False):
         ticket = _resolve_ticket(self.request, self.kwargs["ticket_id"])
-        gate = _gate_actor(self.request, ticket)
+        gate = _gate_actor(self.request, ticket, reading=reading)
         if gate is not None:
             return gate, None
         return None, ticket
@@ -554,7 +567,7 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
         )
 
     def list(self, request, *args, **kwargs):
-        early, _ = self._resolve()
+        early, _ = self._resolve(reading=True)
         if early is not None:
             return early
         return super().list(request, *args, **kwargs)

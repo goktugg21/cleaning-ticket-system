@@ -102,10 +102,17 @@ def carry_managers_to_ticket(extra_work_request, ticket, *, actor=None) -> int:
             # `objects.get_or_create` rather than `bulk_create`: the
             # audit rows for TicketManagerAssignment come from post_save
             # receivers, and a bulk insert fires none of them (H-10).
+            # P-15 (P-14's S4 attribution finding, slot 101/ticket
+            # 328) — the carry stamps the PLANNER (who put this person
+            # on the job), never the transition's actor: a customer
+            # approving a quote never assigned anybody, and a
+            # past-tense fact on the job must be true (the P-13
+            # standard). None (the system) when the plan row carries
+            # no author either.
             _, was_created = TicketManagerAssignment.objects.get_or_create(
                 ticket=ticket,
                 user=assignment.user,
-                defaults={"assigned_by": actor},
+                defaults={"assigned_by": assignment.assigned_by},
             )
             if was_created:
                 created += 1
@@ -207,7 +214,9 @@ def carry_workers_to_ticket(extra_work_request, ticket, *, actor=None) -> int:
                 user=assignment.user,
                 scheduled_start_at=slot_start,
                 defaults={
-                    "assigned_by": actor,
+                    # P-15 — the PLANNER, never the transition's actor
+                    # (see `carry_managers_to_ticket`).
+                    "assigned_by": assignment.assigned_by,
                     "scheduled_end_at": slot_end,
                 },
             )

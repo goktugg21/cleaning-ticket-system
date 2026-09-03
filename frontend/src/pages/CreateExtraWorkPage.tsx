@@ -42,6 +42,8 @@ import {
 } from "../api/admin";
 import { getApiError } from "../api/client";
 import { listLabels } from "../api/customerLabels";
+import { useAuth } from "../auth/AuthContext";
+import { isProviderAdmin } from "../auth/permissions";
 import {
   batchCreateExtraWork,
   createExtraWork,
@@ -162,6 +164,9 @@ function isIntentSubmitError(err: unknown): boolean {
 
 export function CreateExtraWorkPage() {
   const { t } = useTranslation(["extra_work", "common"]);
+  // P-15 — the provider-only pricing reads are prechecked by role
+  // instead of asked-and-403'd on every customer pick.
+  const { me } = useAuth();
 
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -268,20 +273,30 @@ export function CreateExtraWorkPage() {
       .catch(() => {
         if (!cancelled) setCustomerPrices({ customerId, rows: [] });
       });
-    listCustomerCustomPrices(customerId)
-      .then((rows) => {
-        if (!cancelled) setCustomCustomPrices({ customerId, rows });
-      })
-      .catch(() => {
-        if (!cancelled) setCustomCustomPrices({ customerId, rows: [] });
-      });
-    listCustomerPriceFolders(customerId, { is_active: true })
-      .then((rows) => {
-        if (!cancelled) setCustomerFolders({ customerId, rows });
-      })
-      .catch(() => {
-        if (!cancelled) setCustomerFolders({ customerId, rows: [] });
-      });
+    // P-15 (P-14's S4 finding) — the custom-pricing and folder lists
+    // are SA/CA-only server-side; asking as anyone else logged a 403 to
+    // the console on every customer pick. The answer is known, so the
+    // question is not asked; the catch stays as the belt.
+    if (isProviderAdmin(me?.role)) {
+      listCustomerCustomPrices(customerId)
+        .then((rows) => {
+          if (!cancelled) setCustomCustomPrices({ customerId, rows });
+        })
+        .catch(() => {
+          if (!cancelled) setCustomCustomPrices({ customerId, rows: [] });
+        });
+      listCustomerPriceFolders(customerId, { is_active: true })
+        .then((rows) => {
+          if (!cancelled) setCustomerFolders({ customerId, rows });
+        })
+        .catch(() => {
+          if (!cancelled) setCustomerFolders({ customerId, rows: [] });
+        });
+    }
+    // No else-branch write: the consumers guard on `customerId !==
+    // form.customer`, so a stale answer for another customer is
+    // already ignored — and a synchronous setState in an effect body
+    // is the pattern CLAUDE.md bans.
     Promise.all([
       listLabels(customerId, "department", { is_active: true }),
       listLabels(customerId, "work_type", { is_active: true }),
@@ -297,7 +312,7 @@ export function CreateExtraWorkPage() {
     return () => {
       cancelled = true;
     };
-  }, [form.customer]);
+  }, [form.customer, me?.role]);
 
   // ----- derived: who -----------------------------------------------
   const chosenCustomer = useMemo(

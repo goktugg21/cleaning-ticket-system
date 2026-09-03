@@ -408,7 +408,15 @@ class TicketViewSet(
             context={"request": request, "ticket": ticket},
         )
         serializer.is_valid(raise_exception=True)
-        updated = serializer.save()
+        try:
+            updated = serializer.save()
+        except TransitionError as exc:
+            # P-15 (P-14's S4 finding) — the machine-standard flat
+            # `{"detail", "code"}` body, like every sibling endpoint.
+            return Response(
+                {"detail": str(exc), "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Sprint 180 §1 — the email describes the transition the ACTOR
         # drove, which is no longer always the ticket's final status.

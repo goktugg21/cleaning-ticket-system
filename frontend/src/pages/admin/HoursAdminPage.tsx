@@ -677,9 +677,20 @@ export function HoursAdminPage() {
    *  `missingPeople` memo that preselects the dialog, so the button
    *  and the grid can never disagree about who is missing. */
   const startHereLabel = useMemo(() => {
-    const names = missingPeople
-      .slice(0, 4)
-      .map((p) => (p.full_name.trim() || p.email).split(/\s+/)[0]);
+    // P-15 (P-14's S4 finding) — two people who share a first name are
+    // indistinguishable ("Ahmet, Ahmet"), so colliding entries print
+    // their full name; and an email fallback prints whole, never a
+    // whitespace-split of an address that has no spaces.
+    const shown = missingPeople.slice(0, 4);
+    const firsts = shown.map((p) =>
+      p.full_name.trim() ? p.full_name.trim().split(/\s+/)[0] : p.email,
+    );
+    const names = shown.map((p, index) => {
+      const first = firsts[index];
+      const collides =
+        firsts.filter((other) => other === first).length > 1;
+      return collides && p.full_name.trim() ? p.full_name.trim() : first;
+    });
     if (missingPeople.length > 4) {
       return t("hours_admin.enter_for_names_more", {
         names: names.join(", "),

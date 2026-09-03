@@ -81,6 +81,17 @@ def _validation_detail(exc) -> str:
     return str(exc)
 
 
+def _validation_body(exc) -> dict:
+    """P-15 (P-14's S4 refusal-shape finding) — the machine-standard
+    `{"detail", "code"}` body: every InvoiceTransitionError now carries
+    a stable code beside its sentence, like every other machine's."""
+    body = {"detail": _validation_detail(exc)}
+    code = getattr(exc, "code", None)
+    if code:
+        body["code"] = code
+    return body
+
+
 class InvoicePdfView(views.APIView):
     """
     GET /api/invoices/<invoice_id>/pdf/
@@ -549,7 +560,7 @@ class InvoiceViewSet(viewsets.GenericViewSet):
             result = fn(request.user, invoice)
         except DjangoValidationError as exc:
             return Response(
-                {"detail": _validation_detail(exc)},
+                _validation_body(exc),
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(

@@ -64,7 +64,8 @@ def assert_mutable(invoice):
     ISSUED + SENT are both blocked from deletion.)"""
     if invoice.status == Invoice.Status.SENT:
         raise InvoiceTransitionError(
-            "A SENT invoice is immutable; reverse it instead."
+            "A SENT invoice is immutable; reverse it instead.",
+            code="invoice_sent_immutable",
         )
 
 
@@ -158,7 +159,8 @@ def issue_invoice(actor, invoice):
     # already issued it, status != DRAFT and this rejects (no double-issue).
     if locked.status != Invoice.Status.DRAFT:
         raise InvoiceTransitionError(
-            f"Only a DRAFT invoice can be issued (current status: {locked.status})."
+            f"Only a DRAFT invoice can be issued (current status: {locked.status}).",
+            code="invalid_transition",
         )
     resynced_fields = _resync_invoice_group_labels(locked)
     locked.status = Invoice.Status.ISSUED
@@ -186,7 +188,8 @@ def send_invoice(actor, invoice):
     locked = Invoice.objects.select_for_update().get(pk=invoice.pk)
     if locked.status != Invoice.Status.ISSUED:
         raise InvoiceTransitionError(
-            f"Only an ISSUED invoice can be sent (current status: {locked.status})."
+            f"Only an ISSUED invoice can be sent (current status: {locked.status}).",
+            code="invalid_transition",
         )
     # Sprint 186 — an invoice with no addressee is not a document.
     #
@@ -205,6 +208,7 @@ def send_invoice(actor, invoice):
         raise InvoiceTransitionError(
             f"{locked.customer.name} has no billing address yet. "
             "Add one on the customer before sending this invoice.",
+            code="billing_address_required",
         )
 
     now = timezone.now()
@@ -267,17 +271,20 @@ def unissue_invoice(actor, invoice):
     locked = Invoice.objects.select_for_update().get(pk=invoice.pk)
     if locked.status != Invoice.Status.ISSUED:
         raise InvoiceTransitionError(
-            f"Only an ISSUED invoice can be un-issued (current status: {locked.status})."
+            f"Only an ISSUED invoice can be un-issued (current status: {locked.status}).",
+            code="invalid_transition",
         )
     if locked.is_reversal:
         raise InvoiceTransitionError(
-            "A reversal is a committed counter-document; it cannot be un-issued."
+            "A reversal is a committed counter-document; it cannot be un-issued.",
+            code="reversal_not_unissuable",
         )
     if locked.number is not None or locked.year is not None:
         # Would strand an already-allocated gapless number — refuse.
         raise InvoiceTransitionError(
             "Cannot un-issue an invoice that already carries a number "
-            "(it would leave a gap); send it instead."
+            "(it would leave a gap); send it instead.",
+            code="numbered_not_unissuable",
         )
     locked.status = Invoice.Status.DRAFT
     locked.issued_at = None
@@ -316,11 +323,13 @@ def reverse_invoice(actor, invoice):
     original = Invoice.objects.select_for_update().get(pk=invoice.pk)
     if original.status != Invoice.Status.SENT:
         raise InvoiceTransitionError(
-            f"Only a SENT invoice can be reversed (current status: {original.status})."
+            f"Only a SENT invoice can be reversed (current status: {original.status}).",
+            code="invalid_transition",
         )
     if original.is_reversal:
         raise InvoiceTransitionError(
-            "A reversal is terminal; it cannot itself be reversed."
+            "A reversal is terminal; it cannot itself be reversed.",
+            code="reversal_terminal",
         )
     # Sprint 134 — `reverse_invoice` never changes `original.status` (it
     # stays SENT on the books by design, see the docstring), so the two
@@ -338,7 +347,8 @@ def reverse_invoice(actor, invoice):
     if existing_reversal is not None:
         raise InvoiceTransitionError(
             f"Invoice {original.number} has already been reversed by "
-            f"{existing_reversal.number}."
+            f"{existing_reversal.number}.",
+            code="already_reversed",
         )
 
     now = timezone.now()

@@ -1252,9 +1252,30 @@ export function ExtraWorkList({
       </div>
 
       {loading && (
-        <div className="loading-bar">
-          <div className="loading-bar-fill" />
-        </div>
+        <>
+          <div className="loading-bar">
+            <div className="loading-bar-fill" />
+          </div>
+          {/* P-15 (P-14's S4 finding) — a blank pane under the bar read
+              as "there is nothing here" for the seconds the list took;
+              skeleton rows say a table is coming. */}
+          <div
+            className="skeleton-table"
+            aria-hidden="true"
+            data-testid="extra-work-skeleton"
+          >
+            {[0, 1, 2, 3, 4].map((row) => (
+              <div className="skeleton-row" key={row}>
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {error && (

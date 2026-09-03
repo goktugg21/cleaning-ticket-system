@@ -151,6 +151,16 @@ class H12InvoiceAdminGateTests(InvoicingFixture):
         self.assertEqual(draft.status, Invoice.Status.SENT)
         self.assertIsNotNone(draft.number)
 
+    def test_refusals_carry_stable_codes(self):
+        """P-15 (P-14's S4 shape finding) — an illegal invoice
+        transition answers the machine-standard {detail, code} body."""
+        client = self._client(self.admin)
+        draft = self._draft()
+        response = client.post(f"/api/invoices/{draft.id}/send/")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data.get("code"), "invalid_transition")
+        self.assertIn("detail", response.data)
+
     def test_state_machine_rechecks_independently(self):
         """The double gate's second half: even a caller that skips the
         view layer is refused."""
