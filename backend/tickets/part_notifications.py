@@ -18,8 +18,18 @@ def notify_part_assigned(slot):
     part = slot.sub_task
     label = ticket.ticket_no or f"#{ticket.pk}"
     part_title = getattr(part, "title", "") or ""
-    summary = f"{label} — you are on “{part_title}”" if part_title else label
     event = NotificationEventType.TICKET_PART_ASSIGNED
+
+    # P-16 Part D — the words come from the copy catalogue, rendered in
+    # the recipient's own language on both channels.
+    from notifications import copy as notification_copy
+
+    template_key = "ticket_part_assigned"
+    params = {
+        "label": label,
+        "ticket_title": ticket.title,
+        "part_title": part_title,
+    }
 
     # The bell first: it is the channel that works without an address.
     # `assigned_by` is the actor — the recipient's first question is who
@@ -27,16 +37,21 @@ def notify_part_assigned(slot):
     emit_ticket_part_assigned_inapp(
         recipient=user,
         actor=slot.assigned_by,
-        summary=summary,
+        template_key=template_key,
+        params=params,
         ticket=ticket,
     )
     if getattr(user, "email", ""):
+        lang = notification_copy.resolve_lang(getattr(user, "language", "nl"))
+        subject, body = notification_copy.render_email(template_key, params, lang)
         send_logged_email(
             recipient_email=user.email,
             recipient_user=user,
-            subject=f"You were assigned a part of {label}",
-            body=f"{label} — {ticket.title}\nPart: {part_title}\n",
+            subject=subject,
+            body=body,
             event_type=event,
             ticket=ticket,
+            template_key=template_key,
+            params=params,
         )
     return 1

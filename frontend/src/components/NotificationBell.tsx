@@ -117,9 +117,10 @@ export function NotificationBell() {
         return {
           variant: "warning",
           severity,
-          title: isSlaWarningEvent(n.event_type)
-            ? t(`notifications.sla.${n.event_type}`)
-            : name,
+          // P-16 Part D — the warning headline arrives resolved from
+          // the API in the viewer's language; the client no longer
+          // keeps a title map.
+          title: (isSlaWarningEvent(n.event_type) && n.title) || name,
           description: isSlaWarningEvent(n.event_type)
             ? n.summary || name
             : n.summary,
@@ -360,19 +361,17 @@ export function NotificationBell() {
                   onClick={() => openNotification(notification)}
                 >
                   <span className="notif-item-main">
-                    {/* Sprint W4-Q §1 — the warning NAMES itself. The
-                        server summary carries only the facts (which job,
-                        how late); the sentence that says what kind of
-                        problem this is is rendered here through t(), so
-                        it translates. A Dutch string baked into a
-                        notification row on the server is a string
-                        nobody can translate. */}
-                    {isSlaWarningEvent(notification.event_type) && (
-                      <span className="notif-warning-title">
-                        <AlertTriangle size={13} strokeWidth={2.2} />
-                        {t(`notifications.sla.${notification.event_type}`)}
-                      </span>
-                    )}
+                    {/* P-16 Part D — the warning NAMES itself with the
+                        title the API resolved in the viewer's own
+                        language (§D.13.3: the SPA never composes
+                        notification copy from parts). */}
+                    {isSlaWarningEvent(notification.event_type) &&
+                      notification.title && (
+                        <span className="notif-warning-title">
+                          <AlertTriangle size={13} strokeWidth={2.2} />
+                          {notification.title}
+                        </span>
+                      )}
                     <span className="notif-item-summary">
                       {notification.summary}
                     </span>

@@ -9,11 +9,11 @@ from accounts.models import User, UserRole
 from tickets.models import (
     TicketMessageType,
     TicketMessageVisibility,
-    TicketPriority,
     TicketStatus,
-    TicketType,
 )
 
+from . import copy as notification_copy
+from .copy import resolve_lang, ticket_facts_params
 from .models import (
     Notification,
     NotificationSeverity,
@@ -23,7 +23,6 @@ from .models import (
     NotificationStatus,
     NotificationType,
 )
-from .status_labels import ticket_status_label_nl
 
 # `send_mail` is re-exported here so that test code patching
 # notifications.services.send_mail can intercept the actual SMTP call. The
@@ -339,16 +338,20 @@ def emit_ticket_message_notifications(message, actor=None):
 
     directed_ids = {u.id for u in directed}
 
+    # P-16 Part D — the words go through the catalogue: (key, params)
+    # stored on the row, the rendered summary kept as the cache. A
+    # message line is facts only (author + their words), so the two
+    # languages render identically; the key is stored so the read-time
+    # re-render path treats every row one way.
     author_label = ""
     if actor:
         author_label = (actor.full_name or actor.email or "").strip()
     body = (message.message or "").strip()
     truncated = body[:140] + ("…" if len(body) > 140 else "")
-    if author_label:
-        summary = f"{author_label}: {truncated}"
-    else:
-        summary = truncated
-    summary = summary[:500]
+    template_key = (
+        "ticket_message" if author_label else "ticket_message_unattributed"
+    )
+    params = {"author": author_label, "text": truncated}
 
     rows = [
         Notification(
@@ -357,7 +360,14 @@ def emit_ticket_message_notifications(message, actor=None):
             event_type=NotificationType.TICKET_MESSAGE,
             ticket=ticket,
             is_directed=(user.id in directed_ids),
-            summary=summary,
+            summary=(
+                notification_copy.render_summary(
+                    template_key, params, resolve_lang(user.language)
+                )
+                or ""
+            )[:500],
+            template_key=template_key,
+            params=params,
             read_at=None,
         )
         for user in recipients
@@ -454,14 +464,19 @@ def _extra_work_visible_to(user, ew):
     return scope_extra_work_for(user).filter(pk=ew.pk).exists()
 
 
-def _emit_extra_work_notifications(ew, *, recipients, actor, event_type, summary):
-    """Shared builder for the three EW emit helpers: minus-actor, dedupe,
+def _emit_extra_work_notifications(
+    ew, *, recipients, actor, event_type, template_key, params
+):
+    """Shared builder for the EW emit helpers: minus-actor, dedupe,
     SCOPE-gate, then bulk-create. Sets `extra_work=ew`, `ticket=None`,
-    `is_directed=False` (EW notifications are never 'directed')."""
+    `is_directed=False` (EW notifications are never 'directed').
+
+    P-16 Part D — the words come from the catalogue: the summary cache
+    is rendered per RECIPIENT language and the (key, params) ride the
+    row so the feed can re-render per VIEWER."""
     recipients = _dedupe_users(_without_actor(recipients, actor))
     recipients = [u for u in recipients if _extra_work_visible_to(u, ew)]
 
-    summary = (summary or "").strip()[:500]
     rows = [
         Notification(
             recipient=user,
@@ -470,7 +485,14 @@ def _emit_extra_work_notifications(ew, *, recipients, actor, event_type, summary
             ticket=None,
             extra_work=ew,
             is_directed=False,
-            summary=summary,
+            summary=(
+                notification_copy.render_summary(
+                    template_key, params, resolve_lang(user.language)
+                )
+                or ""
+            ).strip()[:500],
+            template_key=template_key,
+            params=params,
             read_at=None,
         )
         for user in recipients
@@ -490,10 +512,6 @@ def emit_extra_work_requested_notifications(ew, actor=None):
     Recipients = `_extra_work_provider_users(ew)` minus the requester. Fires
     for EVERY EW regardless of intent (instant / auto-start / request-quote).
     `actor` is the requester (`ew.created_by`)."""
-    title = _ew_title(ew)
-    summary = (
-        f"New extra-work request: {title}" if title else "New extra-work request"
-    )
     # #109 Part D — subscribed SAs join the provider-management set.
     return _emit_extra_work_notifications(
         ew,
@@ -503,7 +521,8 @@ def emit_extra_work_requested_notifications(ew, actor=None):
         ),
         actor=actor,
         event_type=NotificationType.EXTRA_WORK_REQUESTED,
-        summary=summary,
+        template_key="extra_work_requested",
+        params={"title": _ew_title(ew)},
     )
 
 
@@ -513,14 +532,13 @@ def emit_extra_work_proposal_sent_notifications(ew, actor=None):
     Recipients = `_extra_work_customer_users(ew)` minus the sender (the
     provider operator who sent the quote; minus-actor is a no-op for the
     customer set but kept uniform). `actor` is the provider operator."""
-    title = _ew_title(ew)
-    summary = f"Quote ready: {title}" if title else "Quote ready"
     return _emit_extra_work_notifications(
         ew,
         recipients=list(_extra_work_customer_users(ew)),
         actor=actor,
         event_type=NotificationType.EXTRA_WORK_PROPOSAL_SENT,
-        summary=summary,
+        template_key="extra_work_proposal_sent",
+        params={"title": _ew_title(ew)},
     )
 
 
@@ -530,16 +548,10 @@ def emit_extra_work_decision_notifications(ew, actor=None, *, approved):
     Recipients = `_extra_work_provider_users(ew)` minus the decider. `actor`
     is the customer decider on the normal path, or the provider operator on
     an override path (minus-actor then excludes them so they don't self-
-    notify). The approved-vs-rejected distinction rides the `summary`."""
-    title = _ew_title(ew)
+    notify). The approved-vs-rejected distinction rides the catalogue key."""
     decider = ""
     if actor:
         decider = (actor.full_name or actor.email or "").strip()
-    verb = "approved" if approved else "rejected"
-    if decider:
-        summary = f"{decider} {verb} {title}".strip()
-    else:
-        summary = f"Extra work {verb}: {title}".strip()
     # #109 Part D — subscribed SAs join the provider-management set.
     return _emit_extra_work_notifications(
         ew,
@@ -549,7 +561,10 @@ def emit_extra_work_decision_notifications(ew, actor=None, *, approved):
         ),
         actor=actor,
         event_type=NotificationType.EXTRA_WORK_DECISION,
-        summary=summary,
+        template_key=(
+            "extra_work_approved" if approved else "extra_work_rejected"
+        ),
+        params={"title": _ew_title(ew), "decider": decider},
     )
 
 
@@ -636,13 +651,16 @@ def emit_extra_work_message_notifications(message, actor=None):
 
     directed_ids = {u.id for u in directed}
 
+    # P-16 Part D — through the catalogue, like the ticket-message emit.
     author_label = ""
     if actor:
         author_label = (actor.full_name or actor.email or "").strip()
     body = (message.message or "").strip()
     truncated = body[:140] + ("…" if len(body) > 140 else "")
-    summary = f"{author_label}: {truncated}" if author_label else truncated
-    summary = summary[:500]
+    template_key = (
+        "extra_work_message" if author_label else "extra_work_message_unattributed"
+    )
+    params = {"author": author_label, "text": truncated}
 
     rows = [
         Notification(
@@ -652,7 +670,14 @@ def emit_extra_work_message_notifications(message, actor=None):
             ticket=None,
             extra_work=ew,
             is_directed=(user.id in directed_ids),
-            summary=summary,
+            summary=(
+                notification_copy.render_summary(
+                    template_key, params, resolve_lang(user.language)
+                )
+                or ""
+            )[:500],
+            template_key=template_key,
+            params=params,
             read_at=None,
         )
         for user in recipients
@@ -668,25 +693,22 @@ def emit_extra_work_published_notifications(ew, actor=None):
     approved/started. Recipients = `_extra_work_customer_users(ew)` minus the
     actor (the provider operator). A single direct emit at the view, so it
     fires exactly once regardless of the internal two-leg transition."""
-    title = _ew_title(ew)
-    summary = (
-        f"Extra work approved: {title}" if title else "Extra work approved"
-    )
     return _emit_extra_work_notifications(
         ew,
         recipients=list(_extra_work_customer_users(ew)),
         actor=actor,
         event_type=NotificationType.EXTRA_WORK_PUBLISHED,
-        summary=summary,
+        template_key="extra_work_published",
+        params={"title": _ew_title(ew)},
     )
 
 
-# Sprint 184 §1 — the Dutch status vocabulary moved to
-# `notifications/status_labels.py`, and three of its eight words changed
-# because they disagreed with the screens. The customer was still being
-# emailed "Goedgekeurd", the exact word the app dropped for being
-# ambiguous. See that module for why the backend cannot read the
-# frontend bundle at runtime and what keeps the two identical instead.
+# P-16 Part D — the words live in `notifications/copy.py` now: one
+# keyed catalogue, two languages, rendered per recipient at send time
+# (email) and per viewer at read time (the bell). The label maps and
+# `_ticket_summary` that used to sit here are the catalogue's
+# `_facts_block` / label resolvers; `ticket_facts_params` builds the
+# params every lifecycle mail carries.
 
 
 # WAITING_MANAGER_REVIEW is an internal provider/manager-review state (the
@@ -695,81 +717,6 @@ def emit_extra_work_published_notifications(ew, actor=None):
 # the provider/manager side, not the customer (Ramazan). Customer-facing
 # states (WAITING_CUSTOMER_APPROVAL / APPROVED / REJECTED) are unaffected.
 _CUSTOMER_HIDDEN_STATUSES = {str(TicketStatus.WAITING_MANAGER_REVIEW)}
-
-
-_ROLE_LABEL_NL = {
-    UserRole.SUPER_ADMIN: "Superbeheerder",
-    UserRole.COMPANY_ADMIN: "Bedrijfsbeheerder",
-    UserRole.BUILDING_MANAGER: "Beheerder",
-    UserRole.CUSTOMER_USER: "Klant",
-}
-
-
-_TYPE_LABEL_NL = {
-    TicketType.REPORT: "Melding",
-    TicketType.COMPLAINT: "Klacht",
-    TicketType.REQUEST: "Verzoek",
-    TicketType.SUGGESTION: "Suggestie",
-    TicketType.QUOTE_REQUEST: "Offerteaanvraag",
-}
-
-
-_PRIORITY_LABEL_NL = {
-    TicketPriority.NORMAL: "Normaal",
-    TicketPriority.HIGH: "Hoog",
-    TicketPriority.URGENT: "Urgent",
-}
-
-
-def _status_label(value):
-    # One line, one source. The old body fell back to `str(value)`, which
-    # is how a customer could receive the literal text
-    # `CONVERTED_TO_EXTRA_WORK` in an email.
-    return ticket_status_label_nl(value)
-
-
-def _role_label(value):
-    try:
-        return _ROLE_LABEL_NL[UserRole(value)]
-    except (ValueError, KeyError):
-        return str(value)
-
-
-def _type_label(value):
-    try:
-        return _TYPE_LABEL_NL[TicketType(value)]
-    except (ValueError, KeyError):
-        return str(value)
-
-
-def _priority_label(value):
-    try:
-        return _PRIORITY_LABEL_NL[TicketPriority(value)]
-    except (ValueError, KeyError):
-        return str(value)
-
-
-def _ticket_summary(ticket):
-    lines = [
-        f"Ticket: {ticket.ticket_no}",
-        f"Onderwerp: {ticket.title}",
-        f"Status: {_status_label(ticket.status)}",
-        f"Prioriteit: {_priority_label(ticket.priority)}",
-        f"Type: {_type_label(ticket.type)}",
-        f"Bedrijf: {ticket.company.name}",
-        f"Gebouw: {ticket.building.name}",
-        f"Klant: {ticket.customer.name}",
-    ]
-
-    if ticket.room_label:
-        lines.append(f"Ruimte: {ticket.room_label}")
-
-    if ticket.assigned_to_id:
-        lines.append(f"Toegewezen aan: {ticket.assigned_to.email}")
-
-    lines.extend(["", "Omschrijving:", ticket.description])
-
-    return "\n".join(lines)
 
 
 def send_logged_email(
@@ -783,6 +730,8 @@ def send_logged_email(
     recipient_user=None,
     actor=None,
     attachment=None,
+    template_key="",
+    params=None,
 ):
     """The ONE logged sender. Every notification in this system goes
     through here: it writes the `NotificationLog` row first and then
@@ -821,6 +770,10 @@ def send_logged_email(
         event_type=event_type,
         subject=subject,
         body=body,
+        # P-16 Part D — the catalogue key + facts, beside the rendered
+        # audit record. `subject`/`body` stay exactly what was sent.
+        template_key=template_key or "",
+        params=params,
         status=NotificationStatus.QUEUED,
     )
 
@@ -850,7 +803,22 @@ def send_logged_email(
     return log
 
 
-def _send_to_user(ticket, recipient_user, event_type, subject, body, actor=None):
+def _send_to_user(
+    ticket,
+    recipient_user,
+    event_type,
+    template_key,
+    params,
+    actor=None,
+):
+    """Render `template_key` in THIS recipient's language and send.
+
+    P-16 Part D (§D.13.3, Option B for email): the mail is rendered once
+    at send time, in the recipient's language, and the rendered text is
+    what the NotificationLog keeps — the audit record stays verbatim.
+    """
+    lang = resolve_lang(getattr(recipient_user, "language", "nl"))
+    subject, body = notification_copy.render_email(template_key, params, lang)
     return send_logged_email(
         ticket=ticket,
         recipient_user=recipient_user,
@@ -859,6 +827,8 @@ def _send_to_user(ticket, recipient_user, event_type, subject, body, actor=None)
         event_type=event_type,
         subject=subject,
         body=body,
+        template_key=template_key,
+        params=params,
     )
 
 
@@ -967,7 +937,9 @@ def emit_sla_warning_inapp(
     *,
     event_type,
     recipients,
-    summary,
+    summary=None,
+    template_key="",
+    params=None,
     ticket=None,
     extra_work=None,
     severity=None,
@@ -997,8 +969,21 @@ def emit_sla_warning_inapp(
     W-LATE addendum 2 — `severity` defaults to L1: every time-driven
     warning is the standard warning tone unless the caller says which
     higher rung it is.
+
+    P-16 Part D — callers pass `template_key` + `params` and the summary
+    cache is rendered per RECIPIENT language through the catalogue (the
+    feed re-renders per VIEWER). A caller that still passes a rendered
+    `summary` gets the old behaviour: stored as given, no key.
     """
-    summary = (summary or "").strip()[:500]
+
+    def _summary_for(user):
+        if template_key:
+            rendered = notification_copy.render_summary(
+                template_key, params, resolve_lang(getattr(user, "language", "nl"))
+            )
+            return (rendered or "").strip()[:500]
+        return (summary or "").strip()[:500]
+
     rows = [
         Notification(
             recipient=user,
@@ -1007,7 +992,9 @@ def emit_sla_warning_inapp(
             ticket=ticket,
             extra_work=extra_work,
             is_directed=False,
-            summary=summary,
+            summary=_summary_for(user),
+            template_key=template_key or "",
+            params=params if template_key else None,
             severity=severity or NotificationSeverity.L1,
             read_at=None,
         )
@@ -1019,18 +1006,39 @@ def emit_sla_warning_inapp(
     return rows
 
 
-def emit_escalation_inapp(*, event_type, recipients, summary_for, severity, ticket):
+def emit_escalation_inapp(
+    *,
+    event_type,
+    recipients,
+    summary_for=None,
+    template_key="",
+    params=None,
+    severity,
+    ticket,
+):
     """W-LATE §2 — the BELL half of one escalation step.
 
     Like `emit_sla_warning_inapp` (no actor, not directed, no roster
     logic of its own) with two differences the ladder needs: the
     SEVERITY is the caller's — L2 or L3, never the default — and the
-    summary is built PER RECIPIENT through `summary_for(user)`, because
-    the sentence names a fact in the reader's own language
-    (`User.language`) rather than in whichever language the sweep runs
-    in. A Dutch sentence in an English reader's bell is the thing the
-    bell's own docstring warns against.
+    summary is built PER RECIPIENT, because the sentence names a fact in
+    the reader's own language (`User.language`) rather than in whichever
+    language the sweep runs in. A Dutch sentence in an English reader's
+    bell is the thing the bell's own docstring warns against.
+
+    P-16 Part D — the per-recipient render goes through the catalogue
+    (`template_key` + `params`); a caller still passing a `summary_for`
+    callable gets the old behaviour, without a key.
     """
+
+    def _summary(user):
+        if template_key:
+            rendered = notification_copy.render_summary(
+                template_key, params, resolve_lang(getattr(user, "language", "nl"))
+            )
+            return (rendered or "").strip()[:500]
+        return (summary_for(user) or "").strip()[:500] if summary_for else ""
+
     rows = [
         Notification(
             recipient=user,
@@ -1038,7 +1046,9 @@ def emit_escalation_inapp(*, event_type, recipients, summary_for, severity, tick
             event_type=event_type,
             ticket=ticket,
             is_directed=False,
-            summary=(summary_for(user) or "").strip()[:500],
+            summary=_summary(user),
+            template_key=template_key or "",
+            params=params if template_key else None,
             severity=severity,
             read_at=None,
         )
@@ -1050,7 +1060,9 @@ def emit_escalation_inapp(*, event_type, recipients, summary_for, severity, tick
     return rows
 
 
-def emit_ticket_part_assigned_inapp(*, recipient, actor, summary, ticket):
+def emit_ticket_part_assigned_inapp(
+    *, recipient, actor, summary=None, template_key="", params=None, ticket
+):
     """W-N1 §2 — the BELL half of "you were put on a part of this ticket".
 
     Its own function rather than a reuse of `emit_sla_warning_inapp`,
@@ -1072,6 +1084,10 @@ def emit_ticket_part_assigned_inapp(*, recipient, actor, summary, ticket):
     """
     if recipient is None or not recipient.id:
         return None
+    if template_key:
+        summary = notification_copy.render_summary(
+            template_key, params, resolve_lang(getattr(recipient, "language", "nl"))
+        )
     return Notification.objects.create(
         recipient=recipient,
         actor=actor,
@@ -1079,6 +1095,8 @@ def emit_ticket_part_assigned_inapp(*, recipient, actor, summary, ticket):
         ticket=ticket,
         is_directed=True,
         summary=(summary or "").strip()[:500],
+        template_key=template_key or "",
+        params=params if template_key else None,
         read_at=None,
     )
 
@@ -1118,7 +1136,7 @@ def _drop_muted(users, event_type):
     return [user for user in users if user.id not in muted_ids]
 
 
-def _send_to_users(ticket, users, event_type, subject, body, actor=None):
+def _send_to_users(ticket, users, event_type, template_key, params, actor=None):
     # Recipient resolution layered as: dedupe → exclude-actor → drop-muted.
     # The mute filter sits at the recipient layer (not the Celery task), so a
     # user with muted=True never gets a NotificationLog row at all — no QUEUED
@@ -1134,8 +1152,8 @@ def _send_to_users(ticket, users, event_type, subject, body, actor=None):
                 ticket=ticket,
                 recipient_user=user,
                 event_type=event_type,
-                subject=subject,
-                body=body,
+                template_key=template_key,
+                params=params,
                 actor=actor,
             )
         )
@@ -1143,20 +1161,6 @@ def _send_to_users(ticket, users, event_type, subject, body, actor=None):
 
 
 def send_ticket_created_email(ticket, actor=None):
-    subject = f"[{ticket.ticket_no}] Nieuwe ticket aangemaakt: {ticket.title}"
-    body = "\n".join(
-        [
-            "Er is een nieuwe ticket aangemaakt.",
-            "",
-            _ticket_summary(ticket),
-            "",
-            "Met vriendelijke groet,",
-            "het CleanOps-team",
-            "",
-            "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
-        ]
-    )
-
     return _send_to_users(
         ticket=ticket,
         # Sprint 122 (Part C) — SAs who opted into email for this company
@@ -1164,45 +1168,16 @@ def send_ticket_created_email(ticket, actor=None):
         users=list(_ticket_staff_users(ticket))
         + subscribed_super_admins_for_email(ticket.company_id),
         event_type=NotificationEventType.TICKET_CREATED,
-        subject=subject,
-        body=body,
+        template_key="ticket_created",
+        params=ticket_facts_params(ticket),
         actor=actor,
     )
 
 
 # Sprint W1-B item 14 — the customer has to be TOLD the cutoff rule, in
-# the same message that asks them to approve.
-#
-# This is the moment of truth: the mail that lands when work reaches
-# WAITING_CUSTOMER_APPROVAL is the one the customer reads BEFORE
-# deciding. Putting the explanation only on a screen they may never open,
-# or in a settings page, would make the rule a surprise on an invoice —
-# which is precisely what item 14 was raised to prevent. The frontend
-# `BillingCutoffNotice` component says the same thing in the same words
-# on the pages where the decision is taken; this is the copy that reaches
-# people who never log in.
-#
-# Written for a non-specialist: what happens, when, and what to do if
-# they disagree. No jargon, no invoice-lifecycle vocabulary.
-_BILLING_CUTOFF_PARAGRAPH_NL = [
-    "",
-    "Let op — facturatie:",
-    "Werk dat vóór uw facturatiedatum is afgerond, komt op de "
-    "eerstvolgende factuur te staan, ook als uw goedkeuring op dat "
-    "moment nog niet binnen is. Zo staat het werk op de factuur van de "
-    "maand waarin het echt is uitgevoerd.",
-    "Keurt u het werk daarna alsnog af? Dan draaien wij de factuur terug "
-    "met een creditnota en verdwijnt het werk weer van uw rekening.",
-]
-
-
-def _billing_cutoff_paragraph(new_status):
-    """The cutoff explanation, but only on the one status that needs it."""
-    if str(new_status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL):
-        return list(_BILLING_CUTOFF_PARAGRAPH_NL)
-    return []
-
-
+# the same message that asks them to approve. The paragraph itself lives
+# in the catalogue (`copy._BILLING_CUTOFF`); the `with_billing_cutoff`
+# param below is what switches it on, and only the one status needs it.
 def send_ticket_status_changed_email(
     ticket,
     old_status,
@@ -1216,55 +1191,19 @@ def send_ticket_status_changed_email(
         and str(new_status) in {str(TicketStatus.APPROVED), str(TicketStatus.REJECTED)}
     )
 
+    params = {
+        **ticket_facts_params(ticket),
+        "old_status": str(old_status),
+        "new_status": str(new_status),
+        "actor_label": actor_label,
+    }
     if override:
-        decision_word = (
-            "Goedgekeurd"
-            if str(new_status) == str(TicketStatus.APPROVED)
-            else "Afgewezen"
-        )
-        subject = (
-            f"[{ticket.ticket_no}] {decision_word} namens de klant door {actor_label}"
-        )
-        body = "\n".join(
-            [
-                f"Deze ticket is {decision_word.lower()} namens de klant door {actor_label}.",
-                "",
-                f"Oude status: {_status_label(old_status)}",
-                f"Nieuwe status: {_status_label(new_status)}",
-                "",
-                "Bent u de klant voor deze ticket en bent u het niet eens met deze beslissing? "
-                "Reageer dan op de ticket of neem contact op met uw facilitair beheerder.",
-                "",
-                _ticket_summary(ticket),
-                "",
-                "Met vriendelijke groet,",
-                "het CleanOps-team",
-                "",
-                "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
-            ]
-        )
+        template_key = "ticket_decided_on_behalf"
+        params["approved"] = str(new_status) == str(TicketStatus.APPROVED)
     else:
-        subject = (
-            f"[{ticket.ticket_no}] Status gewijzigd: "
-            f"{_status_label(old_status)} → {_status_label(new_status)}"
-        )
-        body = "\n".join(
-            [
-                "De status van een ticket is gewijzigd.",
-                "",
-                f"Oude status: {_status_label(old_status)}",
-                f"Nieuwe status: {_status_label(new_status)}",
-                "",
-                _ticket_summary(ticket),
-            ]
-            + _billing_cutoff_paragraph(new_status)
-            + [
-                "",
-                "Met vriendelijke groet,",
-                "het CleanOps-team",
-                "",
-                "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
-            ]
+        template_key = "ticket_status_changed"
+        params["with_billing_cutoff"] = (
+            str(new_status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL)
         )
 
     users = []
@@ -1285,8 +1224,8 @@ def send_ticket_status_changed_email(
         ticket=ticket,
         users=users,
         event_type=NotificationEventType.TICKET_STATUS_CHANGED,
-        subject=subject,
-        body=body,
+        template_key=template_key,
+        params=params,
         actor=actor,
     )
 
@@ -1295,26 +1234,12 @@ def send_ticket_assigned_email(ticket, old_assigned_to=None, actor=None):
     if not ticket.assigned_to_id:
         return []
 
-    subject = f"[{ticket.ticket_no}] Ticket aan u toegewezen: {ticket.title}"
-    body = "\n".join(
-        [
-            "Er is een ticket aan u toegewezen.",
-            "",
-            _ticket_summary(ticket),
-            "",
-            "Met vriendelijke groet,",
-            "het CleanOps-team",
-            "",
-            "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
-        ]
-    )
-
     return _send_to_users(
         ticket=ticket,
         users=[ticket.assigned_to],
         event_type=NotificationEventType.TICKET_ASSIGNED,
-        subject=subject,
-        body=body,
+        template_key="ticket_assigned",
+        params=ticket_facts_params(ticket),
         actor=actor,
     )
 
@@ -1323,28 +1248,14 @@ def send_ticket_unassigned_email(ticket, recipient_user, actor=None):
     if recipient_user is None:
         return []
 
-    subject = f"[{ticket.ticket_no}] Toewijzing ingetrokken: {ticket.title}"
-    body = "\n".join(
-        [
-            "U bent niet langer toegewezen aan deze ticket.",
-            "",
-            _ticket_summary(ticket),
-            "",
-            "Met vriendelijke groet,",
-            "het CleanOps-team",
-            "",
-            "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
-        ]
-    )
-
     # Reuse _send_to_users so the same actor-exclusion (self-unassign) and
     # dedupe rules apply as the rest of the email pipeline.
     return _send_to_users(
         ticket=ticket,
         users=[recipient_user],
         event_type=NotificationEventType.TICKET_UNASSIGNED,
-        subject=subject,
-        body=body,
+        template_key="ticket_unassigned",
+        params=ticket_facts_params(ticket),
         actor=actor,
     )
 
@@ -1364,9 +1275,7 @@ def send_slot_unable_to_complete_email(ticket, assignment, actor=None):
     """
     staff_user = assignment.user
     staff_label = (
-        (staff_user.full_name or staff_user.email)
-        if staff_user
-        else "een medewerker"
+        (staff_user.full_name or staff_user.email) if staff_user else ""
     )
 
     window_bits = []
@@ -1378,30 +1287,16 @@ def send_slot_unable_to_complete_email(ticket, assignment, actor=None):
         )
     if assignment.time_window_label:
         window_bits.append(assignment.time_window_label)
-    window = " / ".join(window_bits) if window_bits else "geen specifiek tijdvak"
 
-    reason = assignment.unable_to_complete_reason or "(geen reden opgegeven)"
-
-    subject = f"[{ticket.ticket_no}] Taak niet afgerond door {staff_label}"
-    body = "\n".join(
-        [
-            f"{staff_label} heeft een geplande taak gemarkeerd als "
-            "'niet afgerond'.",
-            "",
-            f"Tijdvak: {window}",
-            f"Reden: {reason}",
-            "",
-            "Plan deze taak opnieuw in of wijs een andere medewerker toe.",
-            "",
-            _ticket_summary(ticket),
-            "",
-            "Met vriendelijke groet,",
-            "het CleanOps-team",
-            "",
-            "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks "
-            "reageren op dit bericht.",
-        ]
-    )
+    # The per-language fallbacks ("een medewerker", "geen specifiek
+    # tijdvak", "(geen reden opgegeven)") live in the catalogue — an
+    # empty param renders as the reader's own language's fallback.
+    params = {
+        **ticket_facts_params(ticket),
+        "staff_label": staff_label,
+        "window": " / ".join(window_bits),
+        "reason": assignment.unable_to_complete_reason or "",
+    }
 
     return _send_to_users(
         ticket=ticket,
@@ -1410,40 +1305,29 @@ def send_slot_unable_to_complete_email(ticket, assignment, actor=None):
         users=list(_ticket_staff_users(ticket))
         + subscribed_super_admins_for_email(ticket.company_id),
         event_type=NotificationEventType.TICKET_SLOT_UNABLE,
-        subject=subject,
-        body=body,
+        template_key="ticket_slot_unable",
+        params=params,
         actor=actor,
     )
 
 
 def send_password_reset_email(user, uid, token, reset_url=None):
-    subject = "Wachtwoord opnieuw instellen voor CleanOps"
-    body_lines = [
-        "Er is een verzoek ingediend om het wachtwoord van uw account opnieuw in te stellen.",
-        "",
-        f"UID: {uid}",
-        f"Token: {token}",
-    ]
-    if reset_url:
-        body_lines.extend(["", f"Herstelkoppeling: {reset_url}"])
-    body_lines.extend(
-        [
-            "",
-            "Heeft u dit verzoek niet zelf gedaan? Dan kunt u deze e-mail negeren.",
-            "",
-            "Met vriendelijke groet,",
-            "het CleanOps-team",
-            "",
-            "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
-        ]
+    template_key = "password_reset"
+    params = {"uid": str(uid), "token": str(token), "reset_url": reset_url or ""}
+    subject, body = notification_copy.render_email(
+        template_key, params, resolve_lang(getattr(user, "language", "nl"))
     )
-
     return send_logged_email(
         recipient_user=user,
         recipient_email=user.email,
         event_type=NotificationEventType.PASSWORD_RESET,
         subject=subject,
-        body="\n".join(body_lines),
+        body=body,
+        template_key=template_key,
+        # The raw token is a secret with a short life; the BODY is the
+        # audit record and already carries it once. Params store no
+        # second copy.
+        params={"uid": str(uid)},
     )
 
 
@@ -1456,51 +1340,30 @@ def send_invitation_email(invitation, raw_token, accept_url):
     token exists; the caller must not persist it.
     """
     inviter = invitation.created_by
-    inviter_label = inviter.full_name or inviter.email
-    role_label = _role_label(invitation.role)
-
-    scope_lines = []
-    company_names = list(invitation.companies.values_list("name", flat=True))
-    if company_names:
-        scope_lines.append("Bedrijven: " + ", ".join(company_names))
-    building_names = list(invitation.buildings.values_list("name", flat=True))
-    if building_names:
-        scope_lines.append("Gebouwen: " + ", ".join(building_names))
-    customer_names = list(invitation.customers.values_list("name", flat=True))
-    if customer_names:
-        scope_lines.append("Klanten: " + ", ".join(customer_names))
-
-    subject = f"Uitnodiging voor CleanOps als {role_label}"
-    body_lines = [
-        "Hallo,",
-        "",
-        f"{inviter_label} heeft u uitgenodigd om deel te nemen aan CleanOps als {role_label}.",
-    ]
-    if scope_lines:
-        body_lines.append("")
-        body_lines.extend(scope_lines)
-    body_lines.extend([
-        "",
-        f"Accepteer deze uitnodiging via onderstaande link. De link verloopt op "
-        f"{invitation.expires_at:%Y-%m-%d %H:%M %Z}.",
-        "",
-        accept_url or "(beheerder: stel INVITATION_ACCEPT_FRONTEND_URL in)",
-        "",
-        "Heeft u deze uitnodiging niet verwacht? Dan kunt u deze e-mail negeren.",
-        "",
-        "Met vriendelijke groet,",
-        "het CleanOps-team",
-        "",
-        "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
-    ])
+    template_key = "invitation"
+    params = {
+        "inviter_label": inviter.full_name or inviter.email,
+        "role": str(invitation.role),
+        "company_names": list(invitation.companies.values_list("name", flat=True)),
+        "building_names": list(invitation.buildings.values_list("name", flat=True)),
+        "customer_names": list(invitation.customers.values_list("name", flat=True)),
+        "expires_label": f"{invitation.expires_at:%Y-%m-%d %H:%M %Z}",
+        "accept_url": accept_url or "",
+    }
+    # The invitee has no account yet, so there is no language to resolve;
+    # Dutch is the platform default. The (key, params) on the row make a
+    # later re-send in the person's own language a render, not a rewrite.
+    subject, body = notification_copy.render_email(template_key, params, "nl")
 
     return send_logged_email(
         recipient_email=invitation.email,
         subject=subject,
-        body="\n".join(body_lines),
+        body=body,
         event_type=NotificationEventType.INVITATION_SENT,
         recipient_user=None,
         actor=inviter,
+        template_key=template_key,
+        params=params,
     )
 
 
@@ -1556,32 +1419,33 @@ def send_invoice_to_contacts(invoice, pdf_bytes, *, actor=None):
 
     number = invoice.number or f"concept-{invoice.pk}"
     filename = f"factuur-{number}.pdf"
-    subject = f"Factuur {number} van {getattr(invoice.company, 'name', '')}".strip()
-    body = "\n".join(
-        [
-            f"Beste {{name}},",
-            "",
-            f"In de bijlage vindt u factuur {number}.",
-            "",
-            f"Totaal: {invoice.total_amount:.2f}",
-            "",
-            "Deze e-mail is automatisch verzonden.",
-        ]
-    )
+    template_key = "invoice_sent"
 
     logs = []
     for contact in recipients:
         try:
+            # A Contact has no account and no language column; Dutch is
+            # the platform default. Addressed by name: an invoice going
+            # to a person should say whose desk it is on.
+            params = {
+                "number": number,
+                "company_name": getattr(invoice.company, "name", ""),
+                "total": f"{invoice.total_amount:.2f}",
+                "contact_name": contact.full_name or "",
+            }
+            subject, body = notification_copy.render_email(
+                template_key, params, "nl"
+            )
             logs.append(
                 send_logged_email(
                     recipient_email=contact.email,
-                    subject=subject,
-                    # Addressed by name: an invoice going to a person
-                    # should say whose desk it is on.
-                    body=body.replace("{name}", contact.full_name or ""),
+                    subject=subject.strip(),
+                    body=body,
                     event_type=NotificationEventType.INVOICE_SENT,
                     actor=actor,
                     attachment=(filename, pdf_bytes, "application/pdf"),
+                    template_key=template_key,
+                    params=params,
                 )
             )
         except Exception:  # noqa: BLE001 — never lose a send over an e-mail.

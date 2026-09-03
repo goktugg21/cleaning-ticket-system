@@ -1999,7 +1999,19 @@ export function DashboardPage({
                         className="attn-row"
                         data-testid={`attention-${row.key}`}
                       >
-                        <span className="attn-row-label">{row.label}</span>
+                        <span className="attn-row-label">
+                          {row.label}
+                          {/* P-16 (P-14 S4) — the one row the greeting
+                              does NOT count says so: the move is the
+                              customer's, so its number stays out of
+                              "N dingen hebben u nodig". */}
+                          {!row.actionable && (
+                            <span className="muted small">
+                              {" · "}
+                              {t("attention.not_your_turn")}
+                            </span>
+                          )}
+                        </span>
                         <span className={attnBadge(row.value, row.actionable)}>
                           {fmt(row.value)}
                         </span>
@@ -2017,7 +2029,14 @@ export function DashboardPage({
                   >
                     {attentionExpanded
                       ? t("attention.show_less")
-                      : t("attention.show_all", { count: attentionRowsAll.length })}
+                      : /* P-16 (P-14 S4) — the greeting's number
+                           reappears HERE, so the visible five plus this
+                           line reconcile with "N dingen hebben u
+                           nodig" without expanding. */
+                        t("attention.show_all", {
+                          count: attentionRowsAll.length,
+                          total: needsYouCount,
+                        })}
                   </button>
                 )}
                 </>

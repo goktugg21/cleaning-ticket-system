@@ -168,37 +168,41 @@ def _notify_run(actor, customer, invoices):
     were correctly created. The run already happened; losing the email is
     an annoyance, losing the invoices is a month of billing.
     """
+    from notifications import copy as notification_copy
     from notifications.services import send_logged_email
 
     if actor is None or not getattr(actor, "email", ""):
         return None
     total = sum((inv.total_amount for inv in invoices), start=0)
-    lines = [
-        f"De facturatietaak heeft {len(invoices)} conceptfactuur/-facturen "
-        f"aangemaakt voor {customer.name}.",
-        "",
-        f"Totaal: {total:.2f}",
-        "",
-    ]
-    for inv in invoices:
-        where = "klantniveau" if inv.building_id is None else "per gebouw"
-        lines.append(f"  - concept #{inv.pk} ({where}): {inv.total_amount:.2f}")
-    lines += [
-        "",
-        "Deze concepten zijn nog niet verstuurd; controleer ze in Facturen.",
-        "",
-        "Deze e-mail is automatisch verzonden.",
-    ]
+    # P-16 Part D — facts through the copy catalogue, rendered in the
+    # recipient's language. The draft pk doubles as the on-screen
+    # "concept #N" label the operator sees under Facturen, so it is a
+    # display reference here, not a bare id.
+    template_key = "invoice_run_completed"
+    params = {
+        "count": len(invoices),
+        "customer_name": customer.name,
+        "total": f"{total:.2f}",
+        "rows": [
+            {
+                "ref": inv.pk,
+                "level": "customer" if inv.building_id is None else "building",
+                "amount": f"{inv.total_amount:.2f}",
+            }
+            for inv in invoices
+        ],
+    }
     try:
+        lang = notification_copy.resolve_lang(getattr(actor, "language", "nl"))
+        subject, body = notification_copy.render_email(template_key, params, lang)
         return send_logged_email(
             recipient_email=actor.email,
             recipient_user=actor,
-            subject=(
-                f"[Facturatie] {len(invoices)} concept(en) aangemaakt voor "
-                f"{customer.name}"
-            ),
-            body="\n".join(lines),
+            subject=subject,
+            body=body,
             event_type=INVOICE_RUN_EVENT,
+            template_key=template_key,
+            params=params,
         )
     except Exception:  # noqa: BLE001 — never lose invoices over an email.
         logger.exception(
@@ -371,46 +375,43 @@ def run_daily_invoice_run(today=None):
 # WP-1 G4 — the weekly billing-month-at-risk digest.
 # ---------------------------------------------------------------------
 
-#: Subject prefix. Also the de-dup key: a recipient who already got a
-#: digest with this prefix inside the last six days is skipped, so a
-#: restarted beat container cannot double-mail the same week.
+#: The digest's catalogue key — the DE-DUP key since P-16 Part D: a
+#: recipient who already has a log row with this `template_key` inside
+#: the last six days is skipped, so a restarted beat container cannot
+#: double-mail the same week. Matching on the key instead of on subject
+#: text survives a copy change and a recipient-language difference.
+AT_RISK_TEMPLATE_KEY = "billing_month_at_risk"
+
+#: The old Dutch subject prefix — kept ONLY as the transition leg of the
+#: de-dup query, so a digest sent just before this deploy (whose row has
+#: no template_key) still holds the six-day window shut.
 AT_RISK_SUBJECT_PREFIX = "[Facturatie] Deze factuurmaand loopt risico"
 
-#: Human words for the machine stages, for the mail body only — the
-#: frontend translates the same keys through i18n.
-_AT_RISK_STAGE_NL = {
-    "WAITING_REVIEW": "wacht op controle",
-    "SLOT_DONE": "klaar gemeld, niet afgerond",
-    "BLOCKED": "vastgelopen",
-    "PAST_DEADLINE": "deadline verstreken",
-}
 
-
-def _at_risk_digest_body(groups) -> str:
-    lines = [
-        "Dit werk valt in de open factuurmaand (of eerder), maar de",
-        "afronding is niet compleet. Zolang dat zo blijft, komt het NIET",
-        "op de factuur van deze maand.",
-        "",
-    ]
-    for group in groups:
-        lines.append(f"{group['customer_name']}:")
-        for row in group["rows"]:
-            ref = row["ticket_no"] or f"MW-{row['extra_work_id']}"
-            stage = _AT_RISK_STAGE_NL.get(row["stage"], row["stage"])
-            where = f" ({row['building_name']})" if row["building_name"] else ""
-            lines.append(
-                f"  - {ref} · {row['title']}{where} — {stage}, "
-                f"{row['age_days']} dag(en)"
-            )
-        lines.append("")
-    lines += [
-        "Afronden, herplannen of annuleren gebeurt in het systeem zelf;",
-        "deze e-mail wijzigt niets.",
-        "",
-        "Deze e-mail is automatisch verzonden.",
-    ]
-    return "\n".join(lines)
+def _at_risk_params(data, day) -> dict:
+    """The digest's facts, for the copy catalogue: names, numbers and
+    display refs (a ticket_no, or the MW-<n> label the list pages print
+    for an unspawned request)."""
+    return {
+        "total": data["total"],
+        "month": day.strftime("%Y-%m"),
+        "groups": [
+            {
+                "customer_name": group["customer_name"],
+                "rows": [
+                    {
+                        "ref": row["ticket_no"] or f"MW-{row['extra_work_id']}",
+                        "title": row["title"],
+                        "building_name": row["building_name"] or "",
+                        "stage": row["stage"],
+                        "age_days": row["age_days"],
+                    }
+                    for row in group["rows"]
+                ],
+            }
+            for group in data["groups"]
+        ],
+    }
 
 
 @shared_task
@@ -463,27 +464,39 @@ def send_billing_month_at_risk_digest(today=None):
             data = at_risk_groups(customers, today=day, now=now)
             if data["total"] == 0:
                 continue
-            subject = (
-                f"{AT_RISK_SUBJECT_PREFIX} — {data['total']} "
-                f"openstaand ({day.strftime('%Y-%m')})"
-            )
-            body = _at_risk_digest_body(data["groups"])
+            # P-16 Part D — rendered per recipient through the copy
+            # catalogue; the dedupe keys on `template_key` (with the old
+            # subject prefix as the transition leg for pre-key rows).
+            from django.db.models import Q as _Q
+
+            from notifications import copy as notification_copy
+
+            params = _at_risk_params(data, day)
             for admin in company_admin_recipients(company_id):
                 already = NotificationLog.objects.filter(
+                    _Q(template_key=AT_RISK_TEMPLATE_KEY)
+                    | _Q(subject__startswith=AT_RISK_SUBJECT_PREFIX),
                     recipient_user=admin,
                     event_type=INVOICE_RUN_EVENT,
-                    subject__startswith=AT_RISK_SUBJECT_PREFIX,
                     created_at__gte=now - timedelta(days=6),
                 ).exists()
                 if already:
                     skipped += 1
                     continue
+                lang = notification_copy.resolve_lang(
+                    getattr(admin, "language", "nl")
+                )
+                subject, body = notification_copy.render_email(
+                    AT_RISK_TEMPLATE_KEY, params, lang
+                )
                 send_logged_email(
                     recipient_email=admin.email,
                     recipient_user=admin,
                     subject=subject,
                     body=body,
                     event_type=INVOICE_RUN_EVENT,
+                    template_key=AT_RISK_TEMPLATE_KEY,
+                    params=params,
                 )
                 mailed += 1
         except Exception:  # noqa: BLE001 — one company must not stop the rest.

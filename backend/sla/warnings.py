@@ -302,9 +302,8 @@ def _extra_email_in_cooldown(
 def _emit(
     *,
     event_type,
-    subject,
-    body,
-    inapp_summary,
+    template_key,
+    params,
     users,
     now,
     cooldown_hours,
@@ -313,6 +312,13 @@ def _emit(
     extra_email: str = "",
 ):
     """Warn everyone in `users` who is not in cooldown, on BOTH channels.
+
+    P-16 Part D — the words come from the notification copy catalogue:
+    `template_key` + `params` instead of pre-rendered text. The mail is
+    rendered per RECIPIENT language at send time (the log keeps the
+    rendered text as the audit record); the bell row stores the key +
+    params so the feed re-renders per VIEWER. The extra address is a
+    mailbox, not a person, and gets the Dutch rendering.
 
     Returns the number of PEOPLE warned — not the number of messages,
     because one person now receives two of them. Recipients are deduped
@@ -335,6 +341,7 @@ def _emit(
     not silently inherit an email-era assumption from a filter three
     modules away.
     """
+    from notifications import copy as notification_copy
     from notifications.services import emit_sla_warning_inapp, send_logged_email
 
     seen = set()
@@ -357,6 +364,7 @@ def _emit(
         now=now,
         cooldown_hours=cooldown_hours,
     ):
+        subject, body = notification_copy.render_email(template_key, params, "nl")
         send_logged_email(
             recipient_email=extra_email,
             recipient_user=None,
@@ -365,6 +373,8 @@ def _emit(
             event_type=event_type,
             ticket=ticket,
             extra_work=extra_work,
+            template_key=template_key,
+            params=params,
         )
         extra_sent = 1
     if not candidates:
@@ -385,13 +395,16 @@ def _emit(
     emit_sla_warning_inapp(
         event_type=event_type,
         recipients=warned,
-        summary=inapp_summary,
+        template_key=template_key,
+        params=params,
         ticket=ticket,
         extra_work=extra_work,
     )
     for user in warned:
         if not getattr(user, "email", ""):
             continue
+        lang = notification_copy.resolve_lang(getattr(user, "language", "nl"))
+        subject, body = notification_copy.render_email(template_key, params, lang)
         send_logged_email(
             recipient_email=user.email,
             recipient_user=user,
@@ -400,19 +413,10 @@ def _emit(
             event_type=event_type,
             ticket=ticket,
             extra_work=extra_work,
+            template_key=template_key,
+            params=params,
         )
     return len(warned) + extra_sent
-
-
-def _sign_off():
-    return [
-        "",
-        "Met vriendelijke groet,",
-        "het CleanOps-team",
-        "",
-        "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks "
-        "reageren op dit bericht.",
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -499,34 +503,14 @@ def sweep_approval_cutoff(now, thresholds):
             if days_left > warn_days:
                 continue
             ew = ticket.extra_work_request
-            cutoff_label = cutoff.strftime("%d-%m-%Y")
-            subject = (
-                f"[{ticket.ticket_no}] Uw goedkeuring wordt verwacht voor "
-                f"de facturatiedatum {cutoff_label}"
-            )
-            body = "\n".join(
-                [
-                    "Het werk hieronder is afgerond en wacht op uw goedkeuring.",
-                    "",
-                    f"Uw facturatiedatum is {cutoff_label} "
-                    f"(over {days_left} dag(en)).",
-                    "",
-                    "Belangrijk: werk dat vóór uw facturatiedatum is "
-                    "afgerond, komt op de eerstvolgende factuur te staan, "
-                    "ook als uw goedkeuring dan nog niet binnen is. Zo "
-                    "staat het werk op de factuur van de maand waarin het "
-                    "echt is uitgevoerd.",
-                    "",
-                    "Bent u het niet eens met het werk? Keur het dan af of "
-                    "neem contact op met uw beheerder. Is het al "
-                    "gefactureerd, dan draaien wij de factuur terug met een "
-                    "creditnota en verdwijnt het werk weer van uw rekening.",
-                    "",
-                    f"Meerwerk: {ew.title}",
-                    f"Ticket: {ticket.ticket_no} - {ticket.title}",
-                ]
-                + _sign_off()
-            )
+            # P-16 Part D — facts only; the words live in the catalogue.
+            params = {
+                "ticket_no": ticket.ticket_no,
+                "ticket_title": ticket.title,
+                "ew_title": ew.title,
+                "cutoff_iso": cutoff.isoformat(),
+                "days_left": days_left,
+            }
             recipients = list(ticket_customer_recipients(ticket))
             # P-5 S8.1 — the rings this company added to the first warning.
             recipients += _also_notify(th, "approval_cutoff", ticket)
@@ -544,18 +528,8 @@ def sweep_approval_cutoff(now, thresholds):
             sent += _emit(
                 event_type=NotificationEventType.SLA_APPROVAL_CUTOFF_DUE,
                 extra_email=th.approval_cutoff_extra_email,
-                subject=subject,
-                body=body,
-                # The bell line carries the FACTS only — which work, how
-                # long is left. The sentence that names the warning is
-                # rendered by the feed UI through `t()`, because a
-                # server-side Dutch string in a translated interface is
-                # a string nobody can translate.
-                inapp_summary=(
-                    f"{ew.title} - {ticket.ticket_no} - "
-                    f"facturatiedatum {cutoff_label} "
-                    f"({days_left} dag(en))"
-                ),
+                template_key="sla_approval_cutoff",
+                params=params,
                 users=recipients,
                 now=now,
                 cooldown_hours=th.cooldown_hours,
@@ -602,25 +576,11 @@ def sweep_manager_review(now, thresholds):
             if waited < target:
                 continue
             hours = waited // 3600
-            subject = (
-                f"[{ticket.ticket_no}] Wacht op uw controle "
-                f"({hours} werkuren)"
-            )
-            body = "\n".join(
-                [
-                    "Een medewerker heeft dit werk als uitgevoerd gemeld. "
-                    "Het wacht nu op uw controle en is nog niet naar de "
-                    "klant gestuurd.",
-                    "",
-                    f"Wachttijd: {hours} werkuren.",
-                    "",
-                    "Zolang het hier staat, ziet de klant het niet en kan "
-                    "het niet gefactureerd worden.",
-                    "",
-                    f"Ticket: {ticket.ticket_no} - {ticket.title}",
-                ]
-                + _sign_off()
-            )
+            params = {
+                "ticket_no": ticket.ticket_no,
+                "ticket_title": ticket.title,
+                "hours": hours,
+            }
             recipients = list(ticket_responsible_manager_recipients(ticket))
             recipients += _also_notify(th, "manager_review", ticket)
             if waited >= escalate_target or _final_step_reached(
@@ -631,12 +591,8 @@ def sweep_manager_review(now, thresholds):
             sent += _emit(
                 event_type=NotificationEventType.SLA_MANAGER_REVIEW_OVERDUE,
                 extra_email=th.manager_review_extra_email,
-                subject=subject,
-                body=body,
-                inapp_summary=(
-                    f"{ticket.ticket_no} - {ticket.title} - "
-                    f"{hours} werkuren"
-                ),
+                template_key="sla_manager_review",
+                params=params,
                 users=recipients,
                 now=now,
                 cooldown_hours=th.cooldown_hours,
@@ -683,22 +639,12 @@ def sweep_not_started_tickets(now, thresholds):
                 continue
             hours = late // 3600
             planned = timezone.localtime(ticket.scheduled_start_at)
-            subject = (
-                f"[{ticket.ticket_no}] Nog niet gestart "
-                f"({hours} werkuren na de planning)"
-            )
-            body = "\n".join(
-                [
-                    "Dit werk had moeten beginnen en staat nog steeds op "
-                    "niet gestart.",
-                    "",
-                    f"Geplande start: {planned.strftime('%d-%m-%Y %H:%M')}.",
-                    f"Verstreken: {hours} werkuren.",
-                    "",
-                    f"Ticket: {ticket.ticket_no} - {ticket.title}",
-                ]
-                + _sign_off()
-            )
+            params = {
+                "ticket_no": ticket.ticket_no,
+                "ticket_title": ticket.title,
+                "planned_label": planned.strftime("%d-%m-%Y %H:%M"),
+                "hours": hours,
+            }
             recipients = list(ticket_assigned_staff_recipients(ticket))
             recipients += _also_notify(th, "not_started", ticket)
             if not recipients or late >= escalate_target:
@@ -713,13 +659,8 @@ def sweep_not_started_tickets(now, thresholds):
             sent += _emit(
                 event_type=NotificationEventType.SLA_WORK_NOT_STARTED,
                 extra_email=th.not_started_extra_email,
-                subject=subject,
-                body=body,
-                inapp_summary=(
-                    f"{ticket.ticket_no} - {ticket.title} - gepland "
-                    f"{planned.strftime('%d-%m-%Y %H:%M')}, "
-                    f"{hours} werkuren verstreken"
-                ),
+                template_key="sla_not_started_ticket",
+                params=params,
                 users=recipients,
                 now=now,
                 cooldown_hours=th.cooldown_hours,
@@ -788,35 +729,23 @@ def sweep_not_started_extra_work(now, thresholds):
             if late < th.not_started_business_seconds:
                 continue
             hours = late // 3600
-            planned_label = ew.provider_planned_date.strftime("%d-%m-%Y")
-            subject = (
-                f"[Meerwerk #{ew.pk}] Nog niet gestart "
-                f"(gepland op {planned_label})"
-            )
-            body = "\n".join(
-                [
-                    "Dit meerwerk is goedgekeurd en ingepland, maar er is "
-                    "nog geen uitvoering gestart.",
-                    "",
-                    f"Geplande datum: {planned_label}.",
-                    f"Verstreken: {hours} werkuren.",
-                    "",
-                    f"Meerwerk: {ew.title}",
-                ]
-                + _sign_off()
-            )
+            # `ew_ref` is the reference the subject line prints — the
+            # EW's number is its only human handle (it has no ticket_no
+            # sibling), frozen into the params as a label.
+            params = {
+                "ew_title": ew.title,
+                "ew_ref": f"Meerwerk #{ew.pk}",
+                "planned_iso": ew.provider_planned_date.isoformat(),
+                "hours": hours,
+            }
             # An Extra Work has no per-row responsible-manager table and
             # no crew until a ticket is spawned, so provider management
             # IS the responsible ring here. There is no second hop above
             # it that is not the same people.
             sent += _emit(
                 event_type=NotificationEventType.SLA_WORK_NOT_STARTED,
-                subject=subject,
-                body=body,
-                inapp_summary=(
-                    f"{ew.title} - gepland {planned_label}, "
-                    f"{hours} werkuren verstreken"
-                ),
+                template_key="sla_not_started_extra_work",
+                params=params,
                 users=list(extra_work_provider_recipients(ew)),
                 now=now,
                 cooldown_hours=th.cooldown_hours,

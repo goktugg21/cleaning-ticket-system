@@ -448,6 +448,37 @@ class ExtraWorkRequestViewSet(
         is_override = data.get("is_override", False)
         note = data.get("note", "")
 
+        # P-16 (P-14 S4) — a caller saying `reason` meant the note; the
+        # key used to be silently dropped and the cancel landed without
+        # its why. An alias, not a second field: `note` wins when both
+        # are sent.
+        if not note.strip():
+            note = str(request.data.get("reason") or "").strip()
+
+        # P-16 (P-14 S4) — cancelling kills work somebody asked for;
+        # the record must say why. The rule the reject door already has
+        # (P-8R: "where the UI cannot be bypassed"), extended to the
+        # cancel: a CANCELLED transition needs a written reason in SOME
+        # field — `note`, the `reason` alias, or the override path's
+        # own `override_reason` (the late-stage cancels' existing
+        # mandatory gate). At the VIEW, not in `apply_transition` — the
+        # primitive walks states for seeders and tests (W13-FIX).
+        if (
+            to_status == ExtraWorkStatus.CANCELLED
+            and not note.strip()
+            and not str(data.get("override_reason") or "").strip()
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "A reason is required when cancelling: say why "
+                        "this work stops."
+                    ),
+                    "code": "cancel_note_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # W-PLAN — the workflow card's direct UNDER_REVIEW ->
         # PRICING_PROPOSED leg is a pricing door too (the proposal
         # views are the other two). Same gate, same bypass. At the

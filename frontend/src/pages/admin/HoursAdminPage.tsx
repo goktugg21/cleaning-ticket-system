@@ -2012,6 +2012,19 @@ export function HoursAdminPage() {
                                     (the fold's summary names the week);
                                     the lock badge it carried rides on
                                     the date now. */}
+                                {/* P-16 (P-14 S4) — hours dated after
+                                    today wear it, amber, never blocked:
+                                    entering hours on the planned day
+                                    ahead of time is real practice. */}
+                                {entry.is_future && (
+                                  <span
+                                    className="badge badge-high"
+                                    style={{ marginLeft: 6 }}
+                                    data-testid={`hours-future-badge-${entry.id}`}
+                                  >
+                                    {t("hours_admin.future_badge")}
+                                  </span>
+                                )}
                                 {entry.is_locked && (
                                   <span
                                     className="badge badge-closed"

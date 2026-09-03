@@ -150,17 +150,18 @@ def _recipients(ticket):
     )
 
 
-def _subject_and_body(ticket, deadline):
-    from notifications.services import _ticket_summary
+def _reminder_params(ticket, deadline):
+    """P-16 Part D — the reminder's facts, for the copy catalogue."""
+    from notifications.copy import ticket_facts_params
 
-    label = ticket.ticket_no or f"#{ticket.pk}"
-    subject = f"Deadline approaching: {label}"
-    body = (
-        f"{label} — {ticket.title}\n"
-        f"Deadline: {deadline.isoformat()}\n\n"
-        f"{_ticket_summary(ticket)}"
+    params = ticket_facts_params(ticket)
+    params.update(
+        {
+            "label": ticket.ticket_no or f"#{ticket.pk}",
+            "deadline_iso": deadline.isoformat(),
+        }
     )
-    return subject, body
+    return params
 
 
 def remind_one(ticket, *, now=None):
@@ -192,17 +193,22 @@ def remind_one(ticket, *, now=None):
         return 0
 
     event = NotificationEventType.TICKET_DEADLINE_APPROACHING
-    label = ticket.ticket_no or f"#{ticket.pk}"
+    template_key = "ticket_deadline_approaching"
+    params = _reminder_params(ticket, deadline)
     emit_sla_warning_inapp(
         event_type=event,
         recipients=told,
-        summary=f"{label} is due {deadline.isoformat()}",
+        template_key=template_key,
+        params=params,
         ticket=ticket,
     )
-    subject, body = _subject_and_body(ticket, deadline)
+    from notifications import copy as notification_copy
+
     for user in told:
         if not getattr(user, "email", ""):
             continue
+        lang = notification_copy.resolve_lang(getattr(user, "language", "nl"))
+        subject, body = notification_copy.render_email(template_key, params, lang)
         send_logged_email(
             recipient_email=user.email,
             recipient_user=user,
@@ -210,6 +216,8 @@ def remind_one(ticket, *, now=None):
             body=body,
             event_type=event,
             ticket=ticket,
+            template_key=template_key,
+            params=params,
         )
     return len(told)
 

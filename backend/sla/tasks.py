@@ -103,35 +103,39 @@ SLA_EVENT_TYPES = (
     "SLA_WORK_NOT_STARTED",
 )
 
-_SUMMARY_LABELS = {
-    "SLA_APPROVAL_CUTOFF_DUE": "Klantgoedkeuring voor de facturatiedatum",
-    "SLA_MANAGER_REVIEW_OVERDUE": "Afgerond werk nog niet gecontroleerd",
-    "SLA_WORK_NOT_STARTED": "Werk niet op tijd gestart",
-}
+def _weekly_summary_params(rows, *, since, until) -> dict:
+    """P-16 Part D — the digest's facts, for the copy catalogue. The
+    words (labels, framing sentences) live in `notifications/copy.py`;
+    this packs each log row into names, numbers and pre-localised
+    timestamps."""
+    return {
+        "since_iso": since.isoformat(),
+        "until_iso": until.isoformat(),
+        "rows": [
+            {
+                "event_type": row.event_type,
+                "when": timezone.localtime(row.created_at).strftime(
+                    "%d-%m %H:%M"
+                ),
+                "subject": row.subject,
+                "recipient": row.recipient_email,
+            }
+            for row in rows
+        ],
+    }
 
 
 def weekly_summary_body(rows, *, since, until) -> str:
-    lines = [
-        "Overzicht van de automatische waarschuwingen van de afgelopen week",
-        f"({since:%d-%m-%Y} t/m {until:%d-%m-%Y}).",
-        "",
-    ]
-    if not rows:
-        lines.append("Er zijn deze week geen waarschuwingen verstuurd.")
-        return "\n".join(lines)
-    by_type: dict = {}
-    for row in rows:
-        by_type.setdefault(row.event_type, []).append(row)
-    for event_type, group in by_type.items():
-        lines.append(
-            f"{_SUMMARY_LABELS.get(event_type, event_type)} - "
-            f"{len(group)} bericht(en)"
-        )
-        for row in group:
-            when = timezone.localtime(row.created_at).strftime("%d-%m %H:%M")
-            lines.append(f"  - {when}  {row.subject}  -> {row.recipient_email}")
-        lines.append("")
-    return "\n".join(lines)
+    """The Dutch rendering, kept as a callable seam for the tests that
+    pin the digest's shape."""
+    from notifications import copy as notification_copy
+
+    _, body = notification_copy.render_email(
+        "sla_weekly_summary",
+        _weekly_summary_params(rows, since=since, until=until),
+        "nl",
+    )
+    return body
 
 
 @shared_task
@@ -167,18 +171,27 @@ def send_sla_weekly_summary(now=None):
                 )
                 .order_by("event_type", "created_at")
             )
-            body = weekly_summary_body(logs, since=since, until=until)
-            subject = (
-                f"Weekoverzicht automatische waarschuwingen "
-                f"({since:%d-%m} t/m {until:%d-%m-%Y})"
-            )
+            # P-16 Part D — rendered per RECIPIENT language through the
+            # catalogue; the log row keeps the key + facts beside the
+            # rendered audit record.
+            from notifications import copy as notification_copy
+
+            params = _weekly_summary_params(logs, since=since, until=until)
             for admin in company_admin_recipients(row.company_id):
+                lang = notification_copy.resolve_lang(
+                    getattr(admin, "language", "nl")
+                )
+                subject, body = notification_copy.render_email(
+                    "sla_weekly_summary", params, lang
+                )
                 send_logged_email(
                     recipient_email=admin.email,
                     recipient_user=admin,
                     subject=subject,
                     body=body,
                     event_type=NotificationEventType.SLA_WEEKLY_SUMMARY,
+                    template_key="sla_weekly_summary",
+                    params=params,
                 )
                 mails += 1
         except Exception:  # noqa: BLE001 — one company must not stop the rest.

@@ -466,14 +466,65 @@ dropped):**
 - RECORDED, no change — recurring archive idempotence; the
   numbered-but-unsent credit note (terminal mirror by design); the
   behaviors-confirmed list.
-- DEFERRED (P-16, by title) — notifications localization (owner's
-  migration yes); customers RELATIONSHIP lifecycle words; "Price and
-  send" pre-read on the detail; dashboard's three reconciling
-  numbers; CA sidebar Hours/My-hours divider; /my/facturen mobile
-  card list (the send-month fallback landed); the native date input
-  (browser-controlled, note only); future-dated hours flagging;
-  preview-vs-generate month question; proposal plan-gate refusal
-  order; EW cancel-note requirement.
+- **P-16: the deferred list is CLOSED — nothing stays deferred.**
+  - FIXED (P-16 Part D) — notifications localization: §D.13.3 built as
+    the hybrid. One keyed catalogue (`notifications/copy.py`, ~28
+    kinds × nl/en), every composer site emits `(template_key, params)`
+    (names and numbers, never ids), email renders at SEND in the
+    recipient's language (the log keeps the rendered audit record),
+    the bell re-renders at READ in the viewer's language (the API
+    resolves it; the SPA's `notifications.sla.*` title map is gone —
+    the serializer's `title` replaces it), the at-risk digest dedupes
+    on the key, old rows keep printing their stored text. Migration
+    `notifications/0022` (additive, nullable). Pinned in
+    `test_p16_copy_catalogue` (both languages on one event; the
+    no-key row; the broken-params fallback).
+  - FIXED (P-16 Part C) — customers RELATIONSHIP words: the lifecycle
+    "Actief/Active" became "Klant/Customer", so RELATIONSHIP and
+    STATUS stop printing the same word for different facts (one key,
+    every consumer: cell, filter, detail).
+  - FIXED (P-16 Part C) — "Price and send" pre-read on the detail:
+    the sentence lives under the button that does it
+    (`extra-work-next-preread`): opens the quote builder on the Money
+    tab, nothing goes to the customer yet (the start route says its
+    own version).
+  - FIXED (P-16 Part C) — the dashboard's reconciling numbers: the
+    fold's "Toon alle N" carries the greeting's own total ("samen
+    {total} die u nodig hebben") so the visible five + that line add
+    up to the greeting without expanding; the one uncounted row says
+    why ("de klant is aan zet").
+  - FIXED (P-16 Part C) — CA sidebar divide: the personal item beside
+    the company "Uren" reads "Mijn eigen uren / My own hours"
+    (`nav.my_hours_own`); the staff-only branch keeps the short name.
+  - FIXED (P-16 Part C) — /my/facturen mobile: the FE-7 `table-cards`
+    collapse; every field visible as label/value cards at 390, number
+    and TOTAL first (page-scoped order rule).
+  - CLOSED, note only (ruled P-16) — the native date input: the
+    browser owns `<input type=date>`'s display format; changing it
+    means a custom picker, which the redesign deliberately does not
+    build. Recorded, no change.
+  - FIXED (P-16 Part C) — future-dated hours: the API stamps
+    `is_future` (server clock — the P-3 rule), read-only; the admin
+    entries table wears an amber "In de toekomst" badge and My hours'
+    day panel says the sentence once. A flag, never a block (the
+    over-quote principle). Pinned in `test_p16_future_flag`.
+  - FIXED (P-16 Part C) — preview-vs-generate: the generate endpoint
+    accepts `through`; the Facturen screen always sends it, so the
+    button bills exactly the list its preview shows ("Maak concept
+    t/m {maand}", the consequence sentence says it); the claim, not
+    the window, still prevents double-billing. Pinned in
+    `test_p16_generate_through`.
+  - FIXED (P-16 Part C) — the proposal refusal order: the plan gate
+    only answers on a LEGAL pair; an impossible move answers
+    `invalid_transition` first. Pinned in
+    `test_p16_part_c.ProposalRefusalOrderTests`.
+  - FIXED (P-16 Part C) — the EW cancel-note requirement: a CANCELLED
+    transition without a written reason in any field is refused
+    (`cancel_note_required`); the `reason` key is an accepted alias
+    into the note instead of being silently dropped; the detail's
+    cancel dialog gained its required reason box (the other four
+    cancel doors already sent one). Pinned in
+    `test_p16_part_c.CancelNoteRequiredTests`.
 
 - **Invoices · API · refusal shape drift** — an illegal invoice
   transition returns a 400 with a human sentence but NO stable

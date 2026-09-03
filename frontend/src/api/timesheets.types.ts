@@ -96,6 +96,9 @@ export interface TimeEntry {
   note: string;
   /** True when this entry's week is closed — the UI disables its actions. */
   is_locked: boolean;
+  /** P-16 — dated after today by the SERVER's clock. A flag, never a
+   *  block: the surfaces mark it amber and let the person decide. */
+  is_future: boolean;
   created_by: number;
   created_at: string;
   updated_at: string;

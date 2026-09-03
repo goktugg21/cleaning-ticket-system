@@ -1903,11 +1903,23 @@ export async function listServiceCategories(
   if (params.company !== undefined) {
     query.company = params.company;
   }
-  const response = await api.get<PaginatedResponse<ServiceCategory>>(
-    "/services/categories/",
-    { params: query },
-  );
-  return response.data.results;
+  // P-16 (the Sprint 135 picker rule) — every consumer treats this
+  // return as "all categories" (the add-service modal's select, the
+  // Categories tab, the pricing picker), and none has pagination UI:
+  // one bare page silently truncated the moment the catalog crossed
+  // the page size. Fetch every matching row (listAllCompanies pattern).
+  const all: ServiceCategory[] = [];
+  let page = 1;
+  for (let i = 0; i < 100; i++) {
+    const response = await api.get<PaginatedResponse<ServiceCategory>>(
+      "/services/categories/",
+      { params: { ...query, page_size: 200, page } },
+    );
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
 }
 
 export async function createServiceCategory(
@@ -1999,10 +2011,19 @@ export async function listServices(
   if (params.company !== undefined) {
     query.company = params.company;
   }
-  const response = await api.get<PaginatedResponse<Service>>("/services/", {
-    params: query,
-  });
-  return response.data.results;
+  // P-16 — same picker rule as listServiceCategories above: every
+  // consumer reads this as the whole catalog; page exhaustively.
+  const all: Service[] = [];
+  let page = 1;
+  for (let i = 0; i < 100; i++) {
+    const response = await api.get<PaginatedResponse<Service>>("/services/", {
+      params: { ...query, page_size: 200, page },
+    });
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
 }
 
 export async function createService(

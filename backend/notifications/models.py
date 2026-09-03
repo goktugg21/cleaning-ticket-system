@@ -184,6 +184,16 @@ class NotificationLog(models.Model):
     subject = models.CharField(max_length=255)
     body = models.TextField()
 
+    # P-16 Part D (§D.13.3) — which catalogue key composed this mail and
+    # with what facts. `subject`/`body` above stay the AUDIT RECORD:
+    # exactly what was sent, in the language it was sent in. The key +
+    # params exist for the machine — the at-risk digest's dedupe keys on
+    # `template_key` instead of matching subject text, and a future
+    # re-render has the facts. Params carry names and numbers, never ids
+    # that can vanish. Additive and nullable; old rows simply have none.
+    template_key = models.CharField(max_length=64, blank=True, default="")
+    params = models.JSONField(null=True, blank=True)
+
     status = models.CharField(
         max_length=32,
         choices=NotificationStatus.choices,
@@ -437,6 +447,15 @@ class Notification(models.Model):
     # recipient set is the message's visible audience), so this carries no
     # PII the recipient could not already read on the ticket.
     summary = models.CharField(max_length=500, blank=True, default="")
+
+    # P-16 Part D (§D.13.3) — the catalogue key + facts this row was
+    # composed from. The bell endpoint re-renders `summary` from these in
+    # the VIEWER's language at read time; the stored `summary` above is
+    # the rendered cache (the recipient's language at emit time) and what
+    # an old row without a key keeps printing. Params carry names and
+    # numbers, never ids that can vanish. Additive and nullable.
+    template_key = models.CharField(max_length=64, blank=True, default="")
+    params = models.JSONField(null=True, blank=True)
 
     # W-LATE addendum 2 — which rung, if any. See `NotificationSeverity`.
     # Additive: the default is INFO and the migration backfills the four

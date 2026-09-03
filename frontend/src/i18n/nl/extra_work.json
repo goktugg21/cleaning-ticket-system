@@ -392,6 +392,8 @@
   "detail.spawned_tickets_empty": "Er zijn nog geen tickets aangemaakt voor dit Meerwerk.",
   "detail.cancel_dialog_title": "Dit Meerwerk annuleren?",
   "detail.cancel_dialog_body": "Hiermee wordt de aanvraag op Geannuleerd gezet en de wijziging vastgelegd in het auditlog.",
+  "detail.cancel_dialog_reason_label": "Waarom stopt dit werk? (verplicht)",
+  "detail.cancel_dialog_reason_placeholder": "Bijv. de klant heeft de aanvraag ingetrokken",
   "detail.cancel_dialog_confirm": "Meerwerk annuleren",
   "detail.cancel_dialog_keep": "Openhouden",
   "detail.cancel_dialog_spawned_warning_title_one": "Na annulering blijft 1 actief ticket bestaan",
@@ -964,5 +966,7 @@
   "detail.fixed_price_tag": "vaste prijs",
   "detail.actual_hours_teach": "Opslaan legt de uren vast voor de factuur. Er wordt niets verzonden.",
   "detail.over_quote_confirm": "{{worked}} u gewerkt tegenover {{agreed}} u afgesproken — {{diff}} meer dan de klant heeft goedgekeurd. Druk nogmaals om toch op te slaan.",
-  "detail.over_quote_save": "Toch opslaan"
+  "detail.over_quote_save": "Toch opslaan",
+  "next.prepare_proposal_preread": "Dit opent de offertebouwer op het tabblad Geld. Daar zet u de prijsregels en verstuurt u de offerte — er gaat nog niets naar de klant.",
+  "next.price_and_start_preread": "Dit opent de prijsregels op het tabblad Geld. De klant heeft vooraf akkoord gegeven: zodra u de prijs vastlegt en verstuurt, kan het werk starten."
 }

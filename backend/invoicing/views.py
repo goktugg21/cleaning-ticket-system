@@ -235,6 +235,17 @@ class InvoiceViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         granularity = request.data.get("granularity") or None
+        # P-16 (P-14 S4, the preview-vs-generate month question) — the
+        # caller may ask the THROUGH question: this period or any
+        # earlier one, the same rule the /due/ panel, the preview and
+        # the nightly run use. The Facturen screen passes it, so the
+        # button produces exactly the list its own preview showed
+        # instead of the exact-month subset (6 predicted, 1 produced —
+        # the P-14 trap). Default stays exact-month for any caller that
+        # does not ask. Double-billing stays impossible either way: the
+        # CLAIM (is_invoiced + the live line link) is what prevents it,
+        # not the month window.
+        through = bool(request.data.get("through"))
         # Resolve the customer through the actor's customer scope so a
         # cross-tenant customer id is a clean 404 (never leaks / generates).
         customer = get_object_or_404(
@@ -248,6 +259,7 @@ class InvoiceViewSet(viewsets.GenericViewSet):
                 year,
                 month,
                 granularity,
+                through=through,
             )
         except DjangoValidationError as exc:
             return Response(

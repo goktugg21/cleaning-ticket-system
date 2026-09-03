@@ -62,6 +62,7 @@ from .models import (
 )
 from .proposal_pdf import render_proposal_pdf
 from .proposal_state_machine import (
+    ALLOWED_TRANSITIONS,
     TransitionError,
     apply_proposal_transition,
     emit_proposal_event,
@@ -313,7 +314,16 @@ class ProposalTransitionView(views.APIView):
         # plan un-made between create and send is exactly what this
         # catches). A DRAFT written before the gate existed is also
         # caught here. Same bypass: `override_reason` in the body.
-        if data["to_status"] == ProposalStatus.SENT:
+        #
+        # P-16 (P-14 S4) — but only when the MOVE ITSELF is legal: an
+        # impossible pair (a CANCELLED proposal asked to SENT) must be
+        # refused as `invalid_transition`, the true FIRST reason, not as
+        # a plan problem it would still have after fixing the plan. The
+        # pair check duplicates one set lookup the machine does anyway;
+        # the machine below remains the authority.
+        if data["to_status"] == ProposalStatus.SENT and (
+            (proposal.status, ProposalStatus.SENT) in ALLOWED_TRANSITIONS
+        ):
             from .planning import check_pricing_plan_gate
 
             gate = check_pricing_plan_gate(

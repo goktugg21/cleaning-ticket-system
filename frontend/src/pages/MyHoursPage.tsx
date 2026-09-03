@@ -1118,6 +1118,18 @@ export function MyHoursPage() {
 
               {openDayIso !== null && (
                 <div style={{ marginTop: 10 }} data-testid="my-hours-day-panel">
+                  {/* P-16 (P-14 S4) — hours dated after today (the
+                      SERVER's is_future, never the browser clock) say
+                      so, once per day, amber. A flag, never a block. */}
+                  {openDayEntries.some((entry) => entry.is_future) && (
+                    <p
+                      className="alert-warning small"
+                      style={{ margin: "0 0 8px", padding: "6px 10px" }}
+                      data-testid="my-hours-future-note"
+                    >
+                      {t("my_hours.future_note")}
+                    </p>
+                  )}
                   {/* Bounded, like every list over a server collection
                       (CLAUDE.md #8). `sm` because this is ONE day of
                       ONE person — the 260px step is the right size for

@@ -106,97 +106,61 @@ def l2_persist_days(
 
 
 # ---------------------------------------------------------------------
-# The sentence, in the recipient's language
+# The sentence, in the recipient's language — P-16 Part D: the words
+# live in the notification copy catalogue (`notifications/copy.py`,
+# the `ticket_late_*` keys); this module packs the FACTS.
 # ---------------------------------------------------------------------
-
-_MONTHS = {
-    "nl": ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"],
-    "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
-}
 
 
 def _lang(user) -> str:
     return "en" if getattr(user, "language", "nl") == "en" else "nl"
 
 
-def _day(date: datetime.date, lang: str) -> str:
-    return f"{date.day} {_MONTHS[lang][date.month - 1]}"
-
-
 def _label(ticket) -> str:
     return ticket.ticket_no or f"#{ticket.pk}"
 
 
-def _days_nl(n: int) -> str:
-    return f"{n} dag" if n == 1 else f"{n} dagen"
+_TEMPLATE_KEY = {
+    TicketEscalationStep.L2_MANAGERS: "ticket_late_l2_managers",
+    TicketEscalationStep.L2_ESCALATED: "ticket_late_l2_escalated",
+    TicketEscalationStep.L3_NEVER_DONE: "ticket_late_l3_never_done",
+}
 
 
-def _days_en(n: int) -> str:
-    return f"{n} day" if n == 1 else f"{n} days"
+def _step_params(step: str, ticket, lateness: late_rules.Lateness) -> dict:
+    """Names, numbers and ISO dates — never ids. The catalogue formats
+    the dates per language at render time, so one params payload serves
+    a Dutch inbox and an English bell alike."""
+    from notifications.copy import ticket_facts_params
+
+    params = ticket_facts_params(ticket)
+    params.update(
+        {
+            "label": _label(ticket),
+            "deadline_days_late": lateness.deadline_days_late,
+            "deadline_iso": (
+                lateness.deadline.isoformat() if lateness.deadline else ""
+            ),
+            "anchor_days": lateness.anchor_days,
+            "anchor_iso": (
+                lateness.anchor.isoformat() if lateness.anchor else ""
+            ),
+            "anchored_on_deadline": lateness.deadline is not None,
+        }
+    )
+    return params
 
 
 def summary_for(step: str, ticket, lateness: late_rules.Lateness, lang: str) -> str:
-    """The fact and the promise broken, as one line."""
-    head = f"{ticket.title} — {_label(ticket)}"
-    if step == TicketEscalationStep.L3_NEVER_DONE:
-        n = lateness.anchor_days or 0
-        anchored_on_deadline = lateness.deadline is not None
-        if lang == "en":
-            what = "the deadline" if anchored_on_deadline else "the planned day"
-            return (
-                f"{head}: {_days_en(n)} past {what} ({_day(lateness.anchor, 'en')}) "
-                "without a single hour worked"
-            )
-        what = "de deadline" if anchored_on_deadline else "de geplande dag"
-        return (
-            f"{head}: {_days_nl(n)} voorbij {what} ({_day(lateness.anchor, 'nl')}) "
-            "zonder één gewerkt uur"
+    """The fact and the promise broken, as one line (via the catalogue)."""
+    from notifications import copy as notification_copy
+
+    return (
+        notification_copy.render_summary(
+            _TEMPLATE_KEY[step], _step_params(step, ticket, lateness), lang
         )
-    n = lateness.deadline_days_late or 0
-    when = _day(lateness.deadline, lang)
-    if step == TicketEscalationStep.L2_ESCALATED:
-        if lang == "en":
-            return f"{head}: deadline {when} is {_days_en(n)} past and the work is still not done"
-        return f"{head}: deadline {when} is {_days_nl(n)} overschreden en het werk is nog niet af"
-    if lang == "en":
-        return f"{head}: deadline {when} is {_days_en(n)} past"
-    return f"{head}: deadline {when} is {_days_nl(n)} overschreden"
-
-
-_SUBJECT = {
-    TicketEscalationStep.L2_MANAGERS: {
-        "nl": "Deadline verstreken: {label}",
-        "en": "Deadline passed: {label}",
-    },
-    TicketEscalationStep.L2_ESCALATED: {
-        "nl": "Deadline verstreken en nog niet af: {label}",
-        "en": "Deadline passed and still not done: {label}",
-    },
-    TicketEscalationStep.L3_NEVER_DONE: {
-        "nl": "Nooit uitgevoerd — dertig dagen zonder gewerkt uur: {label}",
-        "en": "Never done — thirty days without an hour worked: {label}",
-    },
-}
-
-_SIGN_OFF = {
-    "nl": (
-        "\n\nMet vriendelijke groet,\nhet CleanOps-team\n\n"
-        "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks "
-        "reageren op dit bericht."
-    ),
-    "en": (
-        "\n\nKind regards,\nthe CleanOps team\n\n"
-        "This e-mail was sent automatically. You cannot reply to it directly."
-    ),
-}
-
-
-def _mail(step: str, ticket, lateness: late_rules.Lateness, lang: str) -> tuple[str, str]:
-    from notifications.services import _ticket_summary
-
-    subject = _SUBJECT[step][lang].format(label=_label(ticket))
-    body = summary_for(step, ticket, lateness, lang) + "\n\n" + _ticket_summary(ticket) + _SIGN_OFF[lang]
-    return subject, body
+        or ""
+    )
 
 
 # ---------------------------------------------------------------------
@@ -268,18 +232,25 @@ def fire_step(ticket, step: str, lateness: late_rules.Lateness, *, now) -> int:
         return 0
 
     event = _EVENT[step]
+    template_key = _TEMPLATE_KEY[step]
+    params = _step_params(step, ticket, lateness)
     with transaction.atomic():
         emit_escalation_inapp(
             event_type=event,
             recipients=people,
-            summary_for=lambda user: summary_for(step, ticket, lateness, _lang(user)),
+            template_key=template_key,
+            params=params,
             severity=_severity(step),
             ticket=ticket,
         )
+        from notifications import copy as notification_copy
+
         for user in people:
             if not getattr(user, "email", ""):
                 continue
-            subject, body = _mail(step, ticket, lateness, _lang(user))
+            subject, body = notification_copy.render_email(
+                template_key, params, _lang(user)
+            )
             send_logged_email(
                 recipient_email=user.email,
                 recipient_user=user,
@@ -287,6 +258,8 @@ def fire_step(ticket, step: str, lateness: late_rules.Lateness, *, now) -> int:
                 body=body,
                 event_type=event,
                 ticket=ticket,
+                template_key=template_key,
+                params=params,
             )
         TicketEscalation.objects.create(
             ticket=ticket,

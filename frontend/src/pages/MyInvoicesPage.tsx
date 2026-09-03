@@ -90,7 +90,15 @@ export function MyInvoicesPage() {
         />
       ) : (
         <div className="card" style={{ overflowX: "auto" }}>
-          <table className="data-table" data-testid="my-invoices-table">
+          {/* P-16 (P-14 S4) — at phone width this money page showed no
+              money: PERIODE, STATUS and TOTAAL sat inside the table's
+              own scroll with no affordance. The FE-7 `table-cards`
+              collapse turns every row into a card; the page's own
+              media rule puts number and TOTAL first. */}
+          <table
+            className="data-table table-cards my-invoices-cards"
+            data-testid="my-invoices-table"
+          >
             <thead>
               <tr>
                 <th>{t("customer_facturen.col_number")}</th>
@@ -105,7 +113,7 @@ export function MyInvoicesPage() {
             <tbody>
               {invoices.map((inv) => (
                 <tr key={inv.id} data-testid="my-invoices-row">
-                  <td>
+                  <td className="td-subject">
                     <Link to={`/my/facturen/${inv.id}`} className="link">
                       {inv.number ?? `#${inv.id}`}
                       {inv.is_reversal && (
@@ -124,19 +132,29 @@ export function MyInvoicesPage() {
                       )}
                     </Link>
                   </td>
-                  <td className="muted small">
+                  <td
+                    className="muted small"
+                    data-label={t("customer_facturen.col_building")}
+                  >
                     {inv.building_name ?? t("facturen.all_buildings")}
                   </td>
-                  <td className="muted small">
+                  <td
+                    className="muted small"
+                    data-label={t("customer_facturen.col_period")}
+                  >
                     {formatPeriod(inv.period_year, inv.period_month, inv.sent_at)}
                   </td>
-                  <td>
+                  <td data-label={t("customer_facturen.col_status")}>
                     <span className="cell-tag cell-tag-open">
                       <i />
                       {t("facturen.status_sent")}
                     </span>
                   </td>
-                  <td style={{ textAlign: "right" }}>
+                  <td
+                    className="my-invoices-total"
+                    style={{ textAlign: "right" }}
+                    data-label={t("customer_facturen.col_total")}
+                  >
                     <strong>{formatMoney(inv.total_amount)}</strong>
                   </td>
                 </tr>

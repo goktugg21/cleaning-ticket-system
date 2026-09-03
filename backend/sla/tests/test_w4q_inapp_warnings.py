@@ -203,11 +203,17 @@ class BellRowsTests(InAppWarningTestBase):
         addressless = self.make_user("nomail-w4q@example.com", "BUILDING_MANAGER")
         type(addressless).objects.filter(pk=addressless.pk).update(email="")
         addressless.refresh_from_db()
+        # P-16 Part D — `_emit` takes (template_key, params) now; the
+        # words render through the copy catalogue per recipient.
         warned = sla_warnings._emit(
             event_type=NotificationType.SLA_WORK_NOT_STARTED,
-            subject="s",
-            body="b",
-            inapp_summary="summary",
+            template_key="sla_not_started_ticket",
+            params={
+                "ticket_no": self.ticket.ticket_no,
+                "ticket_title": self.ticket.title,
+                "planned_label": "01-09-2026 08:00",
+                "hours": 9,
+            },
             users=[addressless],
             now=NOW,
             cooldown_hours=24,

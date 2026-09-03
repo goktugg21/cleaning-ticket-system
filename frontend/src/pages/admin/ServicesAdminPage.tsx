@@ -27,6 +27,7 @@ import type {
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { useToast } from "../../components/ToastProvider";
+import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { ManagedUnitPicker } from "../../components/ManagedUnitPicker";
@@ -1467,7 +1468,19 @@ export function ServicesAdminPage({ embedded = false }: { embedded?: boolean } =
                     </ul>
                   </div>
                 )}
-                <div className="table-wrap">
+                {/* P-16 — the helper pages exhaustively now (the
+                    Sprint 135 picker rule), so the table is BOUNDED
+                    per CLAUDE.md #8: scrolls past the step instead of
+                    growing without limit. Math.max keeps the header
+                    visible on an empty catalog (BoundedList renders
+                    nothing at count 0). */}
+                <BoundedList
+                  size="lg"
+                  count={Math.max(1, services.length)}
+                  ariaLabel={t("services.tab_services")}
+                  testIdPrefix="services-table"
+                  className="table-wrap"
+                >
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -1541,7 +1554,7 @@ export function ServicesAdminPage({ embedded = false }: { embedded?: boolean } =
                     ))}
                   </tbody>
                 </table>
-                </div>
+                </BoundedList>
               </>
             )}
           </div>
@@ -1735,7 +1748,15 @@ export function ServicesAdminPage({ embedded = false }: { embedded?: boolean } =
                 </p>
               </div>
             ) : (
-              <div className="table-wrap">
+              /* P-16 — bounded for the same reason as the Services
+                 table above: the helper reads the WHOLE catalog now. */
+              <BoundedList
+                size="lg"
+                count={Math.max(1, categories.length)}
+                ariaLabel={t("services.tab_categories")}
+                testIdPrefix="services-categories-table"
+                className="table-wrap"
+              >
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -1832,7 +1853,7 @@ export function ServicesAdminPage({ embedded = false }: { embedded?: boolean } =
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </BoundedList>
             )}
           </div>
 

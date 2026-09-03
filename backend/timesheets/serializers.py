@@ -338,6 +338,7 @@ class TimeEntrySerializer(serializers.ModelSerializer):
     hours = serializers.DecimalField(max_digits=4, decimal_places=2)
     weighted_hours = serializers.SerializerMethodField()
     is_locked = serializers.SerializerMethodField()
+    is_future = serializers.SerializerMethodField()
 
     class Meta:
         model = TimeEntry
@@ -363,6 +364,7 @@ class TimeEntrySerializer(serializers.ModelSerializer):
             "building_name",
             "note",
             "is_locked",
+            "is_future",
             "created_by",
             "created_at",
             "updated_at",
@@ -380,6 +382,7 @@ class TimeEntrySerializer(serializers.ModelSerializer):
             "weighted_hours",
             "building_name",
             "is_locked",
+            "is_future",
             "created_by",
             "created_at",
             "updated_at",
@@ -435,6 +438,19 @@ class TimeEntrySerializer(serializers.ModelSerializer):
         offering an action that would 400.
         """
         return is_week_closed(obj.company_id, obj.iso_year, obj.iso_week)
+
+    def get_is_future(self, obj) -> bool:
+        """P-16 (P-14 S4) — hours dated AFTER today, by the SERVER's
+        clock (a browser in another timezone must not decide what
+        "today" is — the P-3 rule). A FLAG, never a block: entering
+        hours on the planned day ahead of time is a real, deliberate
+        practice (the P-14 chains did it), so the surfaces mark it
+        amber and let the person decide — the same warn-don't-block
+        principle as the over-quote rule.
+        """
+        from django.utils import timezone
+
+        return obj.date > timezone.localdate()
 
     def validate_hours(self, value):
         if value is None or value < HOURS_MIN or value > HOURS_MAX:

@@ -386,16 +386,16 @@ export function NotificationsPage({
                   <span className="notif-item-dot" aria-hidden="true" />
                 )}
                 <span className="notif-page-row-main">
-                  {/* Sprint W4-Q §1 — see NotificationBell: the warning
-                      names itself here, through t(), because the server
-                      summary deliberately carries facts and no
-                      untranslatable sentence. */}
-                  {isSlaWarningEvent(notification.event_type) && (
-                    <span className="notif-warning-title">
-                      <AlertTriangle size={13} strokeWidth={2.2} />
-                      {t(`notifications.sla.${notification.event_type}`)}
-                    </span>
-                  )}
+                  {/* P-16 Part D — see NotificationBell: the warning's
+                      headline arrives resolved from the API in the
+                      viewer's own language. */}
+                  {isSlaWarningEvent(notification.event_type) &&
+                    notification.title && (
+                      <span className="notif-warning-title">
+                        <AlertTriangle size={13} strokeWidth={2.2} />
+                        {notification.title}
+                      </span>
+                    )}
                   <span className="notif-page-row-summary">
                     {notification.summary}
                   </span>

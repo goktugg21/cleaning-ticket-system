@@ -1183,6 +1183,9 @@ export function ExtraWorkDetailPage() {
   // FE-3 (§D.4) — the folded timeline, rendered for the provider too.
   const [timeline, setTimeline] = useState<ExtraWorkTimelineEntry[]>([]);
   const [cancelBusy, setCancelBusy] = useState(false);
+  // P-16 (P-14 S4) — the cancel carries its why: the server refuses a
+  // CANCELLED transition without a written reason (cancel_note_required).
+  const [cancelReason, setCancelReason] = useState("");
 
   // M1 B6 — Extra Work message thread + composer state.
   const [ewMessages, setEwMessages] = useState<EwMessage[]>([]);
@@ -2581,12 +2584,22 @@ export function ExtraWorkDetailPage() {
   // outlive the cancel).
   async function handleConfirmCancel() {
     if (!id) return;
+    const reason = cancelReason.trim();
+    if (reason === "") return;
     setCancelBusy(true);
     try {
+      // `override_reason` satisfies the late-stage override gate (the
+      // server coerces is_override there); `note` lands the same words
+      // on the history row for the pre-spawn statuses — the reason is
+      // recorded whichever pair this is (the TicketExtraWorkCards
+      // pattern).
       const updated = await transitionExtraWork(id, {
         to_status: "CANCELLED",
+        note: reason,
+        override_reason: reason,
       });
       setEw(updated);
+      setCancelReason("");
       cancelDialogRef.current?.close();
     } catch (err) {
       const refusal = describeExtraWorkRefusal(err, t);
@@ -2989,15 +3002,35 @@ export function ExtraWorkDetailPage() {
       </button>
     ) : null
   ) : nextStep.buttonKey ? (
-    <button
-      type="button"
-      className="btn btn-primary"
-      onClick={runNextStep}
-      disabled={nextStepBusy}
-      data-testid="extra-work-next-button"
-    >
-      {t(nextStep.buttonKey)}
-    </button>
+    <>
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={runNextStep}
+        disabled={nextStepBusy}
+        data-testid="extra-work-next-button"
+      >
+        {t(nextStep.buttonKey)}
+      </button>
+      {/* P-16 (P-14 S4) — the "Price and send" pre-read lives HERE,
+          where the pressing happens: the list row only navigates, so
+          the sentence that says what the press actually does belongs
+          on the detail, under the button that does it. */}
+      {(nextStep.buttonKey === "next.button.prepare_proposal" ||
+        nextStep.buttonKey === "next.button.price_and_start") && (
+        <p
+          className="muted small"
+          style={{ margin: "6px 0 0" }}
+          data-testid="extra-work-next-preread"
+        >
+          {t(
+            nextStep.buttonKey === "next.button.price_and_start"
+              ? "next.price_and_start_preread"
+              : "next.prepare_proposal_preread",
+          )}
+        </p>
+      )}
+    </>
   ) : null;
 
   // "Andere stappen": the other legal forward moves (never the one the
@@ -4607,12 +4640,31 @@ export function ExtraWorkDetailPage() {
               </div>
             )}
             <p style={{ margin: 0 }}>{t("detail.cancel_dialog_body")}</p>
+            {/* P-16 (P-14 S4) — the required why. The server refuses a
+                cancel without one (cancel_note_required); the reason
+                lands on the timeline as the history note. */}
+            <label
+              className="field"
+              style={{ marginTop: 12, display: "block" }}
+            >
+              <span className="field-label">
+                {t("detail.cancel_dialog_reason_label")}
+              </span>
+              <textarea
+                rows={2}
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder={t("detail.cancel_dialog_reason_placeholder")}
+                data-testid="extra-work-cancel-reason"
+              />
+            </label>
           </div>
         }
         confirmLabel={t("detail.cancel_dialog_confirm")}
         cancelLabel={t("detail.cancel_dialog_keep")}
         onConfirm={handleConfirmCancel}
         busy={cancelBusy}
+        confirmDisabled={cancelReason.trim() === ""}
         destructive
       />
 

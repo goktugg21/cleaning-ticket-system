@@ -85,12 +85,33 @@ TICKET_STATUS_LABEL_NL = {
     TicketStatus.ON_HOLD: "In wacht",
 }
 
+# P-16 Part D — the English mirror, copied from
+# `frontend/src/i18n/en/common.json`'s `ticket_status.*` block. Same
+# contract as the Dutch map above: the catalogue test asserts it covers
+# every member of `TicketStatus`, and (where the repo is checked out
+# whole) that every string is byte-identical to the en bundle. Keep the
+# two in step by editing the frontend bundle first and this file second.
+TICKET_STATUS_LABEL_EN = {
+    TicketStatus.OPEN: "Open",
+    TicketStatus.IN_PROGRESS: "In progress",
+    TicketStatus.WAITING_MANAGER_REVIEW: "Waiting for the manager",
+    TicketStatus.WAITING_CUSTOMER_APPROVAL: "Waiting for the customer",
+    TicketStatus.APPROVED: "Work approved",
+    TicketStatus.REJECTED: "Rejected",
+    TicketStatus.CLOSED: "Closed",
+    TicketStatus.REOPENED_BY_ADMIN: "Reopened",
+    TicketStatus.CONVERTED_TO_EXTRA_WORK: "Converted to extra work",
+    TicketStatus.ACKNOWLEDGED: "Scheduled, not started",
+    TicketStatus.ON_HOLD: "On hold",
+}
+
 # What a status nobody has a word for renders as. NOT the raw code: a
 # customer receiving `CONVERTED_TO_EXTRA_WORK` in an email learns nothing
 # and is shown the inside of the machine. The completeness test makes
 # this unreachable for a real status; it exists for a value that is not
 # one at all.
 UNKNOWN_STATUS_LABEL_NL = "Onbekende status"
+UNKNOWN_STATUS_LABEL_EN = "Unknown status"
 
 
 def ticket_status_label_nl(value) -> str:
@@ -99,3 +120,14 @@ def ticket_status_label_nl(value) -> str:
         return TICKET_STATUS_LABEL_NL[TicketStatus(value)]
     except (ValueError, KeyError):
         return UNKNOWN_STATUS_LABEL_NL
+
+
+def ticket_status_label(value, lang: str) -> str:
+    """The word for a ticket status in `lang` (P-16 Part D — the
+    catalogue renders per recipient/viewer language)."""
+    if lang == "en":
+        try:
+            return TICKET_STATUS_LABEL_EN[TicketStatus(value)]
+        except (ValueError, KeyError):
+            return UNKNOWN_STATUS_LABEL_EN
+    return ticket_status_label_nl(value)

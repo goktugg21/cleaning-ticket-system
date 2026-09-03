@@ -907,6 +907,11 @@ export interface Notification {
   read_at: string | null;
   is_read: boolean;
   created_at: string;
+  // P-16 Part D — the warning headline, resolved by the API in the
+  // viewer's language (null for rows whose headline is the job's own
+  // name). The client-side notifications.sla.* title map is gone: the
+  // SPA never composes notification copy from parts.
+  title: string | null;
 }
 
 export interface NotificationListResponse {

@@ -313,6 +313,11 @@ export interface GenerateInvoicesPayload {
   // Omit to use the customer's billing target + split (resolved
   // server-side per Extra Work row, Sprint 182 §3).
   granularity?: InvoiceGranularity;
+  // P-16 — true asks the THROUGH question (this period or any earlier
+  // one), the same rule the preview and the nightly run use. The
+  // Facturen screen always passes it so the button bills exactly the
+  // list its preview showed.
+  through?: boolean;
 }
 
 // POST /api/invoices/generate/ — returns the created DRAFT invoice(s) (201).

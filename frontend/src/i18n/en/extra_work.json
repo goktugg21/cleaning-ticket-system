@@ -392,6 +392,8 @@
   "detail.spawned_tickets_empty": "No tickets have been created from this extra work yet.",
   "detail.cancel_dialog_title": "Cancel this Extra Work?",
   "detail.cancel_dialog_body": "This will move the request to Cancelled and write the status change to the audit log.",
+  "detail.cancel_dialog_reason_label": "Why does this work stop? (required)",
+  "detail.cancel_dialog_reason_placeholder": "E.g. the customer withdrew the request",
   "detail.cancel_dialog_confirm": "Cancel Extra Work",
   "detail.cancel_dialog_keep": "Keep open",
   "detail.cancel_dialog_spawned_warning_title_one": "1 active ticket will remain after cancellation",
@@ -964,5 +966,7 @@
   "detail.fixed_price_tag": "fixed price",
   "detail.actual_hours_teach": "Saving fixes the hours for the invoice. Nothing is sent.",
   "detail.over_quote_confirm": "{{worked}} h worked against {{agreed}} h agreed — {{diff}} more than the customer approved. Press again to save anyway.",
-  "detail.over_quote_save": "Save anyway"
+  "detail.over_quote_save": "Save anyway",
+  "next.prepare_proposal_preread": "This opens the quote builder on the Money tab. There you set the price lines and send the quote — nothing goes to the customer yet.",
+  "next.price_and_start_preread": "This opens the price lines on the Money tab. The customer pre-approved: once you set and send the price, the work can start."
 }

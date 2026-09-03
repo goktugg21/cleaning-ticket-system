@@ -617,7 +617,11 @@ export function AppShell({ children }: AppShellProps) {
               )}
               {/* Sprint 152 — employee hours. Every provider-side
                   role including STAFF; customer-side users see no
-                  trace of the module. */}
+                  trace of the module. P-16 (P-14 S4): HERE the item
+                  sits directly under the company-wide "Uren", so it
+                  says whose hours it is — "Mijn eigen uren". The
+                  staff-only branch above keeps the short name; no
+                  neighbour competes with it there. */}
               {canAccessTimesheets(me?.role) && (
                 <NavLink
                   to="/my-hours"
@@ -627,7 +631,7 @@ export function AppShell({ children }: AppShellProps) {
                   <span className="nav-icon">
                     <Timer size={16} strokeWidth={2} />
                   </span>
-                  {t("nav.my_hours")}
+                  {t("nav.my_hours_own")}
                 </NavLink>
               )}
               {canAccessReports(me?.role) && (

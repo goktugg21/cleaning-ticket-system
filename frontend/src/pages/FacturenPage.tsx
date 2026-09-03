@@ -771,6 +771,11 @@ export function FacturenPage({
         // Sprint 183 §1 — the UI speaks the pair; the WIRE keeps the
         // legacy `granularity` field.
         granularity: granularityFor(genTarget, genSplit),
+        // P-16 (P-14 S4) — the button answers the SAME question as the
+        // preview beside it: everything unbilled through the picked
+        // month, not the exact-month subset. The claim prevents
+        // double-billing whatever the window.
+        through: true,
       });
       if (created.length > 0) {
         // P-12 D3 (§D.24 rule 4) — the page MOVES you to where the

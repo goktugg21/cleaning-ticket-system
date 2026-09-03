@@ -16029,6 +16029,13 @@ table.assign-table { min-width: 0; width: 100%; }
     margin-bottom: 4px;
   }
   .table-cards td.td-subject::before { display: none; }
+
+  /* P-16 (P-14 S4) — /my/facturen's card order: the money page leads
+     with number and TOTAL. Flex column so `order` can lift the total
+     under the number; every other cell keeps DOM order. */
+  .my-invoices-cards tr { display: flex; flex-direction: column; }
+  .my-invoices-cards td.td-subject { order: -2; }
+  .my-invoices-cards td.my-invoices-total { order: -1; }
 }
 
 /* FE-7 (base SoT §3.5, tablet) — at 768 the sidebar is still pinned and
