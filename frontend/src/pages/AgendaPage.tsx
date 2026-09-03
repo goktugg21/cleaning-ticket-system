@@ -1277,7 +1277,10 @@ function WorkPlanWeek() {
           style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
           data-testid="agenda-week-stepper"
         >
-          <span className="hours-tiles-title">{t("agenda.week_title")}</span>
+          {/* P-15 — the board head follows the page title's branch. */}
+          <span className="hours-tiles-title">
+            {teamWeek ? t("agenda.page_title_team") : t("agenda.week_title")}
+          </span>
           <button
             type="button"
             className="btn btn-secondary btn-sm"

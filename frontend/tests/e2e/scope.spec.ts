@@ -50,7 +50,6 @@ interface ApiTicketRow {
   id: number;
   title: string;
   building_name?: string;
-  created_by_email?: string | null;
 }
 
 /** Every ticket the signed-in actor may see, through their own token. */
@@ -283,8 +282,17 @@ test("Tom (plain CUSTOMER_USER, view_own) sees only tickets he created", async (
   }
   const visible = await visibleTicketsForPage(page);
   expect(visible.length).toBeGreaterThan(0);
-  for (const ticket of visible) {
-    expect(ticket.created_by_email).toBe(DEMO_USERS.customerAll.email);
+  // P-15 re-pin: the LIST rows carry NO author field at all (the old
+  // `created_by_email` assertion compared `undefined` and was masked
+  // by the pageApiGet host defect until P-15 fixed the helper). The
+  // author lives on the DETAIL, which view_own guarantees Tom can
+  // open for every row he sees — sample the first five.
+  for (const ticket of visible.slice(0, 5)) {
+    const detail = await pageApiGet<{ created_by_email: string }>(
+      page,
+      `/api/tickets/${ticket.id}/`,
+    );
+    expect(detail.created_by_email).toBe(DEMO_USERS.customerAll.email);
   }
 });
 
