@@ -531,6 +531,7 @@
   "detail.dates_saved": "Dates saved.",
   "detail.field_planned_end_date": "Planned end date",
   "list.bulk_dates_button": "Set dates",
+  "list.bulk_what": "Select rows lets you pick several requests and assign, date or plan them at once. Nothing here deletes anything.",
   "list.bulk_dates_title": "Set deadline and planned end date",
   "list.bulk_dates_summary_one": "{{count}} request selected.",
   "list.bulk_dates_summary_other": "{{count}} requests selected.",

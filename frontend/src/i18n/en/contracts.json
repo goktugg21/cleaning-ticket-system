@@ -493,6 +493,7 @@
   "road.cancelled_body": "Cancelled contracts sit off the road; they are never invoiced.",
   "road.cancelled_back": "Back to Ended",
   "road.start_draft": "Contract {{no}} for {{customer}} is a draft without lines — put the first line in.",
+  "road.start_draft_read": "Contract {{no}} for {{customer}} is a draft without lines — the company admin puts the first line in.",
   "road.start_draft_action": "Open the draft",
   "road.start_ending": "Contract {{no}} for {{customer}} ends on {{date}} — decide the follow-up.",
   "road.start_ending_action": "Open the contract",

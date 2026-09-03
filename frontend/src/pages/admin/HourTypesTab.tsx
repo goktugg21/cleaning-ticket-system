@@ -298,7 +298,12 @@ export function HourTypesTab({
   return (
     <>
       <div className="page-header" style={{ marginTop: 0, marginBottom: 12 }}>
-        <div />
+        {/* P-15 (P-14's S3 finding) — the page where the multiplier is
+            EDITED says what it weighs; the sentence used to live only
+            on the Hours page's fold. */}
+        <div className="muted small" data-testid="hour-types-subtitle">
+          {t("hour_types.desc")}
+        </div>
         <div className="page-header-actions">
           {/* Sprint 186 §3 — rendered only when no host is choosing, and
               only on a multi-company deployment (the component decides

@@ -8,7 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 import { ImageUploadField } from "../components/ImageUploadField";
 import { formatDate, useLocaleCode } from "../lib/intl";
 import { deleteProfilePhoto, uploadProfilePhoto } from "../api/media";
-import { roleLabelKeyNs } from "../auth/permissions";
+import { isCustomerUser, roleLabelKeyNs } from "../auth/permissions";
 import { Toggle } from "../components/Toggle";
 import type {
   NotificationEventType,
@@ -538,7 +538,17 @@ export function SettingsPage() {
                   // page. The API label remains as a fallback if the key is
                   // absent (defensive — all four are populated).
                   const labelKey = EVENT_LABEL_KEYS[entry.event_type];
-                  const label = labelKey ? t(labelKey) : entry.label;
+                  // P-15 (P-14's S3 finding, §D.2) — a customer never
+                  // sees the word "ticket"; their portal calls it a
+                  // MELDING. Same keys with the `_customer` suffix,
+                  // picked by the viewer's side.
+                  const label = labelKey
+                    ? t(
+                        isCustomerUser(me?.role)
+                          ? `${labelKey}_customer`
+                          : labelKey,
+                      )
+                    : entry.label;
                   return (
                     <label
                       key={entry.event_type}

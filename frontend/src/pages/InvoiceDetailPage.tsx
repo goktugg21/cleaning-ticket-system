@@ -82,6 +82,9 @@ export function InvoiceDetailPage() {
   // money sentence stays, the door hides).
   const { me } = useAuth();
   const canCommit = isProviderAdmin(me?.role);
+  // P-15 — the fact links point at AdminRoute surfaces; a role that
+  // cannot enter them reads plain names instead of dead doors.
+  const canOpenAdmin = isProviderAdmin(me?.role);
   const { push: pushToast } = useToast();
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
@@ -576,12 +579,25 @@ export function InvoiceDetailPage() {
         <div className="ew-ctx-block" data-testid="invoice-fact-customer">
           <div className="ew-ctx-label">{t("invoice_detail.field_customer")}</div>
           <div className="ew-ctx-body">
+            {/* P-15 (P-14's S3 finding) — a plain name, not a dead
+                door: both facts point at AdminRoute surfaces, so for a
+                role that cannot enter them (a BM, an invoice operator
+                by design) the name renders as text — the invoice
+                LIST's own customer-chip pattern. */}
             <div className="ew-ctx-strong">
-              <Link to={`/admin/customers/${invoice.customer}`}>{invoice.customer_name}</Link>
+              {canOpenAdmin ? (
+                <Link to={`/admin/customers/${invoice.customer}`}>{invoice.customer_name}</Link>
+              ) : (
+                invoice.customer_name
+              )}
             </div>
             <div className="ew-ctx-sub">
               {invoice.building && invoice.building_name ? (
-                <Link to={`/admin/buildings/${invoice.building}`}>{invoice.building_name}</Link>
+                canOpenAdmin ? (
+                  <Link to={`/admin/buildings/${invoice.building}`}>{invoice.building_name}</Link>
+                ) : (
+                  invoice.building_name
+                )
               ) : (
                 t("invoice_detail.all_buildings")
               )}
@@ -764,7 +780,11 @@ export function InvoiceDetailPage() {
                               {line.building && line.building_name ? (
                                 <>
                                   {" · "}
-                                  <Link to={`/admin/buildings/${line.building}`}>{line.building_name}</Link>
+                                  {canOpenAdmin ? (
+                                    <Link to={`/admin/buildings/${line.building}`}>{line.building_name}</Link>
+                                  ) : (
+                                    line.building_name
+                                  )}
                                 </>
                               ) : null}
                             </>

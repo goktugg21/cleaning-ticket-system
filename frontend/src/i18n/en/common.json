@@ -2740,6 +2740,7 @@
   "close": "Close",
   "week_short": "W{{n}}",
   "hour_types.multiplier_note": "counts {{n}}×",
+  "hour_types.desc": "The multiplier weighs hours in reports; it never changes a price.",
   "hours_admin.entries_total_one": "{{count}} entry",
   "hours_admin.entries_total_other": "{{count}} entries",
   "contract_hours.auto_fill_hint": "Fill these people's weekly sheets from this agreement, until it ends. Only once the pattern is approved.",

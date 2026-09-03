@@ -924,6 +924,17 @@ function WorkPlanWeek() {
       {error && (
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>
           {error}
+          {/* P-15 (P-14's S3 finding) — the banner offers the way out;
+              `reload()` is the machinery the page always had. */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            style={{ marginLeft: 12 }}
+            onClick={reload}
+            data-testid="agenda-retry"
+          >
+            {t("agenda.retry")}
+          </button>
         </div>
       )}
 
@@ -1399,11 +1410,22 @@ function WorkPlanWeek() {
            which the owner read as "missing until a second click"
            (probed on crmtest: the request is in flight, the board is
            lying). A loading week says it is loading; nothing claims
-           to be empty until the server said so (§D.6 rule 10). */
+           to be empty until the server said so (§D.6 rule 10).
+
+           P-15 (P-14's S3 finding) — and a FAILED load stops saying
+           "Loading the week…" forever: the columns state the failure
+           and hold the Retry door; nothing is in flight behind them. */
         <div className="agenda-week-scroll">
-          <div className="agenda-week-grid" data-testid="agenda-week-loading">
+          <div
+            className="agenda-week-grid"
+            data-testid={error ? "agenda-week-failed" : "agenda-week-loading"}
+          >
             {isoWeekDays(week).map((day) => (
-              <div key={toDateString(day)} className="wp-day wp-day-loading" aria-busy="true">
+              <div
+                key={toDateString(day)}
+                className="wp-day wp-day-loading"
+                aria-busy={error ? undefined : true}
+              >
                 <div className="wp-day-head">
                   <span className="wp-day-name">
                     {day.toLocaleDateString(i18n.language, { weekday: "short" })}
@@ -1411,7 +1433,9 @@ function WorkPlanWeek() {
                   <span className="wp-day-number">{day.getDate()}</span>
                 </div>
                 <div className="wp-day-body">
-                  <div className="wp-day-empty muted small">{t("agenda.loading_week")}</div>
+                  <div className="wp-day-empty muted small">
+                    {error ? t("agenda.week_failed") : t("agenda.loading_week")}
+                  </div>
                 </div>
               </div>
             ))}

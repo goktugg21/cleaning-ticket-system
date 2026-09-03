@@ -107,8 +107,11 @@ function targetKey(log: AuditLog): string {
 }
 
 /**
- * The target cell. A name when the payload offers one (machine key kept
- * on hover), the machine key otherwise.
+ * The target cell. P-15 (P-14's S3 finding) — the machine key prints
+ * ALWAYS, beside the name when there is one: the RECORD column used to
+ * mix `extra_work.ExtraWorkRequest#281` with bare display names
+ * ("Overig", "Contracten") a stranger could not attach to any record,
+ * on the page whose purpose is investigation.
  */
 function TargetRef({ log }: { log: AuditLog }) {
   const key = targetKey(log);
@@ -119,8 +122,15 @@ function TargetRef({ log }: { log: AuditLog }) {
     );
   }
   return (
-    <span title={key} data-testid="audit-target-name">
-      {name}
+    <span data-testid="audit-target-name">
+      {name}{" "}
+      <span
+        className="muted small"
+        style={{ fontFamily: "var(--f-mono, monospace)" }}
+        data-testid="audit-target-key"
+      >
+        {key}
+      </span>
     </span>
   );
 }

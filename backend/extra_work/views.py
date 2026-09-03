@@ -406,7 +406,16 @@ class ExtraWorkRequestViewSet(
                 "has_ad_hoc": cart.has_ad_hoc,
             },
             "allowed_intents": allowed_intents,
-            "default_intent": derive_default_intent(cart),
+            # P-15 (P-14's S3 finding) — the default is only a default
+            # when THIS actor may actually use it; the preview used to
+            # advertise `default_intent: REQUEST_QUOTE` beside
+            # `allowed_intents: [AUTO_START_AFTER_PRICING]` for a
+            # provider. Null means: choose from allowed_intents.
+            "default_intent": (
+                derive_default_intent(cart)
+                if derive_default_intent(cart) in allowed_intents
+                else None
+            ),
         }
 
         if supplied_intent:

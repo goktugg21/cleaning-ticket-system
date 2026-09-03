@@ -493,6 +493,7 @@
   "road.cancelled_body": "Geannuleerde contracten staan buiten de weg; ze worden nooit gefactureerd.",
   "road.cancelled_back": "Terug naar Afgelopen",
   "road.start_draft": "Contract {{no}} voor {{customer}} is een concept zonder regels — zet de eerste regel erin.",
+  "road.start_draft_read": "Contract {{no}} voor {{customer}} is een concept zonder regels — de bedrijfsbeheerder zet de eerste regel erin.",
   "road.start_draft_action": "Open het concept",
   "road.start_ending": "Contract {{no}} voor {{customer}} eindigt op {{date}} — besluit het vervolg.",
   "road.start_ending_action": "Open het contract",

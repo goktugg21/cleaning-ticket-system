@@ -40,7 +40,11 @@ import { BadgeEuro, Search, SlidersHorizontal } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { canReadCustomerArea, isProviderAdmin } from "../auth/permissions";
+import {
+  canAccessAdminArea,
+  canReadCustomerArea,
+  isProviderAdmin,
+} from "../auth/permissions";
 import {
   generateInvoices,
   getBillingMonthAtRisk,
@@ -1029,7 +1033,17 @@ export function FacturenPage({
                   return (
                     <ClickableRow
                       key={row.customer}
-                      to={dueRowHref(row)}
+                      // P-15 (P-14's S3 finding) — the whole-row door
+                      // went to /admin/customers/:id/invoices, an
+                      // AdminRoute: a BM (a designed invoice operator)
+                      // clicked and bounced to "admins only". A BM's
+                      // row opens this page's own customer view — a
+                      // surface they hold.
+                      to={
+                        canAccessAdminArea(me?.role)
+                          ? dueRowHref(row)
+                          : `/invoices?customer=${row.customer}`
+                      }
                       inert={embedded || customerScoped}
                       testId="facturen-due-row"
                       dataAttrs={{ ready }}

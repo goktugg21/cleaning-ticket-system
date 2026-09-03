@@ -55,6 +55,7 @@ import { isProviderManagementRole } from "../auth/permissions";
 import { StartHere } from "../components/guide/StartHere";
 import { ChoiceDialog } from "../components/ChoiceDialog";
 import { EditModeToggle } from "../components/EditModeToggle";
+import { WhatHappens } from "../components/guide/WhatHappens";
 import { BulkPlanDialog } from "../components/extra-work/BulkPlanDialog";
 import { listNextStep } from "../components/extra-work/nextStep";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
@@ -1540,6 +1541,13 @@ export function ExtraWorkList({
                 ]}
                 testIdPrefix="extra-work-bulk"
               />
+              {/* P-15 (P-14's S3 finding) — the one line no fold ever
+                  carried: what this mode is for. Nothing destructive
+                  lives here; the pre-read says what the three doors do
+                  (the §1.2 contracts pattern). */}
+              <WhatHappens testId="extra-work-bulk-what">
+                {t("list.bulk_what")}
+              </WhatHappens>
             </div>
           )}
 

@@ -506,7 +506,11 @@ export function ContractsAdminPage() {
               to: `/admin/contracts/${stats.start_here.draft_no_lines.id}`,
             }}
           >
-            {t("road.start_draft", {
+            {/* P-15 (P-14's S3 finding) — a BM is a server-narrowed
+                READER here: the sentence must not order them to do
+                what the page will refuse. The read voice states the
+                same fact; opening the draft stays legal. */}
+            {t(canManage ? "road.start_draft" : "road.start_draft_read", {
               no: stats.start_here.draft_no_lines.contract_no,
               customer: stats.start_here.draft_no_lines.customer_name,
             })}

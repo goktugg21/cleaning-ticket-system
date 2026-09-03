@@ -531,6 +531,7 @@
   "detail.dates_saved": "Datums opgeslagen.",
   "detail.field_planned_end_date": "Einddatum planning",
   "list.bulk_dates_button": "Datums instellen",
+  "list.bulk_what": "Met Rijen selecteren kiest u meerdere aanvragen en wijst u ze in één keer toe, geeft u ze datums of plant u ze in. Hier wordt niets verwijderd.",
   "list.bulk_dates_title": "Deadline en geplande einddatum instellen",
   "list.bulk_dates_summary_one": "{{count}} aanvraag geselecteerd.",
   "list.bulk_dates_summary_other": "{{count}} aanvragen geselecteerd.",

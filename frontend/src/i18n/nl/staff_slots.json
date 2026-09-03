@@ -288,6 +288,8 @@
   "agenda.show_more_other": "Toon er nog {{count}}",
   "agenda.show_less": "Minder tonen",
   "agenda.loading_week": "Week wordt geladen…",
+  "agenda.week_failed": "De week kon niet worden geladen.",
+  "agenda.retry": "Probeer opnieuw",
   "agenda.triage_count_one": "{{count}} geselecteerd",
   "agenda.triage_count_other": "{{count}} geselecteerd",
   "agenda.triage_park": "In de wacht zetten",

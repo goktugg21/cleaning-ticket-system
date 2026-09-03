@@ -2740,6 +2740,7 @@
   "close": "Sluiten",
   "week_short": "W{{n}}",
   "hour_types.multiplier_note": "telt {{n}}×",
+  "hour_types.desc": "De vermenigvuldiger weegt uren in rapporten; hij verandert nooit een prijs.",
   "hours_admin.entries_total_one": "{{count}} regel",
   "hours_admin.entries_total_other": "{{count}} regels",
   "contract_hours.auto_fill_hint": "Vul de weekstaten van deze mensen vanuit deze afspraak, totdat die afloopt. Pas zodra het patroon is goedgekeurd.",

@@ -288,6 +288,8 @@
   "agenda.show_more_other": "Show {{count}} more",
   "agenda.show_less": "Show fewer",
   "agenda.loading_week": "Loading the week…",
+  "agenda.week_failed": "The week could not be loaded.",
+  "agenda.retry": "Try again",
   "agenda.triage_count_one": "{{count}} selected",
   "agenda.triage_count_other": "{{count}} selected",
   "agenda.triage_park": "Put on hold",

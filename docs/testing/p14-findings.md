@@ -265,7 +265,11 @@ the in-sprint part-A/B6 work.
   W-PLANTRUTH's "one fact places the board" and P-1's
   captioned-phantom design pull in opposite directions here. (sweep)
 
-- **Agenda · BUILDING_MANAGER · on work-plan failure the board lies
+- **P-15: FIXED (Part 3)** — on failure the seven columns say "The
+  week could not be loaded." instead of loading forever
+  (`agenda-week-failed`), and the banner carries a Retry door wired
+  to the page's own `reload()`. ·
+  **Agenda · BUILDING_MANAGER · on work-plan failure the board lies
   about loading and offers no way out** — a red "Something unexpected
   happened. Please try again." banner while all seven day columns
   keep saying "Loading the week…" forever, nothing in flight, no
@@ -290,7 +294,10 @@ the in-sprint part-A/B6 work.
   **FIXED (P-14)** — the six type labels added to create_ticket.json,
   nl+en in lockstep. (W2)
 
-- **Contracts · BUILDING_MANAGER · Start here orders the reader to do
+- **P-15: FIXED (Part 3)** — the read voice for a reader:
+  `road.start_draft_read` ("…the company admin puts the first line
+  in.") when !canManage; opening the draft stays legal. ·
+  **Contracts · BUILDING_MANAGER · Start here orders the reader to do
   something the page will not let them do** — "…is a draft without
   lines — put the first line in." — but a BM is a server-narrowed
   READER; on the detail the add-line door is canManage-only and
@@ -298,7 +305,12 @@ the in-sprint part-A/B6 work.
   canManage check. Fix: for !canManage show the descriptive sentence
   without the imperative, or hide the Start-here. (W2)
 
-- **Invoices due rows / invoice detail · BUILDING_MANAGER · doors on
+- **P-15: FIXED (Part 3)** — a BM's due row opens
+  `/invoices?customer=` (a surface they hold); the detail's customer
+  and building facts render as plain names for a role that cannot
+  enter the admin routes (the invoice LIST's customer-chip pattern),
+  line-level building links included. ·
+  **Invoices due rows / invoice detail · BUILDING_MANAGER · doors on
   a page he operates by design bounce him to "admins only"** — the
   due row's whole-row click goes to `/admin/customers/:id/invoices`
   and the invoice detail's building facts link to
@@ -316,7 +328,10 @@ the in-sprint part-A/B6 work.
   recomputed. **FIXED (P-14)** — the locale is a memo dependency now.
   (W3)
 
-- **Settings · customer users · the notification toggles speak
+- **P-15: FIXED (Part 3)** — same keys with a `_customer` suffix,
+  picked by `isCustomerUser`: a customer reads "Melding aangemaakt"
+  and "Berichten bij uw meldingen…", both locales. ·
+  **Settings · customer users · the notification toggles speak
   provider vocabulary** — "Ticket aangemaakt", "Ticketstatus
   gewijzigd", "Ticket toegewezen"… to a customer who only ever sees
   "melding" (§D.2). A customer stranger cannot tell these toggles
@@ -324,21 +339,30 @@ the in-sprint part-A/B6 work.
   needs customer-worded labels (melding-*) when the viewer is a
   CUSTOMER_USER — same keys, role-picked copy. (W3)
 
-- **Extra work list · SA + CA · the "Edit" pencil gives no clue** —
+- **P-15: FIXED (Part 3, with §1.2)** — the shared toggle reads
+  "Select rows", and the toolbar carries the missing line as its
+  WhatHappens: "Select rows lets you pick several requests and
+  assign, date or plan them at once. Nothing here deletes anything." ·
+  **Extra work list · SA + CA · the "Edit" pencil gives no clue** —
   truth: edit mode revealing bulk Assign / Set dates / Plan. Nothing
   destructive, but the page says nothing. Fix: "Select rows"/"Bulk
   actions" label, and one fold line ("Edit lets you pick several rows
   and assign, date or plan them at once") — no current fold line
   mentions the bulk toolbar. (W1)
 
-- **Audit logs · SA · the RECORD column mixes `extra_work.
+- **P-15: FIXED (Part 3)** — `model#id` prints ALWAYS, muted beside
+  the display name when one exists (`audit-target-key`). ·
+  **Audit logs · SA · the RECORD column mixes `extra_work.
   ExtraWorkRequest#281` with bare Dutch display names** — "Overig",
   "Overeenkomsten", "Contracten", "Facturen", "Algemeen" — no type,
   no id. A stranger cannot tell WHAT record those rows touched, on
   the page whose purpose is investigation. Fix: always print model#id
   beside the display name. (W1)
 
-- **Catalogs › Hour types · SA + CA · "COUNTS AS × 1.50" weighs
+- **P-15: FIXED (Part 3)** — the tab says it where the multiplier is
+  edited: "The multiplier weighs hours in reports; it never changes
+  a price." (`hour_types.desc`, both locales). ·
+  **Catalogs › Hour types · SA + CA · "COUNTS AS × 1.50" weighs
   what?** — nothing on this page says (pay? price? reports?). The
   true sentence exists but lives on the Hours page's fold ("the hour
   type weighs reports — never the price"); here, where the multiplier
@@ -346,7 +370,14 @@ the in-sprint part-A/B6 work.
   types tab: "The multiplier weighs hours in reports; it never
   changes a price." (W1)
 
-- **Extra work create · API · the derived default intent bypasses
+- **P-15: FIXED (Part 3)** — the derived default faces the same
+  validator as an explicit choice: where it fails, the create asks
+  the caller to choose (`intent_required`) instead of stamping a
+  forbidden intent (never silently swapped for auto-start — that
+  would pre-authorise skipping the customer's approval); the
+  preview's `default_intent` is null unless this actor may use it.
+  Pinned in `test_p15_intent_default` (5 OK; sprint2 suite green). ·
+  **Extra work create · API · the derived default intent bypasses
   intent validation** — a provider creating an EW with
   `request_intent` omitted gets `REQUEST_QUOTE` stamped (EW 315, kept
   CANCELLED as evidence) — the very intent `validate_intent_for_cart`
@@ -375,7 +406,11 @@ the in-sprint part-A/B6 work.
   *starting*, not *completion sign-off*. Needs an owner ruling on who
   signs off. (C1)
 
-- **Work-plan board · manager · an unstaffed ON_HOLD job is on NO
+- **P-15: FIXED (Part 0's commit)** — `_ticket_parked_source`: the
+  parked list and `counts.parked` read their own staffed-or-not
+  source; the columns keep the staffed membership. Pinned in
+  `test_p15_parked_unstaffed` (3 OK). ·
+  **Work-plan board · manager · an unstaffed ON_HOLD job is on NO
   lane, including "Geparkeerd"** — `_ticket_parked_q` would match
   ticket 309, but `_ticket_source` gates the whole board on
   `Exists(non-cancelled staff slot)`; 309 has none, so counts.parked

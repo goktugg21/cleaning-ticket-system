@@ -2528,7 +2528,39 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             # Backward compatibility for Batch 6/7/8 clients that
             # never sent an intent. Derive a safe default (never
             # AUTO_START — that would skip customer approval).
+            #
+            # P-15 (P-14's S3 finding, EW 315) — the derived default
+            # goes through the SAME validator an explicit choice
+            # faces. A provider omitting the intent on a non-agreed
+            # cart used to get REQUEST_QUOTE stamped — the very intent
+            # the validator forbids a provider to choose (the preview
+            # advertised the contradiction: allowed
+            # [AUTO_START_AFTER_PRICING] beside default REQUEST_QUOTE).
+            # A default that fails validation is not silently swapped
+            # for a stronger one (auto-start by omission would
+            # pre-authorise skipping the customer's approval): the
+            # caller is asked to choose, by name.
             effective_intent = derive_default_intent(cart_classification)
+            try:
+                validate_intent_for_cart(
+                    intent=effective_intent,
+                    cart=cart_classification,
+                    actor_kind=actor_kind,
+                )
+            except IntentValidationError:
+                raise serializers.ValidationError(
+                    {
+                        "request_intent": [
+                            serializers.ErrorDetail(
+                                "Choose how this request should run: "
+                                "no default applies here. The preview's "
+                                "allowed_intents lists the choices for "
+                                "this cart.",
+                                code="intent_required",
+                            )
+                        ]
+                    }
+                )
 
         validated_data["request_intent"] = effective_intent
 
