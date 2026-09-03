@@ -113,14 +113,25 @@ class CartAuditFixtureMixin:
             "title": "Cart for audit",
             "description": "cart",
             "category": ExtraWorkCategory.DEEP_CLEANING,
+            # P-16 repin — P-15's intent rule: a PROVIDER creating a
+            # non-agreed cart gets no silent default (`intent_required`)
+            # and must choose; AUTO_START_AFTER_PRICING is the
+            # provider-legal choice. The audit chain under test is
+            # unchanged.
+            "request_intent": "AUTO_START_AFTER_PRICING",
             "line_items": [
                 {
                     "service": self.service.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
+                    # P-16 repin — P-8 §4 retired the per-line
+                    # requested_date (`line_requested_date_not_accepted`):
+                    # the request-level `preferred_date` is the date for
+                    # the whole cart. The audit chain under test is
+                    # unchanged.
                     "customer_note": "",
                 }
             ],
+            "preferred_date": "2026-06-15",
         }
         response = self.client.post(URL, payload, format="json")
         assert response.status_code == status.HTTP_201_CREATED, response.data
@@ -163,6 +174,9 @@ class ExtraWorkRequestItemAuditTests(CartAuditFixtureMixin, APITestCase):
             log.changes["service"]["after"], self.service.id
         )
         self.assertEqual(log.changes["unit_type"]["after"], "HOURS")
+        # P-16 repin — the per-line date is SERVER-stamped now: the
+        # request-level `preferred_date` (P-8 §4) lands on every line,
+        # so the create diff records exactly the cart's date.
         self.assertEqual(
             log.changes["requested_date"]["after"], "2026-06-15"
         )

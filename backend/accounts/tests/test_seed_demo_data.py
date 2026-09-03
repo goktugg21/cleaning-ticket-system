@@ -222,7 +222,12 @@ class SeedDemoDataShapeTests(TestCase):
         # here) + the #108 Part G enrichment (3 attention/my-work
         # tickets + 3 spawned billing-history tickets) + Sprint 179A's
         # 8 Work Plan tickets, and 2 in B.
-        self.assertEqual(len(tickets_a), 19)
+        # P-16 repin — the exact-count pin drifted every time a later
+        # sprint appended a seed block (P-13's finance fixtures, the
+        # marker-drift re-creations) and told us nothing when it broke.
+        # The 19 documented above is the FLOOR; per-company isolation
+        # below is the actual signal and stays exact.
+        self.assertGreaterEqual(len(tickets_a), 19)
         self.assertEqual(len(tickets_b), 2)
         # No ticket in Company A points at a Company B building, and
         # vice versa.
@@ -322,8 +327,13 @@ class SeedDemoDataIsolationTests(TestCase):
         # (3 attention/my-work tickets + 3 spawned billing tickets)
         # PLUS Sprint 179A's 8 Work Plan tickets.
         # Cross-company isolation is the actual signal; the absolute
-        # counts are a sanity check.
-        self.assertEqual(a_ticket_qs.filter(company=self.company_a).count(), 19)
+        # counts are a sanity check. P-16 repin — the A-side count is a
+        # floor (later seed blocks append; the exact pin drifted twice),
+        # and the isolation halves below stay exact.
+        self.assertGreaterEqual(
+            a_ticket_qs.filter(company=self.company_a).count(), 19
+        )
+        self.assertEqual(a_ticket_qs.filter(company=self.company_b).count(), 0)
         self.assertEqual(b_ticket_qs.filter(company=self.company_b).count(), 2)
 
     def test_cross_company_customer_visibility_is_blocked(self):

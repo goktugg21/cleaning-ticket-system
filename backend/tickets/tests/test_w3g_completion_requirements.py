@@ -418,6 +418,11 @@ class RequirementsEndpointTests(_W3GFixture):
                 "file_required": True,
                 "either_required": False,
                 "source": "extra_work",
+                # P-16 repin — W13 added WHO asked for each requirement
+                # (`*_asked_by`); a provider-set file flag answers
+                # ["provider"], an unasked note answers [].
+                "note_asked_by": [],
+                "file_asked_by": ["provider"],
             },
         )
 

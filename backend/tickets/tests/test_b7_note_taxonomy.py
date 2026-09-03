@@ -370,6 +370,22 @@ class AttachmentVisibilityPerTierTests(_B7Fixture):
             self.ticket, self.staff_user, message=self.staff_completion_msg
         )
         self.public_att = _mk_attachment(self.ticket, self.customer_user)
+        # P-16 repin — Sprint 191 §2.5 gave every attachment its own
+        # `visibility` axis (default INTERNAL: nothing crosses the
+        # customer wall until somebody says so), and the list + download
+        # walls read IT, not the message tier. This raw-ORM fixture
+        # bypassed the upload path that stamps it, so every row landed
+        # INTERNAL and the customer saw nothing. Stamp what the real
+        # path stamps: a customer's own upload is always CUSTOMER, and
+        # the completion photo is CUSTOMER here because the tests below
+        # pin the opened-up case (a W4-P grant / per-work setting would
+        # produce exactly this value at upload time). The internal and
+        # staff-operational rows keep the INTERNAL default.
+        from tickets.models import AttachmentVisibility
+
+        for att in (self.staff_completion_att, self.public_att):
+            att.visibility = AttachmentVisibility.CUSTOMER
+            att.save(update_fields=["visibility"])
 
     def _list_ids(self):
         response = self.client.get(self._attachments_url())

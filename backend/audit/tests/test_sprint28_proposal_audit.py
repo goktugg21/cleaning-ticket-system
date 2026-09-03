@@ -118,6 +118,12 @@ class ProposalAuditFixtureMixin:
     def _create_proposal_via_api(self, ew: ExtraWorkRequest) -> Proposal:
         self.client.force_authenticate(user=self.admin)
         payload = {
+            # P-16 repin — W-PLAN gates every pricing door on a complete
+            # plan; this fixture's subject is the AUDIT chain, so it
+            # takes the gate's own documented bypass (the recorded
+            # override, which writes its history row and changes nothing
+            # about the AuditLog rows under test).
+            "override_reason": "audit fixture: plan bypass",
             "lines": [
                 {
                     "service": self.service.id,

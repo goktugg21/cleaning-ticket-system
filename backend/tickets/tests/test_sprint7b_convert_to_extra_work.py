@@ -211,6 +211,10 @@ class ConvertFixtureMixin:
         )
 
     def _svc_line(self, service, *, qty="2.00"):
+        # NOTE: the CONVERSION door still takes a per-line
+        # requested_date (extra_work/conversion.py reads it); only the
+        # normal /api/extra-work/ CREATE retired it (P-8 §4). This
+        # helper serves the conversion payloads.
         return {
             "service": service.id,
             "quantity": qty,
@@ -251,7 +255,12 @@ class ConvertFixtureMixin:
         assert resp.status_code == 200, resp.data
 
         resp = api.post(
-            f"/api/extra-work/{ew.id}/proposals/", {}, format="json"
+            f"/api/extra-work/{ew.id}/proposals/",
+            # P-16 repin — W-PLAN gates the pricing door; this helper's
+            # subject is the conversion/spawn flow, so it takes the
+            # gate's documented bypass (the recorded override).
+            {"override_reason": "sprint7b fixture: plan bypass"},
+            format="json",
         )
         assert resp.status_code == 201, resp.data
         proposal_id = resp.data["id"]
@@ -307,7 +316,12 @@ class ConvertFixtureMixin:
 
         send = api.post(
             f"/api/extra-work/{ew.id}/proposals/{proposal_id}/transition/",
-            {"to_status": ProposalStatus.SENT},
+            {
+                "to_status": ProposalStatus.SENT,
+                # P-16 repin — the SEND leg asks the same W-PLAN gate as
+                # the create door; same recorded-override bypass.
+                "override_reason": "sprint7b fixture: plan bypass",
+            },
             format="json",
         )
         return proposal_id, send
@@ -435,7 +449,11 @@ class RequestQuoteConversionTests(ConvertFixtureMixin, TestCase):
             f"/api/extra-work/{ew.id}/proposals/{proposal_id}/transition/",
             {
                 "to_status": ProposalStatus.CUSTOMER_REJECTED,
-                "customer_reject_reason": "not needed",
+                # P-16 repin — P-8R: the PROPOSAL door's customer
+                # rejection requires the reason in `note`
+                # (rejection_note_required); `customer_reject_reason`
+                # belongs to the EW-transition door.
+                "note": "not needed",
             },
             format="json",
         )
@@ -668,6 +686,13 @@ class ProviderRequestQuoteExceptionTests(ConvertFixtureMixin, TestCase):
         self.assertEqual(resp.status_code, 201, resp.data)
 
     def test_normal_provider_create_still_rejects_request_quote(self):
+        # P-16 repin — the normal CREATE door retired the per-line
+        # requested_date (P-8 §4); with it in the line the request
+        # 400'd on the LINE and never reached the intent validator this
+        # test exists to pin. The conversion door's `_svc_line` keeps
+        # the date; this payload builds its own line without it.
+        line = {**self._svc_line(self.service_unpriced)}
+        line.pop("requested_date")
         resp = self._api(self.admin).post(
             "/api/extra-work/",
             {
@@ -677,7 +702,7 @@ class ProviderRequestQuoteExceptionTests(ConvertFixtureMixin, TestCase):
                 "description": "should be rejected",
                 "category": "DEEP_CLEANING",
                 "request_intent": ExtraWorkRequestIntent.REQUEST_QUOTE,
-                "line_items": [self._svc_line(self.service_unpriced)],
+                "line_items": [line],
             },
             format="json",
         )
