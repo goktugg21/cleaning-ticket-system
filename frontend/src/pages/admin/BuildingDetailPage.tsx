@@ -641,7 +641,7 @@ export function BuildingDetailPage() {
                 <ul className="contract-plain-list">
                   {building.contracts.map((contract) => (
                     <li key={contract.id} data-testid="building-contract-row">
-                      <Link to={`/admin/customers/${contract.customer_id}/contracts/${contract.id}`}>
+                      <Link to={`/admin/contracts/${contract.id}`}>
                         {contract.contract_type_name
                           ? `${contract.contract_type_name} · ${contract.contract_no}`
                           : contract.contract_no}

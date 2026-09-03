@@ -3565,7 +3565,7 @@ export function TicketDetailPage() {
             </span>{" "}
             {ticket.occurrence_origin.contract_id && (
               <Link
-                to={`/admin/customers/${ticket.customer}/contracts/${ticket.occurrence_origin.contract_id}`}
+                to={`/admin/contracts/${ticket.occurrence_origin.contract_id}`}
                 data-testid="ticket-occurrence-contract-link"
               >
                 {ticket.occurrence_origin.contract_type_name

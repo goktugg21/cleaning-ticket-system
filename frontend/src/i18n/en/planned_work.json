@@ -276,6 +276,6 @@
   "how.1": "A rule makes visits on a schedule.",
   "how.2": "A visit is a ticket like any other — planned, done, checked.",
   "how.3": "Pause stops new visits and keeps the rule; Resume picks it back up.",
-  "how.4": "An end date closes it for good.",
+  "how.4": "An end date stops NEW visits for good; a visit already made keeps its day and is closed or cancelled on its own ticket.",
   "detail.what_pause": "Stops new visits; the rule stays and can resume."
 }

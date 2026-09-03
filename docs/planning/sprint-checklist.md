@@ -72,11 +72,33 @@ certain fixes):
   scroll-snap; the stuck strip speaks per viewer (worker: "your
   manager decides what happens next").
 
-**Part B — the audit, in flight**: capability inventory → nine-role
-walks (owner's page order, cold reads, severities S1–S4) → the seven
-cross-role chains → the RBAC probe + state-machine sweep + money
-checks → the findings list, S1→S4, as P-15's input. Web-Claude runs
-the same audit independently; the two lists are compared.
+**Part B — the audit, done** (`docs/testing/p14-findings.md` is the
+product; `capability-inventory.md` the checklist):
+- The inventory: 76 surfaces, ~930 capabilities, each with guard,
+  roles, meaning and server call.
+- The walks: 344 page-records across 18 walks (all nine roles, 1440 +
+  390), every record measured overflowPx=0 and consoleErrors=0; cold
+  reads per page per role against the inventory's truth.
+- The chains: 7/7, 64 recorded steps; the money proven to the cent
+  (quote €304.92 → earned €355.74 = invoice = credit note; VAT once;
+  reversal releases the pool; over-quote WARN ONLY; the 0038 legacy
+  line saves hours; a permissions change moves every count exactly
+  and restores byte-identical).
+- The probes: 194 GET endpoints × 9 roles (0 500s, 0 tenant leaks,
+  content-verified); 354 state-machine attempts (0 illegal allowed,
+  0 non-sentence refusals) with proven rollback.
+- The verdict: **65 findings** — S1 2 (the contract lifecycle has NO
+  state machine; the Contracts Edit-pencil hides the only delete
+  door), S2 14, S3 14, S4 35; **11 fixed in-sprint** (each ≤30
+  lines), the rest prioritised as P-15's input. Four PRE-EXISTING
+  test reds found on the P-13 tip and repaired (stale P-10-era pins).
+
+Queued for P-15 (from the findings, S1 first): the contract
+lifecycle machine; the fill's approval-gate ruling; the BM
+candidates-endpoint mismatch; the two-company staff /my-hours 400;
+the spawned-ticket wish-placement ruling; the unstaffed ON_HOLD
+board gap; then Tickets+People to §D.24, notification localization
+(owner migration yes pending), the Turkish locale.
 
 ### Done — P-13: the money is never invisible (Addendum D §D.24.5, 2026-09-02)
 

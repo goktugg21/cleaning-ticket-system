@@ -45,5 +45,11 @@
   "tips_title": "How to make it quick",
   "tip_1": "Say exactly where: room, floor, area.",
   "tip_2": "One photo says more than three sentences.",
-  "tip_3": "Urgent only when it really cannot wait."
+  "tip_3": "Urgent only when it really cannot wait.",
+  "type_report": "Report",
+  "type_complaint": "Complaint",
+  "type_request": "Request",
+  "type_suggestion": "Suggestion",
+  "type_quote_request": "Quote request",
+  "type_other": "Other"
 }

@@ -583,8 +583,11 @@ export function EmployeesAdminPage({ embedded = false }: { embedded?: boolean } 
               </button>
             )}
             {/* Sprint 156 §8 — the intent step, same gate as every other
-                list since Sprint 155 §4. */}
-            {linkableRows.length > 0 && (
+                list since Sprint 155 §4. P-14 (findings) — and the same
+                gate the WRITE has: `/api/buildings/bulk-link/` is
+                SA/CA-only, so a BUILDING_MANAGER reader no longer gets
+                an Edit door whose one action can only 403. */}
+            {canEdit && linkableRows.length > 0 && (
               <EditModeToggle
                 editMode={edit.editMode}
                 onToggle={edit.toggleMode}

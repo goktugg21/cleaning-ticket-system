@@ -39,7 +39,8 @@ export function SlaWarningsRoute({ children }: { children: ReactNode }) {
   }
 
   if (!canManageSlaWarnings(me.role)) {
-    return <Navigate to="/" replace />;
+    // P-14 (findings) — say why, like AdminRoute does.
+    return <Navigate to="/?admin_required=ok" replace />;
   }
 
   return <AppShell>{children}</AppShell>;

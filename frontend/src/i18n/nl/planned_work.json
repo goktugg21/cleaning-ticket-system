@@ -276,6 +276,6 @@
   "how.1": "Een regel maakt bezoeken volgens een schema.",
   "how.2": "Een bezoek is een ticket als elk ander — gepland, gedaan, gecontroleerd.",
   "how.3": "Pauzeren stopt nieuwe bezoeken en bewaart de regel; Hervatten pakt hem weer op.",
-  "how.4": "Een einddatum sluit het definitief af.",
+  "how.4": "Een einddatum stopt NIEUWE bezoeken definitief; een al gemaakt bezoek houdt zijn dag en wordt op zijn eigen ticket afgerond of geannuleerd.",
   "detail.what_pause": "Stopt nieuwe bezoeken; de regel blijft bestaan en kan hervatten."
 }

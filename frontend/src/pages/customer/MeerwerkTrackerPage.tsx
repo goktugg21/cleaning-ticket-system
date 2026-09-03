@@ -23,20 +23,35 @@ import { PhaseBadge } from "../../components/customer/PhaseBadge";
 import { formatDate } from "../../lib/intl";
 
 /** Render order: action first, then motion, then history. */
-const PHASE_ORDER: ExtraWorkDisplayPhase[] = [
-  "WAITING_YOUR_APPROVAL",
-  "WAITING_COMPLETION_APPROVAL",
-  "WAITING_PRICE",
-  "SCHEDULED",
-  "IN_EXECUTION",
-  "DONE",
-  "INVOICED",
-  "REJECTED",
-  "CANCELLED",
+/**
+ * P-14 (findings list) — the rank is an EXHAUSTIVE Record over the full
+ * phase union, never a hand-kept array: the array silently omitted
+ * WAITING_PLANNING (and WAITING_MANAGER_CHECK), so a customer's tracker
+ * said "Alles 24" and rendered 19 — five agreed-but-unplanned requests
+ * were filed nowhere. This is CLAUDE.md's Sprint-126 trap verbatim; a
+ * phase the union gains without a rank here now fails to compile
+ * instead of dropping rows.
+ */
+const PHASE_RANK: Record<ExtraWorkDisplayPhase, number> = {
+  WAITING_YOUR_APPROVAL: 0,
+  WAITING_COMPLETION_APPROVAL: 1,
+  WAITING_PRICE: 2,
+  // P-2 ruling 1 — agreed, and no person has planned it yet.
+  WAITING_PLANNING: 3,
+  SCHEDULED: 4,
+  IN_EXECUTION: 5,
   // Provider-side wording never reaches a customer read, but the type
-  // admits it, so the tracker files it with the other wait.
-  "WAITING_CUSTOMER_APPROVAL",
-];
+  // admits both, so the tracker files them with their neighbours.
+  WAITING_MANAGER_CHECK: 6,
+  DONE: 7,
+  INVOICED: 8,
+  REJECTED: 9,
+  CANCELLED: 10,
+  WAITING_CUSTOMER_APPROVAL: 11,
+};
+const PHASE_ORDER = (
+  Object.keys(PHASE_RANK) as ExtraWorkDisplayPhase[]
+).sort((a, b) => PHASE_RANK[a] - PHASE_RANK[b]);
 
 export function MeerwerkTrackerPage() {
   const { t } = useTranslation("common");

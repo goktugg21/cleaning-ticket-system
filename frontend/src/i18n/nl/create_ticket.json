@@ -45,5 +45,11 @@
   "tips_title": "Zo gaat het snel",
   "tip_1": "Zeg precies waar: kamer, verdieping, zone.",
   "tip_2": "Eén foto zegt meer dan drie zinnen.",
-  "tip_3": "Spoed alleen als het echt niet kan wachten."
+  "tip_3": "Spoed alleen als het echt niet kan wachten.",
+  "type_report": "Melding",
+  "type_complaint": "Klacht",
+  "type_request": "Verzoek",
+  "type_suggestion": "Suggestie",
+  "type_quote_request": "Offerteaanvraag",
+  "type_other": "Overig"
 }

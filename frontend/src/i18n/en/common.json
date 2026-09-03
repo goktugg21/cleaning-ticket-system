@@ -1843,7 +1843,7 @@
   "hours_admin.earlier_weeks_people": "People",
   "hours_admin.earlier_weeks_hours": "Hours",
   "hours_admin.earlier_weeks_status": "Status",
-  "hours_admin.earlier_weeks_open": "Open",
+  "hours_admin.earlier_weeks_open": "Open week",
   "hours_admin.earlier_weeks_label": "Week {{week}}",
   "hours_admin.save_all": "Save all ({{count}})",
   "hours_admin.edit_saved_one": "{{count}} entry saved.",

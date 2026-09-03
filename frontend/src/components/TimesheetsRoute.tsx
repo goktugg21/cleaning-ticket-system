@@ -49,7 +49,10 @@ export function TimesheetsRoute({
     ? canManageTimesheets(me.role)
     : canAccessTimesheets(me.role);
   if (!allowed) {
-    return <Navigate to="/" replace />;
+    // P-14 (findings) — the SAME landing AdminRoute gives: a silent
+    // bounce to the dashboard read as "the link is broken"; the query
+    // string puts the admins-only banner on the landing.
+    return <Navigate to="/?admin_required=ok" replace />;
   }
 
   return <AppShell>{children}</AppShell>;

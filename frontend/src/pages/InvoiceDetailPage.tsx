@@ -584,7 +584,7 @@ export function InvoiceDetailPage() {
             {/* P-5 S7 — the contract this invoice was generated for. */}
             {invoice.contract && (
               <div className="ew-ctx-sub" data-testid="invoice-contract-row">
-                <Link to={`/admin/customers/${invoice.customer}/contracts/${invoice.contract.id}`}>
+                <Link to={`/admin/contracts/${invoice.contract.id}`}>
                   {invoice.contract.contract_type_name
                     ? `${invoice.contract.contract_type_name} · ${invoice.contract.contract_no}`
                     : invoice.contract.contract_no}

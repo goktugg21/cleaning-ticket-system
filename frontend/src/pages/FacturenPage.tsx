@@ -40,7 +40,7 @@ import { BadgeEuro, Search, SlidersHorizontal } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { canReadCustomerArea } from "../auth/permissions";
+import { canReadCustomerArea, isProviderAdmin } from "../auth/permissions";
 import {
   generateInvoices,
   getBillingMonthAtRisk,
@@ -358,6 +358,11 @@ export function FacturenPage({
   // billing role passes today; the gate is stated so a plain name, not a
   // dead door, is what a narrower role would get.
   const canOpenCustomer = canReadCustomerArea(me?.role);
+  /** P-14 (findings) — "Set a billing day" PATCHes the customer, which
+   *  is SA/CA-only server-side; a BUILDING_MANAGER (a full invoice
+   *  operator otherwise, Addendum B) got a door that could only 403.
+   *  The money sentence stays for BM; the schedule-fixing door hides. */
+  const canSetBillingDay = isProviderAdmin(me?.role);
   // P-6 V1 — the "Invoices → customer → month" sentence on the meerwerk
   // pages links here with `?customer=<id>&period=YYYY-MM`; the page opens
   // on exactly that customer and month.
@@ -857,7 +862,7 @@ export function FacturenPage({
           P-13 J — while a Done banner is up, Start here stands down:
           one voice at a time. */}
       {!dueLoading && !loading && !genRow && !facDone.done && (
-        startNoDayRow ? (
+        canSetBillingDay && startNoDayRow ? (
           <StartHere
             testId="facturen-start-here"
             action={{
@@ -1094,15 +1099,17 @@ export function FacturenPage({
                             schedule, or bill by hand right here. */}
                         {ready && noDay ? (
                           <>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => setDayRow(row)}
-                              data-testid="facturen-set-day-open"
-                              style={{ marginRight: 8 }}
-                            >
-                              {t("invoices:road.set_day")}
-                            </button>
+                            {canSetBillingDay && (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => setDayRow(row)}
+                                data-testid="facturen-set-day-open"
+                                style={{ marginRight: 8 }}
+                              >
+                                {t("invoices:road.set_day")}
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="btn btn-primary btn-sm"

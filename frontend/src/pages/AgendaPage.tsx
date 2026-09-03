@@ -849,11 +849,16 @@ function WorkPlanWeek() {
     (chip !== "" ? 1 : 0) + (kindFilter !== "" ? 1 : 0) + (needle ? 1 : 0);
 
   const weekRangeLabel = useMemo(() => {
+    // P-14 (findings) — the LANGUAGE is a real dependency: i18n can
+    // resolve NL after the first render, and this memo then kept
+    // "Aug 31 – Sep 6" on a Dutch header until the week changed.
+    const locale = i18n.language === "nl" ? "nl-NL" : "en-US";
     const days = isoWeekDays(week);
-    return `${formatDate(toDateString(days[0]))} – ${formatDate(
+    return `${formatDate(toDateString(days[0]), locale)} – ${formatDate(
       toDateString(days[6]),
+      locale,
     )}`;
-  }, [week]);
+  }, [week, i18n.language]);
 
   async function handleUnableConfirm(reason: string) {
     const entry = unableTarget;
