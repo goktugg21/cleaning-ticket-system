@@ -44,11 +44,14 @@ below runs on the dev server from the repo root.
    runservers with kept-alive connections exhaust it (FE-7's "too many
    clients already"). Never run a screenshot sweep concurrently.
 
-3. **Build + serve** (the build needs the repo's `frontend/.env*`):
+3. **Build + serve** (the build needs the repo's `frontend/.env*`;
+   `VITE_DEMO_MODE=true` explicitly, because a stray
+   `.env.production.local` can force it off and silently skip the
+   three demo-card specs):
 
    ```bash
    sg docker -c 'docker run --rm -v /home/adm-local/cleaning-ticket-system/frontend:/app \
-     -w /app node:22-alpine npm run build'
+     -w /app -e VITE_DEMO_MODE=true node:22-alpine npm run build'
    sg docker -c 'docker run -d --name e2e-preview --network host \
      -v /home/adm-local/cleaning-ticket-system/frontend:/app -w /app node:22-alpine \
      npx vite preview --config preview.config.mjs'
@@ -72,6 +75,31 @@ below runs on the dev server from the repo root.
    `http://localhost:8000`, which fails ALLOWED_HOSTS behind the
    proxy. The helpers fetch same-origin since P-15 (`pageApiGet`) —
    pointing both at the preview keeps every request on one origin.
+
+## The one pre-run fixture
+
+`sprint30` K2 tests the retry-spawn repair for a state the API can no
+longer produce (a CUSTOMER_APPROVED EW with zero spawned tickets —
+auto-spawn is the fix it exercises). Seed one ORM row BEFORE each full
+run; K2 heals it by pressing the button, so the row is consumed per
+run:
+
+```python
+# docker compose exec -T backend python manage.py shell -c "exec(...)"
+from extra_work.models import ExtraWorkRequest, ExtraWorkStatus
+from customers.models import Customer, CustomerBuildingMembership
+from accounts.models import User
+import time
+tom = User.objects.get(email="tom-customer-b-amsterdam@b-amsterdam.demo")
+customer = Customer.objects.filter(name="B Amsterdam").first()
+building = CustomerBuildingMembership.objects.filter(customer=customer).first().building
+ExtraWorkRequest.objects.create(
+    company=customer.company, customer=customer, building=building,
+    title=f"[P16-FIXTURE] Stuck approved EW (K2) {int(time.time())}",
+    description="e2e fixture: CUSTOMER_APPROVED, zero tickets, for the K2 retry-spawn pin.",
+    status=ExtraWorkStatus.CUSTOMER_APPROVED, created_by=tom,
+)
+```
 
 ## Afterwards
 

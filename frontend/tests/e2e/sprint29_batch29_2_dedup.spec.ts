@@ -56,6 +56,25 @@ async function resolveFirstMembershipUserId(
  * so a focus target must be a member who holds at least one; a
  * company-wide admin with no building rows has nothing to scroll to.
  */
+/** P-16 repin — the focus_user test used to ask only the FIRST
+ *  customer for a member with access rows and self-skipped when that
+ *  customer had none. Scan the first page of customers instead: any
+ *  (customer, member) pair with access rows serves the pin. */
+async function resolveAnyMemberWithAccessRows(
+  api: APIRequestContext,
+): Promise<{ customerId: number; userId: number } | null> {
+  const response = await api.get("/api/customers/?page_size=20");
+  expect(response.status()).toBe(200);
+  const body = (await response.json()) as {
+    results: Array<{ id: number }>;
+  };
+  for (const customer of body.results) {
+    const userId = await resolveMemberWithAccessRows(api, customer.id);
+    if (userId !== null) return { customerId: customer.id, userId };
+  }
+  return null;
+}
+
 async function resolveMemberWithAccessRows(
   api: APIRequestContext,
   customerId: number,
@@ -152,13 +171,13 @@ test.describe("Sprint 29 Batch 29.2 — Edit Basics dedup", () => {
     page,
   }) => {
     const sa = await apiAs(DEMO_USERS.super.email);
-    const customerId = await resolveFirstCustomerId(sa);
-    const userId = await resolveMemberWithAccessRows(sa, customerId);
+    const found = await resolveAnyMemberWithAccessRows(sa);
     await sa.dispose();
     test.skip(
-      userId === null,
-      "No customer member with building access rows in seed for this customer.",
+      found === null,
+      "No customer member with building access rows anywhere in the seed.",
     );
+    const { customerId, userId } = found!;
 
     await loginAs(page, DEMO_USERS.super);
     await page.goto(
@@ -188,18 +207,59 @@ test.describe("Sprint 29 Batch 29.2 — Edit Basics dedup", () => {
   test("pricing add-form carries the spacing wrapper class", async ({
     page,
   }) => {
-    await loginAs(page, DEMO_USERS.super);
-    await page.goto("/extra-work");
-    await page.waitForSelector(
-      '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
-      { timeout: 10_000 },
-    );
-    const rowCount = await page
-      .locator('[data-testid="extra-work-row"]')
-      .count();
-    test.skip(rowCount === 0, "No EW rows in seed.");
+    // P-16 repin — the spec seeds its own EW at a pricing-open stage
+    // instead of clicking the list's first row and skipping when its
+    // workflow state offered no form. Same seed shape as the reject
+    // and totals fixtures: Tom's cart, SA drive with the W-PLAN
+    // recorded-override bypass.
+    const sa = await apiAs(DEMO_USERS.super.email);
+    const tom = await apiAs(DEMO_USERS.customerAll.email);
+    let ewId: number | null = null;
+    try {
+      const tomEws = (await (
+        await tom.get("/api/extra-work/?page_size=1")
+      ).json()) as { results: Array<{ customer: number; building: number }> };
+      const anchor = tomEws.results[0];
+      if (anchor) {
+        const create = await tom.post("/api/extra-work/", {
+          data: {
+            title: `29.2 add-form fixture ${Date.now()}`,
+            description: "Seeded by the add-form spec.",
+            building: anchor.building,
+            customer: anchor.customer,
+            category: "DEEP_CLEANING",
+            line_items: [
+              { custom_description: "Price me", quantity: "1.00" },
+            ],
+          },
+        });
+        if (create.status() === 201) {
+          const body = (await create.json()) as { id: number };
+          const r1 = await sa.post(`/api/extra-work/${body.id}/transition/`, {
+            data: { to_status: "UNDER_REVIEW" },
+          });
+          // The add form lives INSIDE the ProposalBuilder, which only
+          // mounts on a DRAFT proposal — create one (the W-PLAN gate's
+          // recorded-override bypass, like every pricing fixture).
+          const proposal = await sa.post(
+            `/api/extra-work/${body.id}/proposals/`,
+            {
+              data: { override_reason: "29.2 fixture: plan bypass" },
+            },
+          );
+          if (r1.status() === 200 && proposal.status() === 201) {
+            ewId = body.id;
+          }
+        }
+      }
+    } finally {
+      await sa.dispose();
+      await tom.dispose();
+    }
+    test.skip(ewId === null, "Could not seed a priceable EW.");
 
-    await page.locator('[data-testid="extra-work-row"]').first().click();
+    await loginAs(page, DEMO_USERS.super);
+    await page.goto(`/extra-work/${ewId}`);
     await page
       .waitForLoadState("networkidle", { timeout: 10_000 })
       .catch(() => {});
@@ -209,16 +269,10 @@ test.describe("Sprint 29 Batch 29.2 — Edit Basics dedup", () => {
     });
     await page.locator('[data-testid="extra-work-tab-money"]').click();
 
-    // Only the provider side renders the add-pricing-item form. The
-    // demo seeds super_admin as provider; the form must carry the
-    // wrapper class that drives the 29.2 spacing CSS (it is a <div>
-    // wrapper inside the ProposalBuilder now, not a <form>).
+    // Only the provider side renders the add-pricing-item form; the
+    // wrapper class drives the 29.2 spacing CSS (a <div> wrapper
+    // inside the ProposalBuilder now, not a <form>).
     const addForm = page.locator(".ew-pricing-add-form");
-    const addFormCount = await addForm.count();
-    test.skip(
-      addFormCount === 0,
-      "Add-pricing-item form not visible on this EW (workflow state).",
-    );
-    await expect(addForm.first()).toBeVisible();
+    await expect(addForm.first()).toBeVisible({ timeout: 10_000 });
   });
 });

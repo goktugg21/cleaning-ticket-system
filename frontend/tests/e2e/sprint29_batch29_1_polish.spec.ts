@@ -1,6 +1,65 @@
 import { expect, test } from "@playwright/test";
+import { apiAs } from "./fixtures/apiAs";
 import { DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
+
+/** P-16 — seed a PRICED, unspawned EW so the totals-row test stops
+ *  gambling on the list's first row (it self-skipped whenever that row
+ *  happened to carry no pricing). Tom creates a proposal-routed cart;
+ *  the SA drives it to PRICING_PROPOSED (the W-PLAN gate's recorded-
+ *  override bypass) and prices one line. Returns the EW id, or null. */
+async function seedPricedEw(): Promise<number | null> {
+  const sa = await apiAs(DEMO_USERS.super.email);
+  const tom = await apiAs(DEMO_USERS.customerAll.email);
+  try {
+    const tomEws = (await (
+      await tom.get("/api/extra-work/?page_size=1")
+    ).json()) as { results: Array<{ customer: number; building: number }> };
+    const anchor = tomEws.results[0];
+    if (!anchor) return null;
+    const create = await tom.post("/api/extra-work/", {
+      data: {
+        title: `29.1 totals fixture ${Date.now()}`,
+        description: "Seeded by the pricing-totals spec.",
+        building: anchor.building,
+        customer: anchor.customer,
+        category: "DEEP_CLEANING",
+        line_items: [{ custom_description: "Priced line", quantity: "1.00" }],
+      },
+    });
+    if (create.status() !== 201) return null;
+    const body = (await create.json()) as { id: number };
+    const r1 = await sa.post(`/api/extra-work/${body.id}/transition/`, {
+      data: { to_status: "UNDER_REVIEW" },
+    });
+    if (r1.status() !== 200) return null;
+    // The totals row renders inside the ProposalBuilder, which mounts
+    // on a DRAFT proposal — so the seed builds one (the W-PLAN gate's
+    // recorded-override bypass) and prices one line on it.
+    const proposal = await sa.post(`/api/extra-work/${body.id}/proposals/`, {
+      data: { override_reason: "29.1 fixture: plan bypass" },
+    });
+    if (proposal.status() !== 201) return null;
+    const pid = ((await proposal.json()) as { id: number }).id;
+    const line = await sa.post(
+      `/api/extra-work/${body.id}/proposals/${pid}/lines/`,
+      {
+        data: {
+          description: "29.1 totals line",
+          unit_type: "FIXED",
+          quantity: "1.00",
+          unit_price: "100.00",
+          vat_pct: "21.00",
+        },
+      },
+    );
+    if (line.status() !== 201) return null;
+    return body.id;
+  } finally {
+    await sa.dispose();
+    await tom.dispose();
+  }
+}
 
 /**
  * Sprint 29 Batch 29.1 — polish and papercut fixes.
@@ -38,15 +97,14 @@ test.describe("Sprint 29 Batch 29.1 — polish & papercuts", () => {
   });
 
   test("pricing totals row renders a Total label", async ({ page }) => {
+    // P-16 repin — the spec seeds its own priced EW instead of
+    // clicking the list's first row and skipping when it carried no
+    // pricing.
+    const ewId = await seedPricedEw();
+    test.skip(ewId === null, "Could not seed a priced EW.");
+
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/extra-work");
-    await page.waitForSelector(
-      '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
-      { timeout: 10_000 },
-    );
-    const rowCount = await page.locator('[data-testid="extra-work-row"]').count();
-    test.skip(rowCount === 0, "No EW rows in seed.");
-    await page.locator('[data-testid="extra-work-row"]').first().click();
+    await page.goto(`/extra-work/${ewId}`);
     await page
       .waitForLoadState("networkidle", { timeout: 10_000 })
       .catch(() => {});
@@ -55,10 +113,11 @@ test.describe("Sprint 29 Batch 29.1 — polish & papercuts", () => {
       timeout: 10_000,
     });
     await page.locator('[data-testid="extra-work-tab-money"]').click();
+    // The seeded EW carries a priced line, so the totals row is a
+    // hard expectation now, not a maybe.
     const totalsRow = page.locator(".ew-pricing-totals-row");
-    const totalsCount = await totalsRow.count();
-    test.skip(totalsCount === 0, "No pricing totals row on this EW.");
-    await expect(totalsRow.locator("text=Total")).toBeVisible();
+    await expect(totalsRow.first()).toBeVisible({ timeout: 10_000 });
+    await expect(totalsRow.locator("text=Total").first()).toBeVisible();
   });
 
   test("show technical keys toggle controls affects-line visibility", async ({

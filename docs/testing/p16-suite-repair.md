@@ -89,10 +89,39 @@ services family and one fresh flake:
 - **deleted** — nothing: every red pinned something that still exists
   in some form.
 
-Skips: three were build-config (the demo-card specs self-skip when
-the build has `VITE_DEMO_MODE=false`; the final run builds with it on,
-as crmtest does), the rest are data-conditional and enumerated with
-the final run's list reporter.
+Skips: the discovery run's seven were not platform-skips, and each got
+a disposition of its own:
+
+- three demo-card specs self-skipped because a stray
+  `.env.production.local` forced `VITE_DEMO_MODE=false` into the
+  build; the harness builds with the flag on (as crmtest does) and
+  they run.
+- **deleted** `sprint28_batch15_4` › ticket EW origin link — it hunted
+  the W21-retired `ticket-extra-work-origin` block and skipped when
+  the hunt failed, i.e. always; the surviving fact is J1/J3/J4's
+  money-card landing pin. The one deletion of the sprint.
+- **repinned** `sprint28_batch15_4` › reject dialog — seeds its OWN
+  rejectable EW (Tom's cart → SA drives to PRICING_PROPOSED with a
+  pricing line + the W-PLAN recorded-override bypass) instead of
+  hoping the tracker held one.
+- **repinned** `sprint29_batch29_1` › pricing totals — seeds a DRAFT
+  proposal with a priced line (the totals row lives in the
+  ProposalBuilder) instead of clicking the list's first row.
+- **repinned** `sprint29_batch29_2` › add-form — same seed (the
+  builder mounts on a draft proposal); › focus_user — scans customers
+  for a member with access rows instead of asking only the first.
+- **repinned** `sprint30` K1 — three stale layers: the seed helper
+  sent the P-8-retired per-line `requested_date`, the drive hit the
+  W-PLAN gate (bypass added), the workflow leg needs a pricing line
+  first; and the assertion expected the retired request page — the
+  provider landing is the JOB now (the J1 rule), so K1 asserts the
+  redirect + the money card + no retry door.
+- `sprint30` K2 needs a genuinely stuck CUSTOMER_APPROVED EW with zero
+  tickets — a state the API can no longer produce (auto-spawn is the
+  fix it tests the repair FOR). The harness seeds one ORM row
+  (`[P16-FIXTURE] Stuck approved EW`) before the run; K2 heals it by
+  pressing retry-spawn, so each full run needs a fresh row (the seed
+  snippet lives in the harness notes). Verified green twice.
 
 ## Final lines
 
