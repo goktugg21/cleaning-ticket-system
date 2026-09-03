@@ -457,6 +457,8 @@ dropped):**
   knows the answer to (the 403 console noise).
 - FIXED — recurring PATCH answers the READ shape (create's P-12 E2
   fix, completed for update).
+- FIXED — the My hours no-hour-types truth renders ONCE (the banner
+  keeps it; the button's duplicate reason line stands down).
 - FIXED — the STAFF slot-roster READ gets a read-shaped refusal
   naming My schedule; the crew carry stamps the PLANNER
   (`assignment.assigned_by`), never the transition's actor — a

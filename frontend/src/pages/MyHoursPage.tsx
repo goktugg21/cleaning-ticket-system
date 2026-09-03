@@ -709,11 +709,12 @@ export function MyHoursPage() {
   // Found by the Sprint 161 undefined-class gate while this file was
   // open for §1c. (The gate greps for class literals textually, so
   // naming the class here would make it report itself.)
+  // P-15 (P-14's S4 finding) — the no-hour-types truth renders ONCE:
+  // the banner below carries it, so the button's reason line stands
+  // down for that case (it still says why on a closed week).
   const addDisabledReason = weekClosed
     ? t("my_hours.add_disabled_closed")
-    : !loading && hourTypes.length === 0
-      ? t("my_hours.add_disabled_no_types")
-      : null;
+    : null;
   // P-9 D3 — the last week before this one that holds hours.
   const lastSavedWeek = lastSavedWeekBefore(weeksWithHours, week);
   return (
