@@ -176,7 +176,14 @@ the in-sprint part-A/B6 work.
   assertion is wrong at any speed. Fix: keep the greeting neutral and
   the card a skeleton until the probes resolve. (W1)
 
-- **Hours › Agreed hours · SA + CA · dead inputs and the one fact
+- **P-15: FIXED (Part 4.3)** — the tab moved to the §D.22 standard:
+  six fact columns (Person · Building · Pattern compressed to words,
+  "Mon–Fri · 8 h" — pinned in `patternLabel.test.ts` · Total/week ·
+  STATUS beside VALID · one button per row), filters behind Filter,
+  and the dead inputs are GONE — a row opens its own live editor
+  (fields you can see are fields you can type in; an agreed row's
+  editor states the immutability rule instead). ·
+  **Hours › Agreed hours · SA + CA · dead inputs and the one fact
   that matters is off-screen** — the seven day-value boxes render as
   editable inputs but accept nothing until the small "Edit" toggle is
   pressed; and the row's Draft/Submitted/Agreed status — the fact the

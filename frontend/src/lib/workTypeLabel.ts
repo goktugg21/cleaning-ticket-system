@@ -30,3 +30,21 @@ export function workTypeLabel(
 ): string {
   return standardSlotLabel(name, standardSlot, "work_type_slot", KNOWN, t);
 }
+
+/**
+ * P-15 4.5(b) — the pattern dialog's DEFAULT kind of work.
+ *
+ * A standing pattern is usually "Vast werk": the default is the
+ * company's fixed-work entry (the standard set's first), recognised by
+ * its slot in either language — NEVER "Extra work", which is what the
+ * bare first-option dropdown used to land on. A company with no
+ * fixed-work entry gets no default (the dialog then asks), and a
+ * company with no kinds of work at all hides the field.
+ */
+export function defaultWorkTypeId(
+  workTypes: { id: number; standard_slot?: string | null }[],
+): number | null {
+  return (
+    workTypes.find((type) => type.standard_slot === "fixed_work")?.id ?? null
+  );
+}

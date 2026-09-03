@@ -276,6 +276,7 @@ export function HoursWeekGrid({
   onDirtyChange,
   jobPicker,
   setupBuildingCount,
+  patternMode = false,
 }: {
   week: IsoWeek;
   /** Whose weeks this grid writes. Empty = nothing chosen yet. */
@@ -304,6 +305,9 @@ export function HoursWeekGrid({
    *  empty, with the door to Agreed hours. Omitted (My hours, older
    *  callers): no line. */
   personHasApprovedPattern?: Record<number, boolean>;
+  /** P-15 4.5(d) — the agreed-hours PATTERN dialog's frame: weekday
+   *  headers without dates, and the Save button says "Save pattern". */
+  patternMode?: boolean;
   /** Sprint 177 §7 — the JOBS chosen in the setup, if any. Each becomes
    *  its own seeded row so the hours land already attributed. Empty (the
    *  default, and what every pre-177 caller passes) seeds one untagged
@@ -1141,11 +1145,14 @@ export function HoursWeekGrid({
     }
   }
 
+  // P-15 4.5(d) — a PATTERN dialog borrows this grid as a frame only:
+  // its headers are weekdays without dates (a dateless weekly pattern
+  // entered under concrete dates read as a week's entry), and its Save
+  // says what it saves.
   const dayLabel = (date: Date) =>
     date.toLocaleDateString(i18n.language === "nl" ? "nl-NL" : "en-US", {
       weekday: "short",
-      day: "2-digit",
-      month: "2-digit",
+      ...(patternMode ? {} : { day: "2-digit", month: "2-digit" }),
     });
 
   if (employees.length === 0) {
@@ -1683,7 +1690,11 @@ export function HoursWeekGrid({
             disabled={busy || weekClosed || !!saveBlockedReason}
             data-testid="hours-week-grid-save"
           >
-            {busy ? t("admin_form.saving") : t("hours_week_grid.save")}
+            {busy
+              ? t("admin_form.saving")
+              : patternMode
+                ? t("contract_hours.save_pattern")
+                : t("hours_week_grid.save")}
           </button>
         </div>
       </div>

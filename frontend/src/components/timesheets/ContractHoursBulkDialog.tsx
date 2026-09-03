@@ -40,7 +40,7 @@ import { ChipMultiSelect } from "../ChipMultiSelect";
 import { ConfirmDialog } from "../ConfirmDialog";
 import type { ConfirmDialogHandle } from "../ConfirmDialog";
 import { usePickerReserve } from "../../lib/usePickerReserve";
-import { workTypeLabel } from "../../lib/workTypeLabel";
+import { defaultWorkTypeId, workTypeLabel } from "../../lib/workTypeLabel";
 import { fromDateString, isoWeekOf, toDateString } from "../../lib/isoWeek";
 import { HoursWeekGrid } from "./HoursWeekGrid";
 import type { GridCell } from "./HoursWeekGrid";
@@ -99,7 +99,13 @@ export function ContractHoursBulkDialog({
 
   const [employeeIds, setEmployeeIds] = useState<number[]>([]);
   const [buildingIds, setBuildingIds] = useState<number[]>([]);
-  const [workType, setWorkType] = useState<number | "">("");
+  /* P-15 4.5(b) — the DEFAULT kind of work is the company's
+     fixed-work entry, never "Extra work" and never a bare first
+     option. Derived (null = untouched) rather than seeded into state,
+     so a catalog that arrives after mount still lands the default. */
+  const [workTypePick, setWorkTypePick] = useState<number | "" | null>(null);
+  const workType =
+    workTypePick !== null ? workTypePick : (defaultWorkTypeId(workTypes) ?? "");
   /* W10 — asked ONCE, here, for everybody in this assignment. The
      alternative is a weekly "apply the contract to these people"
      button, which is a thing somebody has to remember every Monday. */
@@ -366,31 +372,40 @@ export function ContractHoursBulkDialog({
           </div>
 
           <div className="field">
-            <span className="field-label">
-              {t("contract_hours.work_type")}
-            </span>
-            {/* Sprint 169 §2 — an empty catalog SAYS so. An empty
-                dropdown with no explanation reads as broken, and until
-                this sprint there was no screen anywhere that could put
-                a row in it. */}
-            <select
-              className="field-input"
-              value={workType}
-              onChange={(event) =>
-                setWorkType(
-                  event.target.value === "" ? "" : Number(event.target.value),
-                )
-              }
-              data-testid="bulk-work-type"
-            >
-              <option value="">{t("contract_hours.no_work_type")}</option>
-              {workTypes.map((type) => (
-                <option key={type.id} value={type.id}>
-                  {workTypeLabel(type.name, type.standard_slot, t)}
-                </option>
-              ))}
-            </select>
-            {workTypes.length === 0 && (
+            {/* P-15 4.5(a/b) — the label says what the value IS and
+                where it lands ("Kind of work (for the hours report)"),
+                the one-liner says what it never touches, and the
+                default is the company's fixed-work entry. A company
+                with no kinds of work hides the field — an empty
+                dropdown defaulting to "Extra work" on a standing
+                pattern was the owner's screenshot. */}
+            {workTypes.length > 0 ? (
+              <>
+                <span className="field-label">
+                  {t("contract_hours.work_type_full")}
+                </span>
+                <select
+                  className="field-input"
+                  value={workType}
+                  onChange={(event) =>
+                    setWorkTypePick(
+                      event.target.value === "" ? "" : Number(event.target.value),
+                    )
+                  }
+                  data-testid="bulk-work-type"
+                >
+                  <option value="">{t("contract_hours.no_work_type")}</option>
+                  {workTypes.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {workTypeLabel(type.name, type.standard_slot, t)}
+                    </option>
+                  ))}
+                </select>
+                <p className="muted small" style={{ margin: "4px 0 0" }}>
+                  {t("contract_hours.work_type_note")}
+                </p>
+              </>
+            ) : (
               <p className="muted small" data-testid="bulk-no-work-types">
                 <Link to="/admin/services-catalogs/catalogs">
                   {t("work_types.none_yet")}
@@ -437,6 +452,10 @@ export function ContractHoursBulkDialog({
           onCancel={requestClose}
           onDirtyChange={setDirty}
           onSaveCells={saveCells}
+          /* P-15 4.5(d) — a PATTERN, not a week: dateless weekday
+             headers and a Save pattern button; the grid's dates stay
+             the internal frame only. */
+          patternMode
         />
 
         {/* Sprint 180 §2 — see the week wizard: rendered unconditionally,

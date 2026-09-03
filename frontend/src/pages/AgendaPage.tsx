@@ -758,6 +758,40 @@ function WorkPlanWeek() {
     });
   }, [data, todayKey]);
 
+  // P-15 4.1 — NEVER A HALF COLUMN. The seven 210px-floor columns (the
+  // owner rejected squeezing them twice) cannot all fit at 1440 with
+  // the sidebar open, so the board scrolls — but the visible area now
+  // ends on a COLUMN BOUNDARY: the scroller's width snaps down to the
+  // largest whole number of columns that fits, so the right edge shows
+  // a flush column and the scrollbar + W24-FX1 edge shadows (not a
+  // clipped Saturday) say there is more. Recomputed on resize; phones
+  // keep their single-column layout untouched.
+  useEffect(() => {
+    const wrap = weekScrollRef.current;
+    if (!wrap || !data) return;
+    const fit = () => {
+      const grid = wrap.querySelector<HTMLElement>(".agenda-week-grid");
+      const column = wrap.querySelector<HTMLElement>(".wp-day");
+      if (!grid || !column) return;
+      if (window.innerWidth < 768) {
+        wrap.style.maxWidth = "";
+        return;
+      }
+      const gap = parseFloat(getComputedStyle(grid).columnGap || "10") || 10;
+      const step = column.offsetWidth + gap;
+      const available = wrap.parentElement?.clientWidth ?? wrap.clientWidth;
+      const whole = Math.max(1, Math.floor((available + gap) / step));
+      wrap.style.maxWidth =
+        whole >= 7 ? "" : `${Math.round(whole * step - gap)}px`;
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => {
+      window.removeEventListener("resize", fit);
+      wrap.style.maxWidth = "";
+    };
+  }, [data]);
+
   const filtered = useMemo(
     () =>
       entries.filter((entry) => {
