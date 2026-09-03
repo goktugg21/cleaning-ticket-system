@@ -402,6 +402,10 @@ export interface WeekAssignmentJob {
 
 export interface WeekAssignmentPerson {
   employee: number;
+  /** P-15 §0.2 — does this person hold an APPROVED auto-fill pattern
+   *  in force this week? Only approved patterns fill the sheet; the
+   *  grid says so under everyone whose standard lines stay empty. */
+  has_approved_pattern: boolean;
   /** The buildings this person may enter, in the grid's company. */
   building_ids: number[];
   /** THIS week's proposal: the jobs the person is on this week, with

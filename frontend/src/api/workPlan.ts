@@ -192,6 +192,10 @@ export interface WorkPlanEntry {
   /** P-10 A4 — the creation day as the server states it ("YYYY-MM-DD"). */
   created_day: string | null;
   plan_source: "TICKET" | "PROVIDER_PLAN" | "CUSTOMER_WISH" | null;
+  /** P-15 §0.4 — the customer's wish as a bare fact ("Wished for
+   *  {date}"), carried only when the wish is the record's sole date.
+   *  It places nothing; the Not-planned strip prints it. */
+  wished_day: string | null;
   /** P-1 — a date is a plan only if a PERSON made it. `has_real_plan`
    *  is false for a seeded date nobody set; such a card reads "created
    *  ... not planned yet", never "planned", never late. `planned_by_name`
@@ -230,6 +234,9 @@ export interface WorkPlanEntry {
   manager_checked_day: string | null;
   manager_checked_by_name: string | null;
   approved_by_name: string | null;
+  /** P-15 §0.3 — the approval leg was an on-behalf override: the card
+   *  words the manager's check as the sign-off. */
+  approved_on_behalf: boolean;
   reported_done_time: string | null;
   settled_days_after_due: number | null;
   /** WP-1 G2 — whole days this job has sat with NO planned date at

@@ -30,7 +30,13 @@ from django.utils import timezone
 
 from accounts.models import UserRole
 
-from .job_dates import job_deadline, job_due, job_plan_source, job_window
+from .job_dates import (
+    job_deadline,
+    job_due,
+    job_plan_source,
+    job_window,
+    job_wish_day,
+)
 from .lateness_index import LATE_LIVE_TICKET_STATUSES
 from .models import TicketStatus
 from .plan_provenance import ticket_plan_provenance
@@ -142,6 +148,38 @@ def ticket_finished_at(ticket):
     )
 
 
+def approval_leg(ticket):
+    """P-15 §0.3 — the latest history leg into APPROVED, as
+    `(who_name, on_behalf)`; `(None, False)` when it never happened.
+
+    `on_behalf` is True when the leg carries `is_override` (the
+    W11/P-4 on-behalf answer). The screen must then say "checked by
+    {manager} — counts as approved" instead of presenting a provider's
+    hand as the customer's — never a provider override in silence.
+    """
+    latest = None
+    for row in ticket.status_history.all():
+        if row.new_status != TicketStatus.APPROVED:
+            continue
+        if latest is None or (row.created_at, row.id) > (
+            latest.created_at,
+            latest.id,
+        ):
+            latest = row
+    if latest is None:
+        return None, False
+    who = None
+    if latest.changed_by_id:
+        actor = latest.changed_by
+        who = (actor.full_name or "").strip() or actor.email
+    return who, bool(latest.is_override)
+
+
+def approval_on_behalf(ticket) -> bool:
+    """See `approval_leg` — the boolean half alone."""
+    return approval_leg(ticket)[1]
+
+
 def ticket_settled_at(ticket):
     """FE-4's past-tense stamp: when the work was over, on a job that IS
     over. None while live, and None while reported done but waiting on
@@ -176,9 +214,14 @@ def ticket_due(ticket, today: datetime.date) -> dict:
     # plan here AND has already been read as no window by `job_window`,
     # so the two cannot disagree.
     provenance = ticket_plan_provenance(ticket)
+    # P-15 §0.4 — the customer's wish, as a bare fact ("Wished for
+    # {date}"): stated only when it is the job's sole date. It places
+    # nothing and dues nothing; the strip and the detail print it.
+    wished = job_wish_day(ticket)
     facts = {
         **provenance.as_dict(),
         "plan_source": job_plan_source(ticket),
+        "wished_day": wished.isoformat() if wished else None,
         "due_date": None,
         "due_kind": None,
         "days_until_due": None,

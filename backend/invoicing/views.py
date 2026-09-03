@@ -41,6 +41,11 @@ from .line_services import (
     update_invoice_meta,
 )
 from .models import Invoice, InvoiceLine
+from .permissions import (
+    ERR_INVOICE_ADMIN_ONLY,
+    INVOICE_ADMIN_ONLY_DETAIL,
+    is_invoice_admin,
+)
 from .preview import plan_invoices
 from .preview_pdf import render_preview_pdf
 from .schedule import billing_day_reached
@@ -158,6 +163,25 @@ class InvoiceViewSet(viewsets.GenericViewSet):
         if not _is_provider_operator(request.user):
             return Response(
                 {"detail": "Only provider operators can manage invoices."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def _forbid_non_admin(self, request):
+        """P-15 §0.1 / H-12 — issue / send / un-issue / reverse are
+        company-level (CA / SA only). Operator first, so a customer or
+        STAFF still gets the generic operator refusal; a BUILDING_MANAGER
+        gets the sentence that names the next actor, with the stable code
+        the screen renders from."""
+        guard = self._forbid_non_operator(request)
+        if guard is not None:
+            return guard
+        if not is_invoice_admin(request.user):
+            return Response(
+                {
+                    "detail": INVOICE_ADMIN_ONLY_DETAIL,
+                    "code": ERR_INVOICE_ADMIN_ONLY,
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
         return None
@@ -514,8 +538,10 @@ class InvoiceViewSet(viewsets.GenericViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def _transition(self, request, fn, *, created=False):
-        """Shared body for issue / send / reverse."""
-        guard = self._forbid_non_operator(request)
+        """Shared body for issue / send / un-issue / reverse — all four
+        are company-level commits (P-15 §0.1 / H-12), so the shared gate
+        here is the ADMIN one, not the operator one."""
+        guard = self._forbid_non_admin(request)
         if guard is not None:
             return guard
         invoice = self.get_object()

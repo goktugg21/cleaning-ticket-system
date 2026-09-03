@@ -363,6 +363,9 @@ export function FacturenPage({
    *  operator otherwise, Addendum B) got a door that could only 403.
    *  The money sentence stays for BM; the schedule-fixing door hides. */
   const canSetBillingDay = isProviderAdmin(me?.role);
+  /** P-15 §0.1 / H-12 — issue/send/un-issue/reverse are CA/SA-only.
+   *  The Start-here must not order a BM to send. */
+  const canCommitInvoices = isProviderAdmin(me?.role);
   // P-6 V1 — the "Invoices → customer → month" sentence on the meerwerk
   // pages links here with `?customer=<id>&period=YYYY-MM`; the page opens
   // on exactly that customer and month.
@@ -926,7 +929,11 @@ export function FacturenPage({
               to: `/invoices/${oldestIssued.id}`,
             }}
           >
-            {t("invoices:road.start_issued", { count: tabCounts.issued })}
+            {/* P-15 §0.1 — a BM may not send; the sentence must not
+                suggest it. The read variant states who does. */}
+            {canCommitInvoices
+              ? t("invoices:road.start_issued", { count: tabCounts.issued })
+              : t("invoices:road.start_issued_read", { count: tabCounts.issued })}
           </StartHere>
         ) : null
       )}

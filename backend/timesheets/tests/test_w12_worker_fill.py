@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
-from timesheets.models import ContractHours, TimeEntry
+from timesheets.models import ContractHours, ContractHoursStatus, TimeEntry
 
 from .fixtures import TimesheetsFixture
 
@@ -41,6 +41,9 @@ class WorkerSelfFillTests(TimesheetsFixture):
             monday=Decimal("8.00"),
             tuesday=Decimal("8.00"),
             auto_fill=True,
+            # P-15 §0.2 — only an APPROVED pattern fills; these fixtures
+            # are about WHOSE week fills, so they stand on approved rows.
+            status=ContractHoursStatus.APPROVED,
             created_by=cls.ca_a,
         )
         cls.agreement_colleague = ContractHours.objects.create(
@@ -51,6 +54,7 @@ class WorkerSelfFillTests(TimesheetsFixture):
             valid_from=date(2026, 1, 1),
             monday=Decimal("6.00"),
             auto_fill=True,
+            status=ContractHoursStatus.APPROVED,
             created_by=cls.ca_a,
         )
 

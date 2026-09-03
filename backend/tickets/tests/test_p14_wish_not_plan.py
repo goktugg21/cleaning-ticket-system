@@ -105,3 +105,66 @@ class WishDateIsNotAPlanTests(WorkPlanFixture, APITestCase):
         self.assertEqual(card["day"], self.today.isoformat())
         self.assertEqual(card["plan_source"], "PROVIDER_PLAN")
         self.assertEqual(self._buckets_holding(payload, key), ["entries"])
+
+
+class SpawnedTicketWishTests(WorkPlanFixture, APITestCase):
+    """P-15 §0.4 — the same law for the TICKET the extra work spawned.
+
+    P-14 A5 stopped the wish placing EXTRA-WORK rows; a spawned ticket
+    with only a `preferred_date` was still placed by it through
+    `tickets/job_dates.py`. One placement law, no exceptions: the
+    wish-only ticket sits in the Not-planned strip wearing the wish as
+    a fact ("Wished for {date}" — `wished_day`).
+    """
+
+    def _buckets_holding(self, payload, key):
+        return [
+            b for b in BUCKETS if any(e["key"] == key for e in payload.get(b, []))
+        ]
+
+    def _spawned_wish_ticket(self, *, wished):
+        extra_work = self.make_extra_work(
+            "The wish behind the spawn",
+            preferred=wished,
+            ew_status=ExtraWorkStatus.IN_PROGRESS,
+        )
+        ticket = self.make_ticket("Spawned execution")
+        ticket.extra_work_request = extra_work
+        ticket.save(update_fields=["extra_work_request"])
+        # The company board lists staffed tickets (`_ticket_source`).
+        self.make_slot(ticket)
+        return ticket
+
+    def test_a_spawned_ticket_is_not_placed_by_the_wish(self):
+        wished = self.today + 2 * DAY
+        ticket = self._spawned_wish_ticket(wished=wished)
+        payload = self.get_plan(self.company_admin, scope="company")
+        key = f"ticket-{ticket.id}"
+        self.assertEqual(self._buckets_holding(payload, key), ["undated_entries"])
+        row = next(e for e in payload["undated_entries"] if e["key"] == key)
+        self.assertIsNone(row["planned_start"])
+        self.assertFalse(row["has_real_plan"])
+        self.assertEqual(row["plan_source"], "CUSTOMER_WISH")
+        self.assertEqual(row["wished_day"], wished.isoformat())
+
+    def test_the_workers_own_slot_states_the_wish_too(self):
+        wished = self.today + 2 * DAY
+        ticket = self._spawned_wish_ticket(wished=wished)
+        payload = self.get_plan(self.worker)
+        key = f"slot-{ticket.staff_assignments.get().id}"
+        row = next(e for e in payload["undated_entries"] if e["key"] == key)
+        self.assertEqual(row["wished_day"], wished.isoformat())
+
+    def test_a_provider_plan_on_the_extra_work_still_places_the_ticket(self):
+        wished = self.today - 3 * DAY
+        ticket = self._spawned_wish_ticket(wished=wished)
+        extra_work = ticket.extra_work_request
+        extra_work.provider_planned_date = self.today
+        extra_work.save(update_fields=["provider_planned_date"])
+        payload = self.get_plan(self.company_admin, scope="company")
+        key = f"ticket-{ticket.id}"
+        card = next(e for e in payload["entries"] if e["key"] == key)
+        self.assertEqual(card["day"], self.today.isoformat())
+        self.assertEqual(card["plan_source"], "PROVIDER_PLAN")
+        # A planned job wears no wish fact — the plan outranks it.
+        self.assertIsNone(card["wished_day"])

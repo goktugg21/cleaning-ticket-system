@@ -178,6 +178,12 @@ class CardEqualsDetailTests(_Fixture):
         self.assertEqual(detail["days_until_due"], -2)
 
     def test_a_customers_wish_is_a_wish_not_a_plan(self):
+        """P-15 §0.4 — one placement law, no exceptions: a ticket whose
+        only date is the customer's wish sits in the Not-planned strip
+        (never in the wished day's column), and the strip states the
+        wish as a fact. Rewritten from the P-1 captioned-phantom pin,
+        which asserted the wished-week column."""
+        wished = self.today + datetime.timedelta(days=2)
         extra_work = ExtraWorkRequest.objects.create(
             company=self.company,
             building=self.building,
@@ -186,13 +192,27 @@ class CardEqualsDetailTests(_Fixture):
             title="Wished",
             description="",
             status=ExtraWorkStatus.CUSTOMER_APPROVED,
-            preferred_date=self.today + datetime.timedelta(days=2),
+            preferred_date=wished,
         )
         ticket = self.make_ticket("Wished work", extra_work_request=extra_work)
         self.make_slot(ticket, days=None)
-        card = self.find(self.company_plan(week=self.week_of(2)), f"ticket-{ticket.id}")
-        self.assertIsNotNone(card)
+        payload = self.company_plan(week=self.week_of(2))
+        key = f"ticket-{ticket.id}"
+        # Not in the wished week's columns, nor in any dated bucket…
+        for bucket in ("entries", "overdue_entries", "upcoming_entries"):
+            self.assertNotIn(
+                key, [entry["key"] for entry in payload.get(bucket, [])], bucket
+            )
+        # …but in the Not-planned strip, wearing the wish as a fact.
+        strip = {
+            entry["key"]: entry for entry in payload["undated_entries"]
+        }
+        self.assertIn(key, strip)
+        card = strip[key]
         self.assertEqual(card["plan_source"], "CUSTOMER_WISH")
+        self.assertIsNone(card["planned_start"])
+        self.assertFalse(card["has_real_plan"])
+        self.assertEqual(card["wished_day"], wished.isoformat())
 
     def test_closed_work_stops_counting_and_reads_in_the_past_tense(self):
         closed_at = self._at(-1, hour=15)

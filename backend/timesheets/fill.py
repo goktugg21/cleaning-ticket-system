@@ -9,6 +9,13 @@ So the question "should this person's normal hours fill their weeks?"
 is answered ONCE, on the agreement, by `ContractHours.auto_fill`. This
 module is what that answer does.
 
+P-15 §0.2 (the owner's ruling on P-14's S2 finding): **only an APPROVED
+pattern fills the sheet.** The approval road (Draft → Submitted →
+Agreed) used to gate nothing here — a DRAFT pattern with the flag on
+wrote hours into reports and closing exactly like an agreed one
+(pattern 17 wrote entry 57, live). Now the flag says *whether* the
+pattern fills and the approval says *whether it may*; both must hold.
+
 ## It writes ordinary worked-hour rows, and invents no table
 
 `ContractHours` owns the AGREEMENT. `TimeEntry` owns WORKED hours. A
@@ -50,7 +57,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import Q
 
-from .models import ContractHours, HourSource, TimeEntry
+from .models import ContractHours, ContractHoursStatus, HourSource, TimeEntry
 from .serializers import snapshot_multiplier
 from .weeks import is_week_closed
 
@@ -103,12 +110,17 @@ def week_days(iso_year: int, iso_week: int) -> list[date]:
 def _agreements_for_week(
     company_id: int, days: list[date], employee_id: int | None = None
 ):
-    """Auto-fill agreements whose window overlaps this week at all.
+    """APPROVED auto-fill agreements whose window overlaps this week.
 
     Overlap, not containment: an agreement that starts on Wednesday
     fills Wednesday to Sunday, and the per-day check below drops the
     days before it. The alternative — requiring the whole week — would
     silently skip the first and last week of every agreement.
+
+    P-15 §0.2 — the status filter is the ruling: a DRAFT or SAVED
+    pattern seeds NOTHING, whatever its flag says. "Nothing downstream
+    reads a DRAFT row as an agreement" (the status's own docstring) now
+    includes this module.
 
     `employee_id` narrows it to ONE person. That is what lets a worker
     fill their own week without writing a row for a colleague — see
@@ -122,6 +134,7 @@ def _agreements_for_week(
         ContractHours.objects.filter(
             company_id=company_id,
             auto_fill=True,
+            status=ContractHoursStatus.APPROVED,
             valid_from__lte=last,
             **narrowed,
         )

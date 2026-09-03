@@ -142,6 +142,7 @@ from .job_dates import (
     job_deadline,
     job_due_q,
     job_window,
+    job_wish_day,
     with_job_dates,
 )
 from .lateness_index import LATE_LIVE_TICKET_STATUSES, LatenessIndex
@@ -1248,6 +1249,39 @@ def _ticket_source(user):
     return _with_ticket_settled_day(with_job_dates(queryset))
 
 
+def _ticket_parked_source(user):
+    """P-15 (P-14's S3 finding) — the PARKED list admits unstaffed jobs.
+
+    `_ticket_source` gates the whole board on `Exists(non-cancelled
+    slot)` — membership the ruling deliberately kept. But an ON_HOLD
+    ticket with NOBODY on it then reached no lane at all, including
+    "Geparkeerd": the undated lane excludes ON_HOLD by design, so the
+    job vanished from the entire planning surface (ticket 309 live).
+    Parking a job and pulling its crew is a normal one-two; the parked
+    lane is exactly where such a job must wait.
+
+    Same scoping helper, same annotations, NO staffing gate, narrowed to
+    the parked predicate — used only for the parked list and its count,
+    so the columns and every other chip keep the staffed membership."""
+    queryset = (
+        scope_tickets_for(user)
+        .filter(deleted_at__isnull=True)
+        .filter(_ticket_parked_q())
+        .select_related(
+            "building",
+            "customer",
+            "extra_work_request",
+            "created_by",
+            "planned_occurrence__recurring_job__created_by",
+        )
+        .prefetch_related(
+            "status_history__changed_by",
+            "extra_work_request__status_history__changed_by",
+        )
+    )
+    return _with_ticket_settled_day(with_job_dates(queryset))
+
+
 # ---------------------------------------------------------------------
 # Normalisation — model row -> `Job` -> response entry
 # ---------------------------------------------------------------------
@@ -1775,6 +1809,8 @@ def _fe4_facts(
     today=None,
     manager_checked=(None, None),
     approved_by=None,
+    approved_on_behalf=False,
+    wished_day=None,
 ) -> dict:
     """FE-4 (Addendum D SS D.12 items 2-4) -- the honest-date facts every
     entry carries, whatever its source:
@@ -1804,6 +1840,15 @@ def _fe4_facts(
                               may well know better); the card and the
                               detail simply say so, and the plan dialog
                               warns before the save.
+
+    P-15 §0.4 adds:
+
+      wished_day              the customer's WISH as a bare fact
+                              ("Wished for {date}"), carried ONLY when
+                              the wish is the record's sole date — a
+                              provider plan or an own schedule silences
+                              it. It places nothing; the Not-planned
+                              strip prints it.
 
     P-9 §A.3 adds the facts the one card standard needs, on every kind:
 
@@ -1835,6 +1880,7 @@ def _fe4_facts(
         "created_day": _iso(_local_date(created)),
         "created_by_name": _person_label(created_by) if created_by else None,
         "plan_source": plan_source,
+        "wished_day": _iso(wished_day),
         "has_real_plan": provenance.has_real_plan,
         "planned_by_name": provenance.planned_by_name,
         "planned_at": provenance.planned_at,
@@ -1856,6 +1902,9 @@ def _fe4_facts(
         "manager_checked_day": _iso(_local_date(manager_checked[0])),
         "manager_checked_by_name": manager_checked[1],
         "approved_by_name": approved_by,
+        # P-15 §0.3 — True when the approval leg was an on-behalf
+        # override: the card words the check as the sign-off.
+        "approved_on_behalf": approved_on_behalf,
         # P-3 §A.3 twin for the report: the clock of the report moment in
         # the server's zone, or null at midnight / when unknown.
         "reported_done_time": _clock(reported_done_at),
@@ -1931,14 +1980,20 @@ def _ticket_check_facts(ticket):
     """P-10 A4 — the manager's check (the leg OUT of
     WAITING_MANAGER_REVIEW into the customer wait or straight to
     approved) and the customer's approval (the leg INTO APPROVED), each
-    as (moment, who). None where the leg never happened."""
+    as (moment, who). None where the leg never happened.
+
+    P-15 §0.3 — the third element says whether that approval leg was an
+    ON-BEHALF override (`is_override`), so the card words the check as
+    the sign-off instead of presenting a provider's hand as the
+    customer's."""
     checked = _latest_leg(
         ticket,
         out_of=(TicketStatus.WAITING_MANAGER_REVIEW,),
         into=(TicketStatus.WAITING_CUSTOMER_APPROVAL, TicketStatus.APPROVED),
     )
     approved = _latest_leg(ticket, into=(TicketStatus.APPROVED,))
-    return _leg_facts(checked), _leg_facts(approved)
+    on_behalf = bool(approved is not None and approved.is_override)
+    return _leg_facts(checked), _leg_facts(approved), on_behalf
 
 
 def _ticket_settled_at(ticket):
@@ -2012,7 +2067,9 @@ def _entry_from_slot(
     planned_hours=None,
 ) -> dict:
     reported_done_at, reported_done_by = _ticket_reported_done(slot.ticket)
-    manager_checked, approved_by = _ticket_check_facts(slot.ticket)
+    manager_checked, approved_by, approved_on_behalf = _ticket_check_facts(
+        slot.ticket
+    )
     return {
         **_fe4_facts(
             job,
@@ -2020,11 +2077,15 @@ def _entry_from_slot(
             deadline=_slot_deadline(slot),
             manager_checked=manager_checked,
             approved_by=approved_by[1],
+            approved_on_behalf=approved_on_behalf,
             # A slot IS a dated piece of a ticket: its own day is a plan,
             # given by whoever put this person on it.
             plan_source=(
                 PLAN_SOURCE_TICKET if job.planned_start is not None else None
             ),
+            # P-15 §0.4 — the worker's strip states the wish too
+            # (`ticket__extra_work_request` is select_related above).
+            wished_day=job_wish_day(slot.ticket),
             provenance=(
                 PlanProvenance(
                     kind=PLAN_KIND_SCHEDULE,
@@ -2174,16 +2235,22 @@ def _entry_from_extra_work(
             created=extra_work.requested_at,
             deadline=extra_work.deadline,
             # P-14 A5 — placed by the PROVIDER's plan or not at all
-            # (the wish no longer places; `_ew_planned_window`). The
-            # CUSTOMER_WISH leg survives for the day the details show
-            # the wish again, but with the window provider-only it can
-            # no longer fire.
+            # (the wish no longer places; `_ew_planned_window`). P-15
+            # §0.4 revives the CUSTOMER_WISH caption as a bare FACT:
+            # `wished_day` carries the wish into the strip's "Wished
+            # for {date}" line, and the source names it, while the
+            # window stays provider-only.
             plan_source=(
-                None
-                if job.planned_start is None
-                else PLAN_SOURCE_PROVIDER_PLAN
+                PLAN_SOURCE_PROVIDER_PLAN
                 if extra_work.provider_planned_date is not None
                 else PLAN_SOURCE_CUSTOMER_WISH
+                if extra_work.preferred_date is not None
+                else None
+            ),
+            wished_day=(
+                extra_work.preferred_date
+                if extra_work.provider_planned_date is None
+                else None
             ),
             provenance=provenance,
             created_by=extra_work.created_by,
@@ -2288,7 +2355,9 @@ def _entry_from_ticket(
     instead is how many people are on it.
     """
     reported_done_at, reported_done_by = _ticket_reported_done(ticket)
-    manager_checked, approved_by = _ticket_check_facts(ticket)
+    manager_checked, approved_by, approved_on_behalf = _ticket_check_facts(
+        ticket
+    )
     return {
         **_fe4_facts(
             job,
@@ -2296,7 +2365,10 @@ def _entry_from_ticket(
             deadline=job_deadline(ticket),
             manager_checked=manager_checked,
             approved_by=approved_by[1],
+            approved_on_behalf=approved_on_behalf,
             plan_source=job_plan_source(ticket),
+            # P-15 §0.4 — the wish is a fact on the card, never a column.
+            wished_day=job_wish_day(ticket),
             settled_at=_ticket_settled_at(ticket),
             reported_done_at=reported_done_at,
             reported_done_by=reported_done_by,
@@ -2683,9 +2755,11 @@ class WorkPlanView(APIView):
         # P-7 S8 — the parked list: undated work somebody decided to park,
         # with its reason. Out of the nag, behind the same drawer. A
         # meerwerk has no parked state (§D.18 item 6), so no extra-work
-        # half.
+        # half. P-15 — on the team board the parked list reads its OWN
+        # source, staffed or not (`_ticket_parked_source`): an unstaffed
+        # ON_HOLD job must not vanish from the whole planning surface.
         parked_entries, parked_truncated = self._flat_entries(
-            jobs.filter(parked_q),
+            _ticket_parked_source(user) if team else jobs.filter(parked_q),
             extra_work.none(),
             week_start,
             week_end,
@@ -3594,6 +3668,10 @@ class WorkPlanView(APIView):
                 key: job_other[key] + ew_other.get(key, 0) for key in job_other
             }
         )
+        if team and user is not None:
+            # P-15 — the parked chip counts what the parked list shows:
+            # its own staffed-or-not source, not the gated board set.
+            counts["parked"] = _ticket_parked_source(user).count()
         # P-10 A2 — the manager's-check numbers, whole scope: `review` is
         # the strip (not this viewer's to check), `review_mine` the cards
         # on their today. Two plain counts rather than a conditional

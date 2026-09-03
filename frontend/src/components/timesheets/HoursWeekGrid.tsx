@@ -67,6 +67,7 @@
  */
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 
 import { getApiError } from "../../api/client";
 import type { HourSourceOption } from "../../api/reports";
@@ -259,6 +260,7 @@ export function HoursWeekGrid({
   entriesByEmployee,
   seedBuildingIds,
   personBuildingIds,
+  personHasApprovedPattern,
   seedSources = [],
   seedRowsByEmployee = NO_SEED_ROWS,
   sourceOptions = NO_SOURCE_OPTIONS,
@@ -297,6 +299,11 @@ export function HoursWeekGrid({
    *  the week card's Edit, so the select offered only "No building".
    *  A person with no entry here falls back to the seed list. */
   personBuildingIds?: Record<number, number[]>;
+  /** P-15 §0.2 — only APPROVED patterns fill the sheet. When a person
+   *  answers `false` here, their band says why the standard lines are
+   *  empty, with the door to Agreed hours. Omitted (My hours, older
+   *  callers): no line. */
+  personHasApprovedPattern?: Record<number, boolean>;
   /** Sprint 177 §7 — the JOBS chosen in the setup, if any. Each becomes
    *  its own seeded row so the hours land already attributed. Empty (the
    *  default, and what every pre-177 caller passes) seeds one untagged
@@ -1372,7 +1379,24 @@ export function HoursWeekGrid({
                     className="hours-week-person"
                     data-testid={`hours-week-person-${block.employeeId}`}
                   >
-                    <td colSpan={dayKeys.length + 2}>{block.employeeName}</td>
+                    <td colSpan={dayKeys.length + 2}>
+                      {block.employeeName}
+                      {/* P-15 §0.2 — only approved patterns fill; say
+                          why this person's standard lines are empty. */}
+                      {personHasApprovedPattern?.[block.employeeId] ===
+                        false && (
+                        <span
+                          className="muted small hours-week-line-sub"
+                          data-testid={`hours-week-no-pattern-${block.employeeId}`}
+                          style={{ display: "block", fontWeight: 400 }}
+                        >
+                          {t("hours_week_grid.no_approved_pattern")}{" "}
+                          <Link to="/admin/hours/agreed">
+                            {t("hours_week_grid.no_approved_pattern_link")}
+                          </Link>
+                        </span>
+                      )}
+                    </td>
                     <td
                       className="hours-week-group-total"
                       data-testid={`hours-week-person-total-${block.employeeId}`}
@@ -1550,7 +1574,23 @@ export function HoursWeekGrid({
                       className="hours-week-person"
                       data-testid={`hours-week-person-${employee.id}`}
                     >
-                      <td colSpan={dayKeys.length + 2}>{employee.name}</td>
+                      <td colSpan={dayKeys.length + 2}>
+                        {employee.name}
+                        {/* P-15 §0.2 — the no-rows band says it too. */}
+                        {personHasApprovedPattern?.[employee.id] ===
+                          false && (
+                          <span
+                            className="muted small hours-week-line-sub"
+                            data-testid={`hours-week-no-pattern-${employee.id}`}
+                            style={{ display: "block", fontWeight: 400 }}
+                          >
+                            {t("hours_week_grid.no_approved_pattern")}{" "}
+                            <Link to="/admin/hours/agreed">
+                              {t("hours_week_grid.no_approved_pattern_link")}
+                            </Link>
+                          </span>
+                        )}
+                      </td>
                       <td
                         className="hours-week-group-total"
                         data-testid={`hours-week-person-total-${employee.id}`}

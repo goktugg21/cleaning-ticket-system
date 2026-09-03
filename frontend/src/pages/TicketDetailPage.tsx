@@ -3964,6 +3964,16 @@ export function TicketDetailPage() {
                     ? ` — ${t("facts.not_planned_yet_age", { count: ticket.unplanned_age_days })}`
                     : ""}
                 </div>
+                {/* P-15 §0.4 — the customer's wish is a FACT, never a
+                    plan: stated here, and the strip files the job under
+                    "Not planned yet". */}
+                {ticket.wished_day && (
+                  <div className="ew-ctx-sub" data-testid="ticket-fact-wished">
+                    {t("facts.wished_for", {
+                      date: formatDay(`${ticket.wished_day}T00:00:00`),
+                    })}
+                  </div>
+                )}
                 {/* FE-4 (§D.12 item 4) — work that is over reads in the
                     past tense, with the after-deadline fact as quiet
                     history: no chip, no "te laat". */}
@@ -3981,6 +3991,25 @@ export function TicketDetailPage() {
                         )}
                       </span>
                     )}
+                  </div>
+                )}
+                {/* P-15 §0.3 — the on-behalf sign-off, said out loud:
+                    the manager's check counts as the approval, and when
+                    this customer structurally cannot approve online the
+                    sentence says why. Never a provider override in
+                    silence. */}
+                {ticket.approved_on_behalf && (
+                  <div
+                    className="ew-ctx-sub"
+                    data-testid="ticket-fact-approved-on-behalf"
+                  >
+                    {t("facts.approved_on_behalf", {
+                      name:
+                        ticket.approved_by_name ?? t("facts.the_manager"),
+                    })}
+                    {ticket.customer_can_decide_online === false
+                      ? ` ${t("facts.customer_cannot_approve_online")}`
+                      : ""}
                   </div>
                 )}
                 {/* §D.11 G3 — ONE chip: days left, today, or days over;

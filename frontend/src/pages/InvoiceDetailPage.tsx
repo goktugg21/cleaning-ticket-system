@@ -17,6 +17,8 @@ import { useTranslation } from "react-i18next";
 import { Download } from "lucide-react";
 
 import { getApiError } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+import { isProviderAdmin } from "../auth/permissions";
 import {
   addInvoiceLine,
   deleteDraftInvoice,
@@ -73,6 +75,13 @@ export function InvoiceDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { t } = useTranslation(["common", "invoices"]);
+  // P-15 §0.1 / H-12 — committing an invoice (issue, send, un-issue,
+  // reverse) is company-level: CA/SA only. A building manager keeps
+  // drafts, preview and edits; the commit doors hide and the sentence
+  // names the next actor (the FacturenPage billing-day precedent: the
+  // money sentence stays, the door hides).
+  const { me } = useAuth();
+  const canCommit = isProviderAdmin(me?.role);
   const { push: pushToast } = useToast();
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
@@ -396,7 +405,7 @@ export function InvoiceDetailPage() {
         tone: "action",
         label: t("facturen.status_draft"),
         sub: t("invoice_detail.phase_draft_sub"),
-        action: (
+        action: canCommit ? (
           <span>
             <button
               type="button"
@@ -412,6 +421,10 @@ export function InvoiceDetailPage() {
               {t("invoices:road.what_issue")}
             </WhatHappens>
           </span>
+        ) : (
+          <p className="muted small" style={{ margin: 0 }} data-testid="invoice-admin-only-note">
+            {t("invoice_detail.admin_only_note")}
+          </p>
         ),
       };
     }
@@ -420,7 +433,7 @@ export function InvoiceDetailPage() {
         tone: "action",
         label: unsentCreditNote ? t("facturen.credit_note_unsent") : t("invoice_detail.phase_issued_label"),
         sub: unsentCreditNote ? t("invoice_detail.credit_note_unsent_note") : t("invoice_detail.phase_issued_sub"),
-        action: (
+        action: canCommit ? (
           <span>
             <button
               type="button"
@@ -436,6 +449,10 @@ export function InvoiceDetailPage() {
               {t("invoices:road.what_send")}
             </WhatHappens>
           </span>
+        ) : (
+          <p className="muted small" style={{ margin: 0 }} data-testid="invoice-admin-only-note">
+            {t("invoice_detail.admin_only_note")}
+          </p>
         ),
       };
     }
@@ -470,8 +487,10 @@ export function InvoiceDetailPage() {
       ? t("invoice_detail.extras_fee_set", { amount: formatMoney(invoice.optional_fee_amount) })
       : null,
   ].filter(Boolean);
+  // P-15 §0.1 — un-issue and reverse ride the commit tier (CA/SA);
+  // delete-draft stays a building-level draft act.
   const advancedItems = (
-    isDraft ? ["delete"] : invoice.status === "ISSUED" && !invoice.is_reversal ? ["unissue"] : invoice.status === "SENT" && !invoice.is_reversal ? ["reverse"] : []
+    isDraft ? ["delete"] : !canCommit ? [] : invoice.status === "ISSUED" && !invoice.is_reversal ? ["unissue"] : invoice.status === "SENT" && !invoice.is_reversal ? ["reverse"] : []
   ) as LifecycleAction[];
 
   return (

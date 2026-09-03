@@ -60,6 +60,7 @@ from django.utils import timezone
 from extra_work.models import ExtraWorkStatus
 
 from . import lateness as late_rules
+from .job_dates import job_wish_window
 from .job_dates import job_window as resolve_job_window
 from .models import (
     StaffAssignmentSlotStatus,
@@ -198,6 +199,13 @@ class LatenessIndex:
             # states no date anywhere does the widest slot / part window
             # stand in for it (see the module docstring).
             planned_start, planned_end = resolve_job_window(ticket)
+            if planned_start is None:
+                # P-15 §0.4 — the ladder KEEPS the wish (the A5 ruling's
+                # own carve-out: a wished day passing unplanned is
+                # exactly the ladder's business), even though the wish
+                # no longer places the board. Same branch the EW rows
+                # below have always had.
+                planned_start, planned_end = job_wish_window(ticket)
             if planned_start is None:
                 ends = [
                     d

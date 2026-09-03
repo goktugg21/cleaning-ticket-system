@@ -27,7 +27,15 @@ the in-sprint part-A/B6 work.
 
 ## S1
 
-- **Contracts · SA/CA · the contract's lifecycle has no state machine
+- **P-15: FIXED (§1.1)** — `contracts/state_machine.py` with
+  `ALLOWED_TRANSITIONS` (DRAFT→ACTIVE/CANCELLED, ACTIVE→CANCELLED,
+  CANCELLED terminal — exactly the UI's own buttons), the
+  `/contracts/<id>/transition/` door with the `{detail, code}` refusal
+  shape, the serializer's `lifecycle` read-only, the AuditLog diff as
+  the history row (zero migrations); the form dialog's lifecycle
+  select removed, the detail gains the Cancel door. Pinned in
+  `test_p15_lifecycle_machine` (12 tests). ·
+  **Contracts · SA/CA · the contract's lifecycle has no state machine
   at all** — `Contract.lifecycle` is a plain writable ChoiceField on
   the detail serializer (`read_only_fields` covers only
   id/contract_no/timestamps), so `PATCH /api/contracts/<id>/
@@ -44,7 +52,15 @@ the in-sprint part-A/B6 work.
   UI's own buttons drive sensible values, so the exposure is API-level
   and operator-role-gated, not public. (sweep)
 
-- **Contracts list · SA + CA · the "Edit" pencil is the only door to
+- **P-15: FIXED (§1.2)** — the shared toggle reads "Select rows /
+  Rijen selecteren" (one label, all seven lists); Delete selected
+  carries its WhatHappens ("permanently — invoices already made
+  stay"); a contract with invoices is unselectable (the checkbox says
+  why) AND the server refuses (`contract_has_invoices`); partial
+  failures are named per row. Vocabulary pinned in
+  `editModeVocabulary.test.ts`; the server floor in
+  `test_p15_lifecycle_machine`. ·
+  **Contracts list · SA + CA · the "Edit" pencil is the only door to
   destroying a money-bearing record, and nothing says so** — the
   pencil is an edit-mode toggle whose bulk toolbar contains Delete
   selected, a real per-row `DELETE /api/contracts/{id}/`; the detail
@@ -56,7 +72,13 @@ the in-sprint part-A/B6 work.
 
 ## S2
 
-- **Hours › Agreed hours · SA/CA · the approval road gates nothing in
+- **P-15: RULED + FIXED (§0.2)** — the 0.2 ruling ("only APPROVED
+  patterns fill the sheet"): `_agreements_for_week` reads
+  `status=APPROVED` beside the flag, pinned in
+  `test_p15_approved_fill`; the grid says "No approved pattern yet —
+  standard lines are empty" under everyone it skips; fold/road-teach/
+  empty-week sentences reworded. ·
+  **Hours › Agreed hours · SA/CA · the approval road gates nothing in
   the fill** — `timesheets/fill.py::_agreements_for_week` seeds the
   week grid from `auto_fill=True` and the validity window alone, with
   NO status filter: a DRAFT pattern with "Fills the sheet" on fills
@@ -151,13 +173,23 @@ the in-sprint part-A/B6 work.
   numbers; the platform standard applies from the next check.") plus
   a confirm. (W1)
 
-- **Services · SA + CA · the same "Edit" pencil hides a bulk toolbar
+- **P-15: FIXED (§1.2)** — the toggle renamed ("Select rows"); the
+  page already carried its permanent what-happens explainer under the
+  toolbar (Sprint 138's `services-bulk-delete-explainer`: deleting is
+  permanent, price-bearing rows are blocked), which is the WhatHappens
+  in substance. ·
+  **Services · SA + CA · the same "Edit" pencil hides a bulk toolbar
   containing Delete** — per-row `DELETE /api/services/{id}/` with a
   partial-failure report, beside deactivate/move, invisible from the
   label. Catalog rows, not money records, hence S2 not S1. Fix: same
   rename + WhatHappens under bulk delete. (W1)
 
-- **Customers / buildings / companies lists · SA + CA · the pencil's
+- **P-15: FIXED (§1.2)** — the bulk action says "Deactivate /
+  Deactiveren" (label + confirm title; the bodies already told the
+  truth), the toggle "Select rows"; pinned in
+  `editModeVocabulary.test.ts` ("a deactivate is never called a
+  delete"). ·
+  **Customers / buildings / companies lists · SA + CA · the pencil's
   bulk action is wired to a `bulk_delete` key but actually
   DEACTIVATES** — two confusions in one: "Edit" hides it, and
   "delete" overstates it (reversible, SA-only reactivate). Fix: label
@@ -190,7 +222,12 @@ the in-sprint part-A/B6 work.
 
 ## S3
 
-- **My schedule / Recurring work board · manager/SA · a spawned
+- **P-15: RULED + FIXED (§0.4)** — the 0.4 ruling: one placement law,
+  no exceptions. `job_window`/`with_job_dates` lost the wish legs; the
+  wish-only ticket sits in the Not-planned strip wearing `wished_day`
+  ("Wished for {date}"); the ladder keeps the wish (`job_wish_window`);
+  the two P-1 pins rewritten to assert the strip. ·
+  **My schedule / Recurring work board · manager/SA · a spawned
   ticket is still placed by the customer's wish** — P-14 A5 removed
   the wish fallback for EXTRA-WORK rows (a wish is not a plan), but a
   ticket spawned from an extra work with only a `preferred_date` is
@@ -296,7 +333,13 @@ the in-sprint part-A/B6 work.
   derive the default through the same validator that judges an
   explicit choice. (C1)
 
-- **Extra work / tickets · customer (view_own) · auto-start work on a
+- **P-15: RULED (§0.3)** — when the customer structurally cannot sign
+  off, the manager's check IS the sign-off and the screen says so:
+  `approved_on_behalf` + `customer_can_decide_online` word the fact
+  "Checked by {manager} — counts as approved (this customer cannot
+  approve online)" on card and detail (pinned in
+  `test_p15_on_behalf_signoff`). The money reaches Invoices as before. ·
+  **Extra work / tickets · customer (view_own) · auto-start work on a
   view_own-only building is invisible to the customer, including its
   completion approval and its money** — EW 316 / ticket 345: Tom 404s
   on the EW detail and the ticket detail, the ticket is absent from
@@ -518,24 +561,26 @@ the in-sprint part-A/B6 work.
   the frontend dialog (only CUSTOMER_REJECTED has a mandatory
   reason). (C2)
 
-## Questions for the owner (documented design, worth a confirmation)
+## Questions for the owner — ANSWERED (P-15 Part 0, 2026-09-03; the
+## owner holds a one-word veto on each — Addendum D §D.24.7)
 
-- **A building manager is a full invoice operator.** `PROVIDER_ROLES`
-  (SA/CA/BM) gates every `InvoiceViewSet` write — a BM can generate,
-  issue, SEND (allocates the gapless number) and reverse invoices for
-  any company they manage a building in. This is documented design
-  (Addendum B §B.8's operator gate), not a defect — but sending
-  invoices is a company-level money act, and the owner may want it
-  CA-only. One sentence from the owner settles it.
-- **Should only APPROVED agreed-hours patterns fill the sheet?** One
-  query filter + a pin once ruled (the S2 fill finding).
+- **A building manager is a full invoice operator.** → **RULED (0.1,
+  H-12): committing is company-level.** Issue/send/un-issue/reverse
+  are CA/SA only; BM keeps drafts, preview, edits, lists; the refusal
+  names the next actor (`invoice_admin_only`). Veto word: "BM may
+  send".
+- **Should only APPROVED agreed-hours patterns fill the sheet?** →
+  **RULED (0.2): yes.** One query filter + the pin
+  (`test_p15_approved_fill`) + the grid's why-empty line.
 - **Who signs off completion on AUTO_START work at a view_own-only
-  building?** The customer nominally owns the step but structurally
-  cannot reach it; today a provider override settles it and the money
-  lands unbilled unseen (the C1 F-3 finding).
+  building?** → **RULED (0.3): the manager's check counts as the
+  sign-off, and the screen says so** ("Checked by {manager} — counts
+  as approved (this customer cannot approve online)"). Never a
+  provider override in silence.
 - **Is a customer's wish date allowed to place a spawned ticket on
-  the board?** W-PLANTRUTH and the P-1 captioned-phantom design pull
-  in opposite directions (the S3 wish-placement finding).
+  the board?** → **RULED (0.4): never.** One placement law, no
+  exceptions; the wish is a strip FACT (`wished_day`). Veto words:
+  "keep the wish on the board".
 
 ## Pre-existing reds ("don't trust the tests we have" — confirmed)
 

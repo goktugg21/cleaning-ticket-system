@@ -519,6 +519,10 @@ ENTRY_KEYS = {
     # P-10 A4 — the creation day as a server DAY.
     "created_day",
     "plan_source",
+    # P-15 §0.4 — the customer's wish as a bare fact ("Wished for
+    # {date}"); carried only when the wish is the record's sole date.
+    # It places nothing — the Not-planned strip prints it.
+    "wished_day",
     # P-1 -- provenance: a date is a plan only if a person made it.
     "has_real_plan",
     "planned_by_name",
@@ -547,6 +551,9 @@ ENTRY_KEYS = {
     "manager_checked_day",
     "manager_checked_by_name",
     "approved_by_name",
+    # P-15 §0.3 — the approval leg was an on-behalf override; the card
+    # words the manager's check as the sign-off.
+    "approved_on_behalf",
     "reported_done_time",
     # P-3 §A.5 — a real plan whose last day is past the deadline.
     "planned_after_deadline",

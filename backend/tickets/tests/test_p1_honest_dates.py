@@ -232,6 +232,12 @@ class PhantomPlanTests(_Fixture):
         self.assertIsNotNone(detail["planned_at"])
 
     def test_the_wish_behind_a_phantom_is_still_a_wish(self):
+        """P-15 §0.4 — the wish stays a WISH all the way down: it never
+        places the board (the row lives in the Not-planned strip) and it
+        is stated as its own fact, `wished_day`, on card and detail
+        alike. Rewritten from the P-1 captioned-phantom pin, which
+        asserted `planned_start` == the wish."""
+        wished = self.today + datetime.timedelta(days=4)
         extra_work = ExtraWorkRequest.objects.create(
             company=self.company,
             building=self.building,
@@ -240,7 +246,7 @@ class PhantomPlanTests(_Fixture):
             title="Windows",
             description="",
             status=ExtraWorkStatus.IN_PROGRESS,
-            preferred_date=self.today + datetime.timedelta(days=4),
+            preferred_date=wished,
         )
         ticket = self.make_phantom(
             "Execution", created_days_ago=3, extra_work_request=extra_work
@@ -249,12 +255,13 @@ class PhantomPlanTests(_Fixture):
         detail = self.detail(ticket)
         self.assertFalse(detail["has_real_plan"])
         self.assertEqual(detail["plan_source"], "CUSTOMER_WISH")
-        card, _bucket = self.find(self.board(), f"ticket-{ticket.id}")
+        self.assertEqual(detail["wished_day"], wished.isoformat())
+        card, bucket = self.find(self.board(), f"ticket-{ticket.id}")
+        self.assertEqual(bucket, "undated_entries")
         self.assertEqual(card["plan_source"], "CUSTOMER_WISH")
         self.assertFalse(card["has_real_plan"])
-        self.assertEqual(
-            card["planned_start"], (self.today + datetime.timedelta(days=4)).isoformat()
-        )
+        self.assertIsNone(card["planned_start"])
+        self.assertEqual(card["wished_day"], wished.isoformat())
 
     def test_the_providers_commitment_is_a_plan_with_a_name(self):
         extra_work = ExtraWorkRequest.objects.create(

@@ -36,6 +36,53 @@ class CanPostMessage(IsAuthenticatedAndActive):
         return scope_tickets_for(request.user).filter(pk=obj.pk).exists()
 
 
+def any_customer_user_can_reach(ticket) -> bool:
+    """P-15 §0.3 — can ANY active customer-side account even SEE this
+    ticket?
+
+    The 0.3 ruling: when the customer structurally cannot sign off
+    completion (auto-start work at a view_own-only building, C1's EW
+    316 / ticket 345 — €408.98 of work no customer account could ever
+    open), the manager's check counts as the sign-off and the screen
+    SAYS so. This answers the structural half.
+
+    Mirrors `user_has_scope_for_ticket`'s CUSTOMER_USER branch, asked
+    the other way round: a company-wide CCA reaches everything; a
+    `view_company` row reaches every building; a `view_location` row
+    reaches its building; a `view_own` row reaches only what that user
+    created. Called on ONE ticket (the detail), never per board card.
+    """
+    from customers.models import CustomerUserMembership
+    from customers.permissions import access_has_permission
+
+    if CustomerUserMembership.objects.filter(
+        customer_id=ticket.customer_id,
+        is_company_admin=True,
+        user__is_active=True,
+        user__deleted_at__isnull=True,
+    ).exists():
+        return True
+    accesses = CustomerUserBuildingAccess.objects.filter(
+        membership__customer_id=ticket.customer_id,
+        is_active=True,
+        membership__user__is_active=True,
+        membership__user__deleted_at__isnull=True,
+    ).select_related("membership")
+    for access in accesses:
+        if access_has_permission(access, "customer.ticket.view_company"):
+            return True
+        if access.building_id != ticket.building_id:
+            continue
+        if access_has_permission(access, "customer.ticket.view_location"):
+            return True
+        if (
+            access_has_permission(access, "customer.ticket.view_own")
+            and ticket.created_by_id == access.membership.user_id
+        ):
+            return True
+    return False
+
+
 def user_has_scope_for_ticket(user, ticket):
     if user.role == UserRole.SUPER_ADMIN:
         return True

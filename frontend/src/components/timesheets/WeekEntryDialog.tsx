@@ -393,6 +393,16 @@ export function WeekEntryDialog({
     return out;
   }, [personById]);
 
+  /** P-15 §0.2 — who holds an APPROVED auto-fill pattern this week;
+   *  the grid says why everyone else's standard lines are empty. */
+  const personHasApprovedPattern = useMemo(() => {
+    const out: Record<number, boolean> = {};
+    for (const [id, person] of personById) {
+      out[id] = person.has_approved_pattern;
+    }
+    return out;
+  }, [personById]);
+
   /** P-12 B5 — where each job's hours go (customer + billing day),
    *  keyed the way the grid looks them up. */
   const jobBillingFacts = useMemo(() => {
@@ -767,6 +777,7 @@ export function WeekEntryDialog({
              whenever the dialog opens from the week card's Edit, and
              the select then offered only "No building". */
           personBuildingIds={personBookableBuildingIds}
+          personHasApprovedPattern={personHasApprovedPattern}
           jobBillingFacts={jobBillingFacts}
           seedRowsByEmployee={seedRowsByEmployee}
           sourceOptions={jobTitleOptions}

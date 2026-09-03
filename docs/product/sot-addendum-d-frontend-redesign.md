@@ -2337,3 +2337,50 @@ shipped fixes; the rulings:
    worker reads "Stopped before it was finished — your manager
    decides what happens next."; the manager keeps the verbs
    (replan / reassign / cancel) because they have them.
+
+### D.24.7 Close the list — the P-15 Part 0 rulings (2026-09-03)
+
+The owner's four P-14 questions, answered by web-Claude under a
+standing one-word owner veto ("BM may send" / "keep the wish on the
+board"). Struck here so no later sprint re-litigates them.
+
+1. **Who may SEND an invoice — company-level (H-12).** Issue, send,
+   un-issue and reverse are CA/SA only; sending allocates the gapless
+   number and emails the customer — a company act, not a building act.
+   A building manager keeps Make a draft, Preview, draft edits and the
+   lists, and where the commit button stood reads the refusal that
+   names the next actor: "Sending is done by the company admin. Your
+   draft is ready for them." (stable code `invoice_admin_only`; the
+   view gate AND the state-machine re-check, Addendum B's double gate).
+   The Invoices Start-here stops ordering a BM to send (`road.start_
+   issued_read`). New invariant: rbac-matrix §3 H-12.
+2. **Only APPROVED agreed-hours patterns fill the sheet.** The
+   approval road (Draft → Submitted → Agreed) now gates the fill:
+   `_agreements_for_week` reads `status=APPROVED` beside `auto_fill`
+   (pinned in `test_p15_approved_fill`). The Enter-hours grid says
+   under a person with no approved pattern in force: "No approved
+   pattern yet — standard lines are empty", with the door to Agreed
+   hours (`/reports/week-assignments/` carries
+   `has_approved_pattern`). The fold, the road teach and the empty-week
+   sentence all changed their one word.
+3. **Auto-start work the customer cannot reach: the manager's check IS
+   the sign-off, and the screen says so.** When the approval leg into
+   APPROVED was an on-behalf override (`approved_on_behalf`), the card
+   and the detail word it "Checked by {manager} — counts as approved";
+   when additionally no active customer-side account can even open the
+   ticket (`customer_can_decide_online` false — computed only while
+   the question is live), the detail adds "(this customer cannot
+   approve online)". Never a provider override in silence. The money
+   reaches Invoices like any other finished work (P-13 W1 already
+   lists it).
+4. **A customer's wish never places a ticket — one placement law, no
+   exceptions.** P-14 A5 (extra-work rows) extends to the tickets they
+   spawn: `job_dates.job_window` / `with_job_dates` lost the
+   `preferred_date` legs, a wish-only ticket sits in the Not-planned
+   strip wearing the wish as a FACT — `wished_day`, "Wished for
+   {date}" — on the strip row and the detail alike. The lateness
+   ladder keeps the wish deliberately (`job_wish_window`): a wished
+   day passing unplanned is exactly its business. The P-1
+   captioned-phantom pins are rewritten to assert the strip
+   (`test_fe4_honest_dates`, `test_p1_honest_dates`,
+   `test_p14_wish_not_plan.SpawnedTicketWishTests`).

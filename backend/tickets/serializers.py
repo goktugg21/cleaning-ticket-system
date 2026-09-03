@@ -872,6 +872,9 @@ class TicketDetailSerializer(
     # states — nobody guesses who opened a ticket.
     has_real_plan = serializers.SerializerMethodField()
     plan_source = serializers.SerializerMethodField()
+    # P-15 §0.4 — the customer's wish as a bare fact; set only when the
+    # wish is the job's sole date (it places nothing, dues nothing).
+    wished_day = serializers.SerializerMethodField()
     planned_by_name = serializers.SerializerMethodField()
     planned_at = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
@@ -885,6 +888,44 @@ class TicketDetailSerializer(
 
     def get_plan_source(self, obj):
         return self._due_facts(obj)["plan_source"]
+
+    def get_wished_day(self, obj):
+        return self._due_facts(obj)["wished_day"]
+
+    # P-15 §0.3 — the on-behalf sign-off, said out loud. When the
+    # approval leg was a provider override, `approved_on_behalf` is
+    # True and the fact block words the check as the sign-off; when
+    # additionally no customer-side account can even reach the ticket
+    # (`customer_can_decide_online` False), the sentence explains WHY
+    # the check counts: "this customer cannot approve online".
+    approved_on_behalf = serializers.SerializerMethodField()
+    approved_by_name = serializers.SerializerMethodField()
+    customer_can_decide_online = serializers.SerializerMethodField()
+
+    def get_approved_on_behalf(self, obj) -> bool:
+        from .detail_facts import approval_leg
+
+        return approval_leg(obj)[1]
+
+    def get_approved_by_name(self, obj):
+        from .detail_facts import approval_leg
+
+        return approval_leg(obj)[0]
+
+    def get_customer_can_decide_online(self, obj):
+        # Answered only while the question is live: the ticket waits on
+        # the customer now, or the approval was recorded on their
+        # behalf. None otherwise — the reachability walk is per-ticket
+        # work the list must never pay.
+        from .detail_facts import approval_on_behalf
+        from .models import TicketStatus as _TS
+        from .permissions import any_customer_user_can_reach
+
+        if obj.status == _TS.WAITING_CUSTOMER_APPROVAL or approval_on_behalf(
+            obj
+        ):
+            return any_customer_user_can_reach(obj)
+        return None
 
     def get_planned_by_name(self, obj):
         return self._due_facts(obj)["planned_by_name"]
@@ -939,10 +980,11 @@ class TicketDetailSerializer(
     # P-5 S1 — ONE PLAN, ONE DATE. The job's own window as
     # `tickets/job_dates.job_window` resolves it: the ticket's own
     # schedule when a person set one, else the meerwerk's committed
-    # window, else the customer's wish (`plan_source` says which). The
-    # page used to read only `scheduled_start_day` and so a meerwerk
-    # planned on the extra work looked unplanned on the ticket and asked
-    # the operator to plan AGAIN (TCK-2026-000385).
+    # window — and nothing further since P-15 §0.4 (a customer's wish
+    # is a fact, `wished_day`, never a window). The page used to read
+    # only `scheduled_start_day` and so a meerwerk planned on the extra
+    # work looked unplanned on the ticket and asked the operator to
+    # plan AGAIN (TCK-2026-000385).
     job_start_day = serializers.SerializerMethodField()
     job_end_day = serializers.SerializerMethodField()
 
@@ -1173,6 +1215,12 @@ class TicketDetailSerializer(
             # P-1 — is the window a person's plan at all, and whose.
             "has_real_plan",
             "plan_source",
+            # P-15 §0.4 — the wish as a bare fact ("Wished for {date}").
+            "wished_day",
+            # P-15 §0.3 — the on-behalf sign-off, said out loud.
+            "approved_on_behalf",
+            "approved_by_name",
+            "customer_can_decide_online",
             "planned_by_name",
             "planned_at",
             # Sprint 4 — sub-tasks + auto-complete opt-in (additive).

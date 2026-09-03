@@ -157,6 +157,17 @@ export function cardFacts(entry: WorkPlanEntry, todayIso: string, t: TFunction):
 
   switch (state) {
     case "not_planned": {
+      // P-15 §0.4 — the wish is a FACT on the strip, never a column:
+      // "Wished for {date}" leads the card when the customer's wish is
+      // the record's only date.
+      if (entry.wished_day) {
+        const wished = line("wished", lbl("wished"), day(entry.wished_day));
+        return {
+          state,
+          lines: [wished, deadlineLive(), people()],
+          details: [created()],
+        };
+      }
       const lines = [created(), deadlineLive(), people()];
       return { state, lines, details: [] };
     }
@@ -236,17 +247,19 @@ export function cardFacts(entry: WorkPlanEntry, todayIso: string, t: TFunction):
     case "finished": {
       const date = day(entry.settled_day);
       const after = entry.settled_days_after_plan;
-      const finished = line(
-        "finished",
-        lbl("finished"),
-        !entry.settled_day
-          ? t("agenda.settled_plain")
-          : after === null
-            ? date
-            : after === 0
-              ? t("agenda.val_on_the_day", { date })
-              : t("agenda.val_days_after_plan", { date, count: after }),
-      );
+      // P-15 4.2 — a missing finish date is NO line, never the label
+      // printed as its own value ("Afgerond: Afgerond").
+      const finished = !entry.settled_day
+        ? null
+        : line(
+            "finished",
+            lbl("finished"),
+            after === null
+              ? date
+              : after === 0
+                ? t("agenda.val_on_the_day", { date })
+                : t("agenda.val_days_after_plan", { date, count: after }),
+          );
       const details: CardFactLine[] = [plannedPlain()];
       if (entry.reported_done_day) {
         const when = shortDayTime(entry.reported_done_day, entry.reported_done_time, locale, todayIso);
@@ -272,18 +285,30 @@ export function cardFacts(entry: WorkPlanEntry, todayIso: string, t: TFunction):
         );
       }
       if (entry.approved_day) {
+        // P-15 §0.3 — an on-behalf approval is the MANAGER's check
+        // counting as the sign-off, and says so; never a provider's
+        // hand presented as the customer's.
         details.push(
           line(
             "approval",
             lbl("customer_approval"),
-            entry.approved_by_name
-              ? t("agenda.val_on_by", { date: day(entry.approved_day), name: entry.approved_by_name })
-              : day(entry.approved_day),
+            entry.approved_on_behalf
+              ? t("agenda.val_approved_on_behalf", {
+                  date: day(entry.approved_day),
+                  name: entry.approved_by_name ?? t("agenda.val_the_manager"),
+                })
+              : entry.approved_by_name
+                ? t("agenda.val_on_by", { date: day(entry.approved_day), name: entry.approved_by_name })
+                : day(entry.approved_day),
           ),
         );
       }
       details.push(created());
-      return { state, lines: [finished, deadlineSettled(), people()], details };
+      return {
+        state,
+        lines: [...(finished ? [finished] : []), deadlineSettled(), people()],
+        details,
+      };
     }
     case "blocked":
       return { state, lines: [], details: [] };

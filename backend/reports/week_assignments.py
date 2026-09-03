@@ -75,9 +75,10 @@ from __future__ import annotations
 
 import datetime
 
+from django.db.models import Q
 from django.utils import timezone
 
-from timesheets.models import HourSource
+from timesheets.models import ContractHours, ContractHoursStatus, HourSource
 from timesheets.weeks import week_bounds
 
 
@@ -302,6 +303,23 @@ def week_assignments(user, company, employees, iso_year: int, iso_week: int) -> 
 
     buildings = _building_ids_by_employee(employees, company)
 
+    # P-15 §0.2 — who has an APPROVED auto-fill pattern in force this
+    # week. One query for the whole crew; the grid prints "No approved
+    # pattern yet — standard lines are empty" under everyone else, so
+    # the ruling (only approved patterns fill) is visible where the
+    # empty lines are, not just true.
+    filled_ids = set(
+        ContractHours.objects.filter(
+            company=company,
+            employee_id__in=employee_ids,
+            auto_fill=True,
+            status=ContractHoursStatus.APPROVED,
+            valid_from__lte=sunday,
+        )
+        .filter(Q(valid_to__isnull=True) | Q(valid_to__gte=monday))
+        .values_list("employee_id", flat=True)
+    )
+
     people = []
     for employee in employees:
         jobs = list(jobs_by_employee[employee.id].values())
@@ -309,6 +327,7 @@ def week_assignments(user, company, employees, iso_year: int, iso_week: int) -> 
         people.append(
             {
                 "employee": employee.id,
+                "has_approved_pattern": employee.id in filled_ids,
                 "building_ids": sorted(buildings.get(employee.id, set())),
                 "assignments": sorted(
                     week_by_employee[employee.id].values(),

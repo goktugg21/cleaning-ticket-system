@@ -713,6 +713,17 @@ export interface TicketDetail extends TicketList {
    *  detail) and when the plan came in without a named person. */
   has_real_plan: boolean;
   plan_source: "TICKET" | "PROVIDER_PLAN" | "CUSTOMER_WISH" | null;
+  /** P-15 §0.4 — the customer's wish as a bare fact ("Wished for
+   *  {date}"); set only when the wish is the job's sole date. */
+  wished_day: string | null;
+  /** P-15 §0.3 — the approval leg was an on-behalf override; the fact
+   *  block words the manager's check as the sign-off. */
+  approved_on_behalf: boolean;
+  approved_by_name: string | null;
+  /** P-15 §0.3 — can any customer-side account reach this ticket at
+   *  all? Answered only while the question is live (waiting on the
+   *  customer, or approved on their behalf); null otherwise. */
+  customer_can_decide_online: boolean | null;
   planned_by_name: string | null;
   planned_at: string | null;
   /** P-1 — who opened the ticket, as a name. Nobody guesses this. */

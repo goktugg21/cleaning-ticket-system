@@ -37,11 +37,15 @@ from rest_framework.exceptions import PermissionDenied
 
 from customers.models import Customer
 from extra_work.models import ExtraWorkRequest
-from extra_work.views import _is_provider_operator  # reuse (do NOT re-implement)
-
 from .invoice_pdf import freeze_invoice_pdf
 from .models import Invoice, InvoiceLine
 from .numbering import allocate_invoice_number
+
+# P-15 §0.1 / H-12 — issue / send / un-issue / reverse are company-level
+# (CA / SA only). The view layer refuses first with the sentence and the
+# stable code; these re-checks are the second half of Addendum B's
+# deliberate double gate ("keep both").
+from .permissions import is_invoice_admin
 
 
 class InvoiceTransitionError(ValidationError):
@@ -137,7 +141,7 @@ def _resync_invoice_group_labels(invoice) -> list[str]:
 
 @transaction.atomic
 def issue_invoice(actor, invoice):
-    """DRAFT -> ISSUED. Provider-operator only. Stamps issued_at ONLY — the
+    """DRAFT -> ISSUED. Company-admin only (P-15 §0.1 / H-12). Stamps issued_at ONLY — the
     gapless number is now assigned at SEND (`send_invoice`), NOT here, so an
     ISSUED-but-unsent invoice carries no number and can be cleanly un-issued
     back to DRAFT (`unissue_invoice`). The frozen money (Phase 2a) is
@@ -145,8 +149,10 @@ def issue_invoice(actor, invoice):
     its live lines (Sprint 132 — see `_resync_invoice_group_labels`) before
     the invoice becomes (mostly) immutable. Returns the locked/updated row.
     """
-    if not _is_provider_operator(actor):
-        raise PermissionDenied("Only provider operators can issue invoices.")
+    if not is_invoice_admin(actor):
+        raise PermissionDenied(
+            "Only a company admin can issue invoices."
+        )
     locked = Invoice.objects.select_for_update().get(pk=invoice.pk)
     # Precondition on the LOCKED row also guards concurrency: if another tx
     # already issued it, status != DRAFT and this rejects (no double-issue).
@@ -165,7 +171,7 @@ def issue_invoice(actor, invoice):
 
 @transaction.atomic
 def send_invoice(actor, invoice):
-    """ISSUED -> SENT. Provider-operator only. Allocates the gapless
+    """ISSUED -> SENT. Company-admin only (P-15 §0.1 / H-12). Allocates the gapless
     number+year (allocation-year sequence) INSIDE this atomic block WHEN the
     invoice has none yet, then stamps sent_at. A reversal is born ISSUED WITH
     its own number (allocated at creation), so send keeps that number and only
@@ -173,8 +179,10 @@ def send_invoice(actor, invoice):
     committed (SENT) document and the SENT set stays gapless. SEND is
     customer-portal visibility only (surfaced in Phase 5); no email (deferred).
     Returns the locked/updated row."""
-    if not _is_provider_operator(actor):
-        raise PermissionDenied("Only provider operators can send invoices.")
+    if not is_invoice_admin(actor):
+        raise PermissionDenied(
+            "Only a company admin can send invoices."
+        )
     locked = Invoice.objects.select_for_update().get(pk=invoice.pk)
     if locked.status != Invoice.Status.ISSUED:
         raise InvoiceTransitionError(
@@ -237,7 +245,7 @@ def send_invoice(actor, invoice):
 
 @transaction.atomic
 def unissue_invoice(actor, invoice):
-    """ISSUED -> DRAFT ("terug naar concept"). Provider-operator only.
+    """ISSUED -> DRAFT ("terug naar concept"). Company-admin only (P-15 §0.1 / H-12).
 
     Trivially safe under number-at-send: a normal ISSUED invoice has no number
     yet, so un-issuing consumes / strands NOTHING — it just returns the draft
@@ -252,8 +260,10 @@ def unissue_invoice(actor, invoice):
     somehow already carries a number/year (e.g. a legacy row issued before the
     number-at-send switch): dropping it would leave a gap, so such a row can
     only go forward (send). Returns the locked/updated row."""
-    if not _is_provider_operator(actor):
-        raise PermissionDenied("Only provider operators can un-issue invoices.")
+    if not is_invoice_admin(actor):
+        raise PermissionDenied(
+            "Only a company admin can un-issue invoices."
+        )
     locked = Invoice.objects.select_for_update().get(pk=invoice.pk)
     if locked.status != Invoice.Status.ISSUED:
         raise InvoiceTransitionError(
@@ -281,7 +291,7 @@ def reverse_invoice(actor, invoice):
     Reverse a SENT invoice: auto-generate a NEGATED counter-invoice and
     release the original's claimed EW back to unbilled.
 
-    Provider-operator only. The original MUST be SENT and NOT itself a
+    Company-admin only (P-15 §0.1 / H-12). The original MUST be SENT and NOT itself a
     reversal (a reversal is TERMINAL — you cannot reverse a reversal).
 
     The reversal:
@@ -299,8 +309,10 @@ def reverse_invoice(actor, invoice):
 
     Returns the reversal invoice.
     """
-    if not _is_provider_operator(actor):
-        raise PermissionDenied("Only provider operators can reverse invoices.")
+    if not is_invoice_admin(actor):
+        raise PermissionDenied(
+            "Only a company admin can reverse invoices."
+        )
     original = Invoice.objects.select_for_update().get(pk=invoice.pk)
     if original.status != Invoice.Status.SENT:
         raise InvoiceTransitionError(

@@ -53,17 +53,24 @@ will do the work — and `extra_work/dates.py` records that a write to it
 pushes the spawned tickets' schedules (Sprint 184 §1), so the two are
 the same commitment seen from either end.
 
-`preferred_date` is the third and last link, and only because the extra
-work's OWN card on this board already uses it as its planned start
-(`_extra_work_job`). Without it a request and the ticket it spawned
-would sit on different days for the same reader, which is the defect
-this module exists to end. It is not treated as a commitment anywhere
-else.
+`preferred_date` — the customer's WISH — is NOT a link any more.
+P-15 §0.4 extends the P-14 A5 ruling (a wish is not a plan) from the
+extra-work rows to the tickets they spawn: one placement law, no
+exceptions. A ticket whose only date is the wish has NO window, sits in
+the Not-planned strip, and the strip states the wish as a FACT
+("Wished for {date}" — `job_wish_day` carries it). Before P-15 the wish
+was the third link "so a request and its spawned ticket sit on the same
+day" — both now sit in the strip, which still satisfies that reason.
 
-Past that: NOTHING. A job with no date is undated, and the undated lane
-is where it goes. An unrelated staff slot is never promoted into the
-job's date — "if there is no valid placement date, do not invent one",
-verbatim.
+Past the provider's plan: NOTHING. A job with no date is undated, and
+the undated lane is where it goes. An unrelated staff slot is never
+promoted into the job's date — "if there is no valid placement date, do
+not invent one", verbatim.
+
+The one deliberate exception is LATENESS: the ladder keeps the wish
+(`lateness_index.py`) — a wished day passing unplanned is exactly its
+business. That is why `job_wish_window` exists as a named accessor
+rather than the wish silently vanishing from every reader.
 
 THE DUE DATE is the extra work's `deadline` where one exists and the
 window's last day otherwise. Unchanged from Sprint 184 §2, restated here
@@ -124,7 +131,34 @@ def job_window(ticket) -> tuple[datetime.date | None, datetime.date | None]:
             extra_work.provider_planned_date,
             extra_work.provider_planned_end_date,
         )
+    # P-15 §0.4 — the customer's wish is NOT a window. See the module
+    # docstring; the ladder reads it through `job_wish_window` instead.
+    return None, None
+
+
+def job_wish_window(
+    ticket,
+) -> tuple[datetime.date | None, datetime.date | None]:
+    """The customer's WISH as a (start, end) pair, or `(None, None)`.
+
+    Named and separate from `job_window` on purpose (P-15 §0.4): the
+    wish never places a board, but two readers still state it — the
+    Not-planned strip's "Wished for {date}" fact and the lateness
+    ladder, whose business a passed unplanned wish exactly is. Answers
+    only when the wish is the job's ONLY date: a provider plan or an
+    own schedule outranks and silences it.
+    """
+    if ticket_has_own_plan(ticket) and ticket.scheduled_start_at is not None:
+        return None, None
+    extra_work = getattr(ticket, "extra_work_request", None)
+    if extra_work is None or extra_work.provider_planned_date is not None:
+        return None, None
     return extra_work.preferred_date, extra_work.planned_end_date
+
+
+def job_wish_day(ticket) -> datetime.date | None:
+    """The strip's fact: the wished day, when the wish is all there is."""
+    return job_wish_window(ticket)[0]
 
 
 #: FE-4 (Addendum D SS D.12 item 2) -- WHERE a job's window came from, so
@@ -138,8 +172,12 @@ PLAN_SOURCE_CUSTOMER_WISH = "CUSTOMER_WISH"
 
 
 def job_plan_source(ticket) -> str | None:
-    """Which of `job_window`'s three sources answered, or None when the
-    job has no window at all. Mirrors `job_window` branch for branch."""
+    """WHERE the job's dates come from, or None when it has none at all.
+
+    P-15 §0.4 — deliberately WIDER than `job_window` now: the
+    `CUSTOMER_WISH` branch survives as the CAPTION source (the strip's
+    "Wished for {date}" fact) even though the wish no longer yields a
+    window. The first two branches still mirror `job_window`."""
     if ticket_has_own_plan(ticket):
         return PLAN_SOURCE_TICKET
     extra_work = getattr(ticket, "extra_work_request", None)
@@ -202,6 +240,10 @@ def with_job_dates(queryset):
     keeps a ticket's start from being paired with an extra work's end.
     `TruncDate` takes the current timezone, which is the same conversion
     `local_date` does.
+
+    P-15 §0.4 — the wish legs (`preferred_date` / `planned_end_date`)
+    are GONE, mirroring `job_window`: a wish-only ticket has NULL
+    `job_start` and falls to the Not-planned strip.
     """
     # P-1 — the SQL twin of `ticket_has_own_plan`: the ticket's own
     # column is read only behind a schedule row or an occurrence.
@@ -216,7 +258,6 @@ def with_job_dates(queryset):
                     output_field=DateField(),
                 ),
                 F(f"{_EW}__provider_planned_date"),
-                F(f"{_EW}__preferred_date"),
                 output_field=DateField(),
             ),
             JOB_END: Case(
@@ -225,7 +266,6 @@ def with_job_dates(queryset):
                     **{f"{_EW}__provider_planned_date__isnull": False},
                     then=F(f"{_EW}__provider_planned_end_date"),
                 ),
-                default=F(f"{_EW}__planned_end_date"),
                 output_field=DateField(),
             ),
         }
@@ -265,6 +305,8 @@ __all__ = [
     "job_due_q",
     "job_window",
     "job_window_end",
+    "job_wish_day",
+    "job_wish_window",
     "local_date",
     "with_job_dates",
 ]
