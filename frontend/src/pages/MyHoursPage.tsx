@@ -126,7 +126,16 @@ export function MyHoursPage() {
    *  the remembered/first otherwise, with a picker when the scope has
    *  more than one (the admin Hours page's shape) — and sends it on
    *  the two calls that need it. */
-  const companyIds = useMemo(() => me?.company_ids ?? [], [me?.company_ids]);
+  // P-16 — resolved from the TIMESHEET scope, not memberships: a
+  // building-assigned STAFF has no CompanyUserMembership, so
+  // `company_ids` was [] for exactly the two-company worker the P-14
+  // finding was about, and the status/fill calls kept 400ing. The
+  // server computes `timesheet_company_ids` from the same scope the
+  // write path enforces; older payloads without the field fall back.
+  const companyIds = useMemo(
+    () => me?.timesheet_company_ids ?? me?.company_ids ?? [],
+    [me?.timesheet_company_ids, me?.company_ids],
+  );
   const [companyPick, setCompanyPick] = useState<number | "">(() => {
     try {
       const stored = Number(
@@ -147,7 +156,9 @@ export function MyHoursPage() {
           : companyIds[0];
   /** Names for the picker — read only when there is a choice to make;
    *  `/companies/` is scoped, so a worker reads exactly their own. */
-  const [companyNames, setCompanyNames] = useState<Record<number, string>>({});
+  const [fetchedCompanyNames, setFetchedCompanyNames] = useState<
+    Record<number, string>
+  >({});
   useEffect(() => {
     if (companyIds.length <= 1) return;
     let cancelled = false;
@@ -156,7 +167,7 @@ export function MyHoursPage() {
         if (cancelled) return;
         const names: Record<number, string> = {};
         for (const row of rows) names[row.id] = row.name;
-        setCompanyNames(names);
+        setFetchedCompanyNames(names);
       })
       .catch(() => undefined);
     return () => {
@@ -188,6 +199,20 @@ export function MyHoursPage() {
     [myEmployeeId, entries],
   );
   const [hourTypes, setHourTypes] = useState<HourType[]>([]);
+  // P-16 — `/companies/` is MEMBERSHIP-scoped and answers [] for a
+  // building-assigned STAFF, leaving their picker nameless. The hour
+  // types the page loads anyway carry `company_name` for every company
+  // in the timesheet scope — the staff-readable name source. DERIVED,
+  // not stored (no setState in an effect body).
+  const companyNames = useMemo(() => {
+    const names: Record<number, string> = {};
+    for (const ht of hourTypes) {
+      if (ht.company_name && names[ht.company] === undefined) {
+        names[ht.company] = ht.company_name;
+      }
+    }
+    return { ...names, ...fetchedCompanyNames };
+  }, [hourTypes, fetchedCompanyNames]);
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
   const [weekClosed, setWeekClosed] = useState(false);
   /** Sprint 179B §2 — the pickable jobs, purely so a stored

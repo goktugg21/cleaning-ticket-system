@@ -2984,7 +2984,5 @@
   "sla_warnings.how_4": "Empty fields follow the platform default — you override only what you fill in.",
   "sla_warnings.what_save": "Applies from the next check, to running waits too. Nothing is recalculated backwards.",
   "hours_admin.future_badge": "In the future",
-  "my_hours.future_note": "This day is in the future. The hours count as normal — check that the date is right.",
-  "attention.show_all": "Show all {{count}} — {{total}} that need you in total",
-  "attention.not_your_turn": "the customer's turn"
+  "my_hours.future_note": "This day is in the future. The hours count as normal — check that the date is right."
 }

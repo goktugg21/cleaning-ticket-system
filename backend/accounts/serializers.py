@@ -109,6 +109,15 @@ class MeSerializer(serializers.ModelSerializer):
     company_ids = serializers.SerializerMethodField()
     building_ids = serializers.SerializerMethodField()
     customer_ids = serializers.SerializerMethodField()
+    # P-16 — the companies this user may FILE HOURS in. A building-
+    # assigned STAFF has no CompanyUserMembership, so `company_ids` is
+    # [] for exactly the persona whose My-hours page needs to resolve a
+    # company (the P-14 two-company finding; P-15's fix read
+    # company_ids and healed only membership-backed users). The server
+    # computes it from the timesheet scope — the same authority the
+    # write path enforces — because a display that needs a derived
+    # state asks the backend (the display_phase rule), never infers.
+    timesheet_company_ids = serializers.SerializerMethodField()
     profile_photo_url = serializers.SerializerMethodField()
     # Sprint 126 — does this (customer) user have the Documents module, for
     # ANY of their customers? Drives the customer-side sidebar entry. The
@@ -133,6 +142,7 @@ class MeSerializer(serializers.ModelSerializer):
             "company_ids",
             "building_ids",
             "customer_ids",
+            "timesheet_company_ids",
             "profile_photo_url",
             "can_manage_documents",
             "date_joined",
@@ -169,6 +179,18 @@ class MeSerializer(serializers.ModelSerializer):
 
     def get_customer_ids(self, obj):
         return list(scope_customers_for(obj).values_list("id", flat=True))
+
+    def get_timesheet_company_ids(self, obj):
+        # Lazy import: timesheets imports accounts (scoping) at module
+        # load; the reverse import stays call-time to keep the graph
+        # acyclic. SUPER_ADMIN's `None` ("no filter") maps onto the
+        # scoped company list — the same ids scope_companies_for grants.
+        from timesheets.scope import scope_company_ids_for_timesheets
+
+        ids = scope_company_ids_for_timesheets(obj)
+        if ids is None:
+            return self.get_company_ids(obj)
+        return sorted(ids)
 
 
 class MeUpdateSerializer(serializers.ModelSerializer):

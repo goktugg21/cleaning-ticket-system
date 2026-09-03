@@ -99,6 +99,11 @@ export interface Me {
   company_ids: number[];
   building_ids: number[];
   customer_ids: number[];
+  // P-16 — the companies this user may FILE HOURS in, computed by the
+  // server from the timesheet scope. A building-assigned STAFF has no
+  // membership, so company_ids is [] for exactly the persona My hours
+  // must resolve a company for.
+  timesheet_company_ids: number[];
   // RF-1 — authed avatar URL (null when unset).
   profile_photo_url: string | null;
   // Sprint 126 — customer-side Documents access (any of the user's

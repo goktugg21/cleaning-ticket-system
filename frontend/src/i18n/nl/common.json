@@ -2984,7 +2984,5 @@
   "sla_warnings.how_4": "Lege velden volgen de platformstandaard — u overschrijft alleen wat u invult.",
   "sla_warnings.what_save": "Geldt vanaf de eerstvolgende controle, ook voor lopend wachten. Er wordt niets met terugwerkende kracht herberekend.",
   "hours_admin.future_badge": "In de toekomst",
-  "my_hours.future_note": "Deze dag ligt in de toekomst. De uren tellen gewoon mee — controleer of de datum klopt.",
-  "attention.show_all": "Toon alle {{count}} — samen {{total}} die u nodig hebben",
-  "attention.not_your_turn": "de klant is aan zet"
+  "my_hours.future_note": "Deze dag ligt in de toekomst. De uren tellen gewoon mee — controleer of de datum klopt."
 }

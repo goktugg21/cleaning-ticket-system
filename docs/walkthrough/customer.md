@@ -21,14 +21,13 @@ lopen, meerwerk dat op uw akkoord wacht, en de deur "Melding maken".
    facturatiedatum is afgerond, komt op de eerstvolgende factuur, ook
    als uw akkoord dan nog niet binnen is — wijst u het daarna af, dan
    volgt een creditnota.
-5. **Facturen** — onder "Meer" → **Facturen**: al uw verstuurde
-   facturen met periode, status en totaal; elke regel opent de
-   factuur zelf.
+5. **Facturen** — al uw verstuurde facturen met periode, status en
+   totaal; elke regel opent de factuur zelf.
 
 ## Waar het geld staat
 
-**Facturen** (onder "Meer"). Alleen verstuurde facturen staan er — een
-concept bij de schoonmaker is nog geen rekening van u.
+**Facturen**, in de linkerbalk. Alleen verstuurde facturen staan er —
+een concept bij de schoonmaker is nog geen rekening van u.
 
 ## Als iets vastzit
 
@@ -58,12 +57,12 @@ extra work waiting for your approval, and the "Melding maken" door.
    and approve or reject. Note: work finished before your billing date
    goes on the next invoice even if your approval is not in yet — if
    you reject afterwards, a credit note follows.
-5. **Facturen** — under "Meer" → **Facturen**: all your sent invoices
-   with period, status and total; every row opens the invoice.
+5. **Facturen** — all your sent invoices with period, status and
+   total; every row opens the invoice.
 
 ## Where the money is
 
-**Facturen** (under "Meer"). Only sent invoices appear — a draft at
+**Facturen**, in the sidebar. Only sent invoices appear — a draft at
 the cleaning company is not yet a bill of yours.
 
 ## When something is stuck
