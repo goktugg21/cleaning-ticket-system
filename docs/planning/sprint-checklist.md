@@ -24,6 +24,55 @@ needs no separate PR. **Sprints now branch from `main`** (CLAUDE.md §1,
 No branch was deleted at merge time — the train's branches stay for at
 least a week from 2026-09-04 (P-17 C5).
 
+### P-18 — "The first sprint from main" (2026-09-04, DONE)
+
+**The first sprint branched from `main`** under the new rule:
+`feat/p18-after-the-merge`, merge-base with `origin/main` = `a7b3d3e`
+(the redesign-train merge itself). Docs + one dev script; zero `.py`,
+zero migrations.
+
+- **Part A — the visual walk P-17 skipped.** Walked crmtest (running
+  `main`) with Playwright as SUPER_ADMIN, BUILDING_MANAGER, STAFF,
+  CUSTOMER and an NL COMPANY_ADMIN fixture. **A1: the attention list is
+  assembled from TWO namespaces** — `queue.*` (reported done, customer
+  has not answered, nobody is on these yet) and `attention.*` — for
+  **eight** possible rows, not five and not seven; a row whose count is
+  zero does not render at all, so the number is data-dependent (crmtest
+  showed 8, web-Claude's seed 7). The doc now describes the RULE and
+  names all eight kinds instead of enumerating a fixed list.
+  **A2:** the customer's example statuses are now `Ontvangen` /
+  `Received` (the status a new report actually gets first) beside
+  `Klaar — wacht op uw controle`. **A3:** the nav says *Werkplanning* /
+  *My schedule* while the page for a team-scope viewer is titled
+  *Werkplanning van het team* / *Team schedule* — confirmed on screen in
+  BOTH locales (web-Claude flagged EN only); the doc names both, per
+  web-Claude's ruling to fix the doc and not the nav. STAFF is
+  consistent (nav and title both *Werkplanning*), so `staff.md` needed
+  no change.
+- **Part B — the loose ends.** B1: strip titles quoted in full
+  (`Vastgelopen — actie nodig` / `Stuck — action needed`). **B2: the
+  i18n audit's `NS-FALLBACK: 58` was the SCRIPT misreading itself.**
+  The 58 were 29 call sites x 2 languages; 28 of the 29 are
+  `tCred("...")` calls bound directly to `staff_credentials` by
+  `useTranslation("staff_credentials")` and resolving in their own
+  primary namespace. The old regex matched any `t…(` but attributed
+  every call to the file's FIRST `useTranslation`. **No key was
+  misfiled.** The script now tracks the `t` alias; the number is **2**
+  (one genuine, by-design fallback: `hours_admin.hour_unit` from
+  `common`), `checked` unchanged at 5286 and MISSING still 0. Written up
+  in [../testing/i18n-audit.md](../testing/i18n-audit.md). B3: the close
+  rule below now carries "any document that quotes a label is verified
+  against the running screen, not the bundle".
+- **Part C — branch protection: reported, nothing changed.** The two
+  required checks are `test.yml`'s two jobs, **Backend (Django,
+  Postgres, Redis)** and **Frontend (lint, tsc, vite build)**, and
+  `test.yml` already runs on `push: branches: [main]` — so CI DID run on
+  the merge commit. The protection/ruleset configuration itself could
+  not be read (no `gh`, no API token; the endpoint is 401). Owner's
+  decision, not CC's.
+- **In passing:** the Conventions ESLint baseline said **44**, which
+  CLAUDE.md explicitly calls stale; corrected to **39**.
+
 ### P-17 — "The walkthrough reads right, then merge" (2026-09-04, DONE)
 
 Docs-only; zero migrations, zero `.py` changed, no app code. Web-Claude
@@ -4251,7 +4300,8 @@ this file always reflects where we actually are.
 - Backend is the business source of truth; **verify, don't assume**; never invent endpoints.
 - **Never stage** `docs/transkript*` or their `:Zone.Identifier`. Stage commits by **explicit path**.
 - nl + en i18n in lockstep (Dutch primary); every referenced i18n key must resolve (no raw keys on screen).
-- ESLint baseline = **44** (42 errors, 2 warnings): add **no** new violations; **never** a synchronous setState in an effect body; for prop-derived state, **key the component by id** (no resync useEffect). (History: 49 → 48 when Sprint 115 removed an unused hook, `useEffectivePermissions.ts`, that carried one violation. This line then said 48 until Sprint 155, which was stale from Sprint 152 onwards — Sprints 152–154 each removed a violation without correcting it, and CLAUDE.md said 45 while this said 48. Sprint 154 §B deleted the effect that took it to **44**; Sprint 155 corrected both files to agree. When the count changes, change it in BOTH places in the same commit.)
+- ESLint baseline = **39** (38 errors, 1 warning = `useSavedBanner.ts:28` `react-hooks/exhaustive-deps`), as CLAUDE.md records and as measured again at P-17 and P-18: add **no** new violations; **never** a synchronous setState in an effect body; for prop-derived state, **key the component by id** (no resync useEffect). (History: 49 → 48 when Sprint 115 removed an unused hook, `useEffectivePermissions.ts`, that carried one violation. This line then said 48 until Sprint 155, which was stale from Sprint 152 onwards — Sprints 152–154 each removed a violation without correcting it, and CLAUDE.md said 45 while this said 48. Sprint 154 §B deleted the effect that took it to **44**; Sprint 155 corrected both files to agree. When the count changes, change it in BOTH places in the same commit.)
+- **Close rule — the full backend suite runs at the close of every sprint** (P-16); a red is a sprint item, not a note. **And beside it (P-18 B3): any document that quotes a label is verified against the RUNNING SCREEN, not the bundle.** P-17 corrected the walkthrough's labels against `frontend/src/i18n/` and still shipped a wrong sentence — the Dashboard attention list is assembled from TWO namespaces, so the bundle could not show what the page contains. A grep proves a string exists; only the screen proves it is the one the reader sees.
 - **PR cadence (corrected 2026-07-27 — the old "PR per sprint" line was stale):** several sprints now land on ONE shared branch and the owner opens ONE PR after the last of them (Sprints 115–119 → PR #115; Sprints 122–124 are following the same pattern on `feat/sprint-122`). CI (+ Codex review) still gates that one PR when it opens. Migrations stay additive + back-compat regardless of when the PR opens.
 - Each prompt starts with a sync + a grep GUARD proving the right base, captures the ESLint baseline, applies any new migration to the dev DB before a FE smoke, and ends with an adversarial self-review. Screenshots/smokes via **token-inject** (the e2e login form is flaky).
 - Co-author trailer on commits: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` (the old line here named a different model — verify the current one in `CLAUDE.md` before reusing this, it has changed before).

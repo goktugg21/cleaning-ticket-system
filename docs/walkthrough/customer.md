@@ -12,7 +12,7 @@ lopen, meerwerk dat op uw akkoord wacht, en de deur "Melding maken".
 1. **Melding maken** — iets kapot, vies of niet gedaan? Eén formulier;
    u krijgt bericht bij elke stap die volgt.
 2. **Mijn meldingen** — al uw meldingen met hun status, in gewone
-   woorden ("Ingepland", "Klaar — wacht op uw controle").
+   woorden ("Ontvangen", "Klaar — wacht op uw controle").
 3. **Meerwerk** — extra werk aanvragen en offertes beoordelen. Bij
    "Wacht op uw akkoord" beslist u: goedkeuren of afwijzen (afwijzen
    vraagt om een reden, zodat de schoonmaker weet waarom).
@@ -49,7 +49,7 @@ extra work waiting for your approval, and the "New report" door.
 1. **New report** — something broken, dirty or skipped? One form;
    you are notified at every following step.
 2. **My reports** — all your reports with their status, in plain
-   words ("Planned", "Done — waiting for your check").
+   words ("Received", "Done — waiting for your check").
 3. **Extra work** — request extra work and judge quotes. At "Waiting for
    your approval" you decide: approve or reject (rejecting asks for a
    reason, so the cleaner knows why).
