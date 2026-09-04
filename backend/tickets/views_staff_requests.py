@@ -257,17 +257,33 @@ class StaffAssignmentRequestViewSet(viewsets.ModelViewSet):
                 # ticket (one or MORE slots) while the request sat PENDING.
                 # get_or_create's internal .get() would then raise
                 # MultipleObjectsReturned -> 500. A self-request means "let
-                # me work this ticket"; if the staff already holds ANY slot
-                # they are already on it, so approval is idempotent and
-                # creates nothing.
-                if not TicketStaffAssignment.objects.filter(
-                    ticket=locked.ticket, user=locked.staff
-                ).exists():
+                # me work this ticket"; if the staff already holds a
+                # BASE slot they are already on it, so approval is
+                # idempotent and creates nothing.
+                # W26.3 — the SAME predicate the /staff-assignments/
+                # create uses, at the level this path writes (a request
+                # is to work the JOB, so approval grants a base slot).
+                # It is a predicate here, not a rejection: approving a
+                # request whose staff is already on the ticket creates NO
+                # row, so the rule is not broken, and 400-ing an approval
+                # that has nothing to do would strand the request PENDING
+                # for ever. Asking at base level also repairs a legacy
+                # case W26 got wrong: someone holding only a part slot
+                # counted as "already on it" and approval left them on a
+                # part of a job they were never assigned to.
+                from .views_staff_assignments import staff_already_assigned
+
+                if not staff_already_assigned(locked.ticket, locked.staff):
                     TicketStaffAssignment.objects.create(
                         ticket=locked.ticket,
                         user=locked.staff,
                         assigned_by=request.user,
                     )
+                    # W-FIX1 C1 (audit F25) — an approved request puts
+                    # the person on the extra work's crew as well.
+                    from .crew_sync import worker_added
+
+                    worker_added(locked.ticket, locked.staff, actor=request.user)
         return Response(self.get_serializer(locked).data)
 
     @action(detail=True, methods=["post"])

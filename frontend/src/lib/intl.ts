@@ -84,6 +84,30 @@ export function formatDate(
 }
 
 /**
+ * WP-1 G0 — "ma 24 aug" / "Mon 24 Aug": weekday-short day, no year.
+ * For the work plan's placement markers, where the reader is inside one
+ * week and the year is noise but the WEEKDAY is the fact ("planned
+ * Monday" reads; "planned the 24th" makes them count). Empty/invalid
+ * input returns "—".
+ */
+export function formatDateWeekday(
+  value: string | Date | null | undefined,
+  locale?: string,
+): string {
+  const date = parseDate(value);
+  if (!date) return DASH;
+  try {
+    return new Intl.DateTimeFormat(resolveLocale(locale), {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    }).format(date);
+  } catch {
+    return DASH;
+  }
+}
+
+/**
  * "15 May 2026, 17:49" — with time. Empty returns "—".
  */
 export function formatDateTime(
@@ -139,6 +163,45 @@ export function formatRelative(
   }
 
   return formatDate(date, resolved);
+}
+
+/**
+ * P-13 J — "2" → "2nd" / "2de". Ordinal day-of-month for sentences
+ * like "today is the 2nd". EN suffixes come from Intl.PluralRules
+ * ordinal categories; Dutch has no CLDR ordinal categories, so the
+ * Dutch rule is spelled out — within 1..31 it is -ste for 1, 8 and
+ * everything from 20 up (1ste, 8ste, 20ste), -de otherwise (2de,
+ * 19de).
+ */
+export function formatOrdinal(
+  value: number | null | undefined,
+  locale?: string,
+): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return DASH;
+  }
+  const resolved = resolveLocale(locale);
+  if (resolved.startsWith("nl")) {
+    const n = Math.abs(Math.trunc(value));
+    const suffix = n === 1 || n === 8 || n >= 20 ? "ste" : "de";
+    return `${value}${suffix}`;
+  }
+  try {
+    const rule = new Intl.PluralRules(resolved, { type: "ordinal" }).select(
+      value,
+    );
+    const suffix =
+      rule === "one"
+        ? "st"
+        : rule === "two"
+          ? "nd"
+          : rule === "few"
+            ? "rd"
+            : "th";
+    return `${value}${suffix}`;
+  } catch {
+    return String(value);
+  }
 }
 
 export interface FormatMoneyOptions {

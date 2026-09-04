@@ -12,6 +12,7 @@ import type { Granularity } from "../../../api/reports.types";
 import type { ReportFilters } from "../../../api/reports";
 import { fetchTicketsOverTime } from "../../../api/reports";
 import { useReport } from "../../../hooks/useReport";
+import { ChartSkeleton } from "./ChartSkeleton";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -68,9 +69,7 @@ export function TicketsOverTimeChart({ filters, refreshKey }: ChartProps) {
       )}
 
       {loading && (
-        <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-          <div className="loading-bar-fill" />
-        </div>
+        <ChartSkeleton />
       )}
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 12 }}>
@@ -112,7 +111,7 @@ export function TicketsOverTimeChart({ filters, refreshKey }: ChartProps) {
               <Tooltip
                 labelFormatter={(v: string) => formatTick(v, data.granularity)}
               />
-              <Line
+              <Line isAnimationActive={false}
                 type="monotone"
                 dataKey="count"
                 stroke="#3b82f6"

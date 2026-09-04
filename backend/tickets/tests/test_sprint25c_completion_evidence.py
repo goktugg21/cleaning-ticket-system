@@ -271,13 +271,30 @@ class CompletionEvidenceUnitTests(TenantFixtureMixin, APITestCase):
 
 
 # ===========================================================================
-# B1 — Admin / manager bypass coverage.
+# B1 — Admin / manager bypass coverage, AT THE PRIMITIVE.
 #
-# Per system-business-logic-and-workflows.md §4.4 the evidence rule
-# applies to STAFF only. Managers and admins driving the same completion
-# transition (e.g. BM closing a job on behalf of an absent staff member,
-# SUPER_ADMIN unblocking a stuck ticket) must NOT trip the gate even
-# with empty note + no visible attachment.
+# W-UX1 §4 NARROWED WHAT THIS CLASS MEANS, so read the scope carefully
+# before trusting the name. It used to be the whole truth:
+#
+#     "Per system-business-logic-and-workflows.md §4.4 the evidence rule
+#      applies to STAFF only. Managers and admins driving the same
+#      completion transition (e.g. BM closing a job on behalf of an
+#      absent staff member, SUPER_ADMIN unblocking a stuck ticket) must
+#      NOT trip the gate even with empty note + no visible attachment."
+#
+# The owner has since ruled that the proof gate binds EVERY role. That
+# ruling was implemented at the OPERATOR'S DOOR
+# (`transition_requirements` -> `TicketStatusChangeSerializer.save`),
+# not on this primitive — because `apply_transition` is also what
+# `auto_close`, the sub-task rollup, the extra-work sync hook and a
+# great deal of test setup use to WALK a ticket into a state, and none
+# of those is a person who can answer a question.
+#
+# So these three still pass and still SHOULD: they assert the primitive
+# is still a primitive. What a manager can no longer do is reach
+# WAITING_* through `POST /api/tickets/<id>/status/` with no proof and
+# no override — pinned in
+# `test_w_ux1_proof_gate_has_no_vips.py`.
 # ===========================================================================
 @override_settings(MEDIA_ROOT=_TMP_MEDIA)
 class AdminAndManagerBypassCompletionEvidenceTests(TenantFixtureMixin, APITestCase):
@@ -370,9 +387,27 @@ class CompletionEvidenceAPITests(TenantFixtureMixin, APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_api_admin_bypasses_evidence_rule(self):
-        # B1 — same endpoint, COMPANY_ADMIN actor, empty payload. The
-        # gate must NOT fire; the transition succeeds.
+    def test_api_admin_is_now_blocked_without_evidence(self):
+        """W-UX1 §4 REVERSED THIS. The old assertion, quoted so the
+        change of intent survives the rename:
+
+            # B1 - same endpoint, COMPANY_ADMIN actor, empty payload.
+            # The gate must NOT fire; the transition succeeds.
+            ...
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        The owner has ruled that the proof gate has no VIPs. An empty
+        payload from a COMPANY_ADMIN is now refused at the operator's
+        door with `transition_requirements_unmet`.
+
+        The sibling `apply_transition` tests in
+        `AdminAndManagerBypassCompletionEvidenceTests` still assert the
+        old behaviour and still pass: the PRIMITIVE is unchanged on
+        purpose. This test is the API, which is a person pressing a
+        button, and that is where the ruling bites. The ways past it are
+        pinned in `test_w_ux1_proof_gate_has_no_vips.py`: send the note,
+        or override with a recorded reason.
+        """
         in_progress = self._drive_to_in_progress()
         self.authenticate(self.company_admin)
         response = self.client.post(
@@ -380,7 +415,12 @@ class CompletionEvidenceAPITests(TenantFixtureMixin, APITestCase):
             {"to_status": TicketStatus.WAITING_CUSTOMER_APPROVAL},
             format="json",
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK, response.content)
+        self.assertEqual(
+            response.status_code, status.HTTP_400_BAD_REQUEST, response.content
+        )
+        self.assertEqual(
+            response.data["code"], "transition_requirements_unmet", response.data
+        )
 
     def test_customer_user_blocked_by_auth_gate_not_evidence_gate(self):
         """A CUSTOMER_USER never has the OSIUS-side transition right

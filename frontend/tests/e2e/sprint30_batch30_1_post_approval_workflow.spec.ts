@@ -104,8 +104,27 @@ async function driveToPricingProposed(
     if (r1.status() !== 200) return false;
   }
   // Either we just moved into UNDER_REVIEW or were already there.
+  // P-16 — the workflow leg refuses without at least one pricing line
+  // (`pricing_line_items_required`), so the line goes in FIRST.
+  const line = await api.post(`/api/extra-work/${ewId}/pricing-items/`, {
+    data: {
+      description: "Sprint 30 fixture pricing line",
+      unit_type: "FIXED",
+      quantity: "1.00",
+      unit_price: "100.00",
+      vat_rate: "21.00",
+    },
+  });
+  if (line.status() !== 201) return false;
+  // P-16 — W-PLAN gates this pricing leg on a complete plan; the
+  // fixture's subject is the post-approval spawn flow, so it takes the
+  // gate's documented bypass (the recorded override). Without it the
+  // drive 400'd plan_requirements_unmet and K1 self-skipped forever.
   const r2 = await api.post(`/api/extra-work/${ewId}/transition/`, {
-    data: { to_status: "PRICING_PROPOSED" },
+    data: {
+      to_status: "PRICING_PROPOSED",
+      override_reason: "sprint30 fixture: plan bypass",
+    },
   });
   return r2.status() === 200;
 }
@@ -163,9 +182,13 @@ async function createFreshProposalRouteEw(
           {
             service: service.id,
             quantity: "1.00",
-            requested_date: requestedDate,
+            // P-16 — P-8 §4 retired the per-line requested_date; the
+            // request-level preferred_date below carries the cart's
+            // date. With the old field every create 400'd and K1
+            // self-skipped forever.
           },
         ],
+        preferred_date: requestedDate,
       },
     });
     if (createResp.status() !== 201) continue;
@@ -286,29 +309,32 @@ test.describe("Sprint 30 Batch 30.1 — post-approval workflow", () => {
       "Auto-spawn hook must yield at least one ticket on customer approval",
     ).toBeGreaterThan(0);
 
+    // P-16 repin — W21 retired the request page for a spawned EW: the
+    // provider landing IS the job now (the very rule J1/J3 pin). The
+    // surviving K1 facts: the approval auto-spawned (asserted above
+    // from the API), the provider lands on a spawned ticket carrying
+    // its extra-work money surface, and no retry door renders anywhere
+    // — tickets exist, so the gate is closed.
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/extra-work/${approvedEwId!}`);
-
+    await page.waitForURL(/\/tickets\/\d+(\?.*)?$/, { timeout: 10_000 });
+    const landedId = Number(
+      new URL(page.url()).pathname.split("/").filter(Boolean).pop(),
+    );
+    expect(
+      approvedEwSpawnedTickets.map((t) => t.id),
+      "the redirect lands on one of the freshly spawned tickets",
+    ).toContain(landedId);
+    await page
+      .locator('[data-testid="ticket-tab-money"]')
+      .click()
+      .catch(() => {});
     await expect(
-      page.locator('[data-testid="extra-work-detail-page"]'),
+      page.locator('[data-testid="ticket-extra-work-money"]'),
     ).toBeVisible({ timeout: 10_000 });
-
-    // Spawned-tickets panel is visible and at least one row resolves.
-    const panel = page.locator(
-      '[data-testid="extra-work-spawned-tickets-panel"]',
-    );
-    await expect(panel).toBeVisible({ timeout: 10_000 });
-    const rowCount = await page
-      .locator('[data-testid^="extra-work-spawned-ticket-row-"]')
-      .count();
-    expect(rowCount).toBeGreaterThan(0);
-
-    // Retry button must NOT render — tickets exist, so the gate is
-    // closed regardless of role/status.
-    const retryButton = page.locator(
-      '[data-testid="extra-work-retry-spawn"]',
-    );
-    await expect(retryButton).toHaveCount(0);
+    await expect(
+      page.locator('[data-testid="extra-work-retry-spawn"]'),
+    ).toHaveCount(0);
   });
 
   test("K2 — retry-spawn button surfaces for stuck CUSTOMER_APPROVED EW", async ({
@@ -328,6 +354,9 @@ test.describe("Sprint 30 Batch 30.1 — post-approval workflow", () => {
       page.locator('[data-testid="extra-work-detail-page"]'),
     ).toBeVisible({ timeout: 10_000 });
 
+    // FE-3 — the repair lives in the "Geavanceerd" fold with the other
+    // corrections; open it first.
+    await page.locator('[data-testid="extra-work-advanced-toggle"]').click();
     const retryButton = page.locator(
       '[data-testid="extra-work-retry-spawn"]',
     );

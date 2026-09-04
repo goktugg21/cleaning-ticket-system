@@ -32,7 +32,15 @@ export type EmploymentType = "INTERNAL_STAFF" | "ZZP" | "INHUUR";
 // IN_PROGRESS and WAITING_CUSTOMER_APPROVAL.
 export type TicketStatus =
   | "OPEN"
+  // W10 §1 — seen and scheduled, work not begun. Between OPEN and
+  // IN_PROGRESS so an operator opening a September job in August has a
+  // true answer instead of choosing between "ignored" and "started".
+  | "ACKNOWLEDGED"
   | "IN_PROGRESS"
+  // W10 §2 — stalled on something outside our control. Not cancelled,
+  // not in progress, and not terminal: it has a way back to IN_PROGRESS
+  // and it stays on the ticket list.
+  | "ON_HOLD"
   | "WAITING_MANAGER_REVIEW"
   | "WAITING_CUSTOMER_APPROVAL"
   | "APPROVED"
@@ -81,12 +89,21 @@ export interface Me {
   id: number;
   email: string;
   full_name: string;
+  /** P-3 §D — the account's own first name (may be empty). The
+   *  greeting reads it and falls back to the whole display name; it
+   *  never splits "Super Admin" into "Super". */
+  first_name: string;
   role: Role;
   language: string;
   is_active: boolean;
   company_ids: number[];
   building_ids: number[];
   customer_ids: number[];
+  // P-16 — the companies this user may FILE HOURS in, computed by the
+  // server from the timesheet scope. A building-assigned STAFF has no
+  // membership, so company_ids is [] for exactly the persona My hours
+  // must resolve a company for.
+  timesheet_company_ids: number[];
   // RF-1 — authed avatar URL (null when unset).
   profile_photo_url: string | null;
   // Sprint 126 — customer-side Documents access (any of the user's
@@ -105,6 +122,21 @@ export interface Company {
   is_active: boolean;
 }
 
+/** P-5 S7 — a contract covering a building, with one line of context. */
+export interface BuildingContractRef {
+  id: number;
+  contract_no: string;
+  contract_type_name: string | null;
+  customer_id: number;
+  customer_name: string | null;
+  status: string;
+  lifecycle: string;
+  billing_period: string;
+  period_amount: string | null;
+  start_date: string | null;
+  end_date: string | null;
+}
+
 export interface Building {
   id: number;
   company: number;
@@ -114,6 +146,8 @@ export interface Building {
   country: string;
   postal_code: string;
   is_active: boolean;
+  /** P-5 S7 — the contracts covering this building (detail only). */
+  contracts?: BuildingContractRef[] | null;
 }
 
 // Mirrors backend `customers/serializers.py::compute_customer_actions`.
@@ -184,6 +218,12 @@ export interface Customer {
   /** Sprint 185 §3 — where the relationship is. DESCRIPTIVE ONLY:
    *  `is_active` above still decides access. */
   lifecycle: CustomerLifecycle;
+  /** Sprint 182 §3 — which invoice this customer's work lands on by
+   *  default. Read here so the Extra Work create form can say what
+   *  "follow the customer" resolves to for THIS customer instead of
+   *  naming a setting the reader would have to go and look up.
+   *  Optional: a server that predates the split does not send it. */
+  invoice_billing_target?: InvoiceBillingTarget;
   // RF-1 — customer company logo URL (null when unset).
   logo_url?: string | null;
   // Per-current-user, per-customer capability block. Optional so
@@ -200,35 +240,111 @@ export type SLAStatus =
 
 export type SLADisplayState = SLAStatus | "PAUSED";
 
-/** Sprint 185 E §1 — one row of the per-company work-category catalog
- *  (`GET /api/tickets/categories/`). The `CatalogTab` shape, shared with
- *  building types, hour types, work types, contract types and managed
- *  units. */
-export interface WorkCategory {
+/** W13 — one row of the per-company ticket-category catalog
+ *  (`GET /api/tickets/categories/`): the owner's list, Verzoek / Extra /
+ *  Compliment / Melden / Storing / Ongegrond / Klacht.
+ *
+ *  Replaces `WorkCategory`, the Sprint 185 kind-of-work catalog, which
+ *  sat beside the `TicketType` enum and gave a melding two overlapping
+ *  classifications with near-identical labels. There is one now. */
+export interface TicketCategory {
   id: number;
   company: number;
   company_name: string;
-  name: string;
-  is_active: boolean;
+  /** Stable machine key. What code matches on, so a company renaming
+   *  its label never breaks a mapping. */
+  slug: string;
+  /** The label in the READER's language, resolved server-side by the
+   *  one resolver (`TicketCategory.label_for`). Read-only: write
+   *  `label_nl` / `label_en`. */
+  label: string;
+  label_nl: string;
+  label_en: string;
+  /** "#rrggbb", or "" for no chip colour. */
+  color: string;
   sort_order: number;
+  is_active: boolean;
+  /** W13 §4 — may this be chosen when a melding is CREATED? False for
+   *  "Ongegrond", a verdict somebody reaches afterwards. The create
+   *  forms ask the server for `available_at_intake=true` and render
+   *  what comes back, so such a category is absent there rather than
+   *  present and disabled. */
+  available_at_intake: boolean;
+  /** The pre-W13 `Ticket.type` this category stands in for. A
+   *  compatibility bridge; see the model. */
+  legacy_type: string;
   usage_count: number;
   created_at: string;
   updated_at: string;
 }
 
+
+// FE-2 (Addendum D §D.4) — the ONE presentation phase, computed
+// server-side per viewer. Never inferred client-side.
+export type ExtraWorkDisplayPhase =
+  | "WAITING_PRICE"
+  | "WAITING_YOUR_APPROVAL"
+  | "WAITING_CUSTOMER_APPROVAL"
+  /** P-2 ruling 1 — agreed, and no person has planned it yet. */
+  | "WAITING_PLANNING"
+  | "SCHEDULED"
+  | "IN_EXECUTION"
+  /** P-10 B1 — provider viewer only: the crew reported the work done and
+   *  the manager has not checked it yet (the ticket's own
+   *  WAITING_MANAGER_REVIEW word). The customer keeps IN_EXECUTION. */
+  | "WAITING_MANAGER_CHECK"
+  | "WAITING_COMPLETION_APPROVAL"
+  | "DONE"
+  | "INVOICED"
+  | "REJECTED"
+  | "CANCELLED";
+
+export type TicketDisplayPhase =
+  | "RECEIVED"
+  | "PLANNED"
+  | "IN_EXECUTION"
+  | "WAITING_YOUR_APPROVAL"
+  | "WAITING_CUSTOMER_APPROVAL"
+  /** P-3 — the provider's own truth for WAITING_MANAGER_REVIEW: the
+   *  worker reported it done, the manager has not checked it. The
+   *  customer reads IN_EXECUTION for the same status. */
+  | "WAITING_MANAGER_CHECK"
+  | "DONE"
+  | "REJECTED"
+  | "CONVERTED";
+
 export interface TicketList {
+  // W-H §1 — the archive, on the LIST as well as the detail, so the
+  // archive view can name who filed each row without a per-row fetch.
+  // `archived_at` IS the state: set means the ticket has left the
+  // working list. Nothing reads the other two to decide anything.
+  archived_at?: string | null;
+  archived_by_name?: string | null;
+  archive_note?: string;
   id: number;
   ticket_no: string;
   title: string;
   type: string;
-  /** Sprint 185 E §1 — the kind of WORK, from the company's own
-   *  catalog. `type` above says what kind of MESSAGE it is; the two
-   *  answer different questions and a melding carries both. Null until
-   *  somebody classifies it, which is a real and common state. */
+  /** W13 — WHAT KIND OF MELDING, from the company's catalog. The one
+   *  classification any screen offers; `type` above is the superseded
+   *  enum, still on the row and still written by the API, offered by
+   *  nothing.
+   *
+   *  Null until somebody classifies it — a real and common state, and
+   *  where the two legacy types with no home in the owner's list
+   *  (SUGGESTION, OTHER) landed at migration.
+   *
+   *  `category_name` is already in the reader's language; the resolver
+   *  is server-side so two screens cannot name one row two ways. */
   category: number | null;
   category_name: string | null;
+  category_slug: string | null;
+  /** "#rrggbb" or null. The chip colour, which is what turns a column
+   *  of grey words into groups you can see. */
+  category_color: string | null;
   priority: string;
   status: TicketStatus;
+  display_phase: TicketDisplayPhase;
   company: number;
   // Sprint 30 Batch 30.1.2 — provider company display name. The
   // backend exposes this on BOTH list + detail serializers via
@@ -252,6 +368,14 @@ export interface TicketList {
   // renders a small "Extra Work" route badge that deep-links to the
   // parent EW. Mirrors backend `TicketListSerializer.extra_work_origin`.
   extra_work_origin: TicketExtraWorkOrigin | null;
+  /** P-5 S7 — an occurrence ticket's origin: its recurring job and,
+   *  through the contract line, the contract; which visit of the year. */
+  occurrence_origin: TicketOccurrenceOrigin | null;
+  /** P-9 D2 — WHERE THE ROW CAME FROM: the detail's `kind`, on the list
+   *  (server-computed by `tickets/detail_facts.ticket_kind`, never
+   *  inferred here). An occurrence ticket is a TICKET whose
+   *  `occurrence_origin` is set — that is the row's "Recurring". */
+  kind: TicketKind;
 }
 
 export interface TicketStatusHistory {
@@ -286,6 +410,45 @@ export interface TicketStatusChangePayload {
   note?: string;
   is_override?: boolean;
   override_reason?: string;
+  // W13-FIX §1 — the transition modal's answers, posted WITH the move so
+  // "start the work" stays one action. Mirrors the optional fields on
+  // `tickets/serializers.py::TicketStatusChangeSerializer`, which applies
+  // them inside the same transaction as the transition.
+  assigned_staff_ids?: number[];
+  scheduled_start_at?: string;
+}
+
+// W13-FIX §1 — what a step needs before it may be taken. Mirrors
+// `backend/tickets/transition_requirements.py`. The modal renders one
+// field per UNSATISFIED requirement; `apply_transition` refuses the move
+// while any is unmet, so the form and the gate read the same source.
+export type TransitionRequirementKey =
+  | "assignee"
+  | "schedule"
+  | "completion_evidence"
+  // P-5 S0 — the actual hours on every hourly meerwerk line, before the
+  // job goes to the customer. Reported so the modal can point at them;
+  // the machine refuses under `actual_hours_required`.
+  | "actual_hours"
+  // W14 §4 — the justification an OVERRIDE carries, reported by
+  // `state_machine.transition_needs_override_reason`. Unlike the other
+  // three it can never arrive satisfied: a reason is written FOR the
+  // move, so there is nothing on the ticket that could already answer
+  // it. Reported by the requirements ENDPOINT and rendered by the
+  // modal; the refusal itself keeps its own stable code
+  // (`override_reason_required`) one layer down in `apply_transition`.
+  | "override_reason";
+
+export interface TransitionRequirement {
+  key: TransitionRequirementKey;
+  satisfied: boolean;
+}
+
+export interface TransitionRequirements {
+  from_status: TicketStatus;
+  to_status: TicketStatus;
+  requirements: TransitionRequirement[];
+  unmet: TransitionRequirementKey[];
 }
 
 // Sprint 7B (frontend) — request body for
@@ -389,7 +552,15 @@ export interface AssignedStaffNamedEntry {
 
 export type AssignedStaffEntry =
   | AssignedStaffNamedEntry
-  | { anonymous: true; label_key: string };
+  // W-N1 §4 — the anonymous row is now one PER MEMBER and carries the
+  // same resolver-gated credentials the named row does. It still has no
+  // name, no email, no phone and no `id`: a certificate says what the
+  // work is covered for, not who is doing it.
+  | {
+      anonymous: true;
+      label_key: string;
+      credentials?: AssignedStaffCredential[];
+    };
 
 // Sprint 28 Batch 15.4 — ticket "spawned from extra work" anchor.
 // Mirrors backend `TicketDetailSerializer.extra_work_origin`. Non-
@@ -405,6 +576,41 @@ export interface TicketExtraWorkOrigin {
   extra_work_request_item_id: number;
   service_name: string | null;
   origin: "INSTANT" | "PROPOSAL";
+  /** W6-H — the CALLER'S OWN planned days on the parent Extra Work, and
+   *  nobody else's. Optional because the list serializer omits it.
+   *
+   *  This is the WORKER'S surface. A worker cannot open the parent
+   *  Extra Work at all — `scope_extra_work_for` returns none() for
+   *  STAFF, the P0 staff-privacy fix, with operational visibility
+   *  living on the spawned ticket instead — so "which days am I on"
+   *  had to be answered on the ticket they can already open.
+   *
+   *  `date: null` means "planned, day not decided". Hours only: no
+   *  rate, no cost, no other person's name. */
+  my_planned_hours?: { date: string | null; hours: string }[];
+  actual_hours_required?: boolean;
+  /** W-H — THE PARENT EXTRA WORK'S DATES.
+   *
+   *  The backend has sent all four since Sprint 184 §1 and this type
+   *  did not declare them, so no screen could read them: the ticket
+   *  page showed a lone `Scheduled date` while the answers to "when was
+   *  this asked for, by when is it owed, what did we commit to" sat
+   *  unread in the same response.
+   *
+   *  Two pairs and one due date, exactly as
+   *  `extra_work/models.py` documents them:
+   *    ASKED FOR   preferred_date -> planned_end_date
+   *    COMMITTED   provider_planned_date -> provider_planned_end_date
+   *    OWED BY     deadline
+   *
+   *  Borrowed, never copied: the extra work owns them and the ticket
+   *  links back. Optional because the list serializer stops before the
+   *  heavier keys. */
+  preferred_date?: string | null;
+  planned_end_date?: string | null;
+  deadline?: string | null;
+  provider_planned_date?: string | null;
+  provider_planned_end_date?: string | null;
 }
 
 // Sprint 9B (backend) — operational schedule lifecycle on a ticket.
@@ -417,8 +623,60 @@ export type TicketScheduleStatus =
   | "SCHEDULED"
   | "RESCHEDULED";
 
+/** FE-3 (Addendum D §D.4) — WHAT KIND of work a ticket is, computed
+ *  server-side (`tickets/detail_facts.py`). "Chargeable work" is not a
+ *  kind: MEERWERK is the same meerwerk in its execution phase. */
+export type TicketKind = "MELDING" | "MEERWERK" | "TICKET";
+
+/** FE-3 (§D.11 G3) — which date `due_date` is, so a planned day is
+ *  never captioned "deadline". */
+export type TicketDueKind = "DEADLINE" | "PLANNED_DAY";
+
+export interface TicketOccurrenceOrigin {
+  occurrence_id: number;
+  planned_date: string;
+  status: string;
+  recurring_job_id: number;
+  recurring_job_title: string;
+  frequency: string;
+  visit_index: number;
+  visits_this_year: number;
+  contract_id: number | null;
+  contract_no: string | null;
+  contract_type_name: string | null;
+  contract_line_name: string | null;
+}
+
 export interface TicketDetail extends TicketList {
   description: string;
+  kind: TicketKind;
+  /** P-13 C/D — the finished job's MONEY fact: the parent extra
+   *  work's earned-but-unbilled amount plus the customer's billing
+   *  day. Null unless the viewer is provider management, the ticket is
+   *  EW-born, and money actually waits (billable, unclaimed,
+   *  positive). Feeds the Done banner and the archive confirm. */
+  extra_work_billing?: {
+    unbilled_total: string;
+    customer_name: string;
+    customer_invoice_day: number | "LAST_OF_MONTH" | null;
+  } | null;
+  /** The date that decides late (`tickets/job_dates.py::job_due`): the
+   *  extra work's deadline, else the last planned day. Null when nobody
+   *  stated one. */
+  due_date: string | null;
+  due_kind: TicketDueKind | null;
+  /** Signed whole days: left when positive, over when negative, today
+   *  at zero. Null when there is no due date OR the work is over. */
+  days_until_due: number | null;
+  /** FE-4 (§D.12) — the SAME age the Werkplanning's "Nog niet gepland"
+   *  row prints: whole days since creation on a live job with no window
+   *  at all; null otherwise. */
+  unplanned_age_days: number | null;
+  /** FE-4 (§D.12 item 4) — when the work was over (past tense), and
+   *  how many days after its due date that came (quiet history). Null
+   *  while the ticket is live / when it was on time. */
+  settled_at: string | null;
+  settled_days_after_due: number | null;
   room_label: string;
   created_by: number;
   created_by_email: string;
@@ -439,6 +697,42 @@ export interface TicketDetail extends TicketList {
   // the backend `Ticket.manager_review_at` column.
   manager_review_at: string | null;
   status_history: TicketStatusHistory[];
+  /** Sprint 184 §3 — the date the CUSTOMER would like this done. A wish,
+   *  never a commitment: it decides nothing and never makes a ticket
+   *  late. On the wire since Sprint 184 and undeclared here until W-H,
+   *  which is why the Scheduling card could not show the operator what
+   *  was asked for while they set their own date. */
+  customer_wanted_date: string | null;
+  /** W-H — who set the current schedule, and when. Computed by the
+   *  backend from the schedule annotation row on `status_history`;
+   *  nothing new is stored. Null for a CUSTOMER_USER (which employee
+   *  typed the date is internal staffing detail, gated like
+   *  `reschedule_reason`) and null on a ticket nobody has planned. */
+  schedule_planned_by_name: string | null;
+  schedule_planned_at: string | null;
+  /** P-1 — is the window a PERSON's plan at all? False for a seeded
+   *  date nobody set (the Sprint 9B spawn seed on old crmtest tickets):
+   *  such a ticket reads "created ... not planned yet", never "planned",
+   *  and never late. `plan_source` mirrors the work-plan card's.
+   *  `planned_by_name` is null for a CUSTOMER_USER (internal staffing
+   *  detail) and when the plan came in without a named person. */
+  has_real_plan: boolean;
+  plan_source: "TICKET" | "PROVIDER_PLAN" | "CUSTOMER_WISH" | null;
+  /** P-15 §0.4 — the customer's wish as a bare fact ("Wished for
+   *  {date}"); set only when the wish is the job's sole date. */
+  wished_day: string | null;
+  /** P-15 §0.3 — the approval leg was an on-behalf override; the fact
+   *  block words the manager's check as the sign-off. */
+  approved_on_behalf: boolean;
+  approved_by_name: string | null;
+  /** P-15 §0.3 — can any customer-side account reach this ticket at
+   *  all? Answered only while the question is live (waiting on the
+   *  customer, or approved on their behalf); null otherwise. */
+  customer_can_decide_online: boolean | null;
+  planned_by_name: string | null;
+  planned_at: string | null;
+  /** P-1 — who opened the ticket, as a name. Nobody guesses this. */
+  created_by_name: string;
   allowed_next_statuses: TicketStatus[];
   sla_status: SLAStatus;
   sla_due_at: string | null;
@@ -468,9 +762,25 @@ export interface TicketDetail extends TicketList {
   // null (the current date/window + schedule_status stay visible).
   scheduled_start_at: string | null;
   scheduled_end_at: string | null;
+  /** P-3 §A.3 — the clock of the plan, decided by the SERVER in its own
+   *  zone ("09:30"); null when the plan is a day and not a time. */
+  scheduled_start_time: string | null;
+  scheduled_end_time: string | null;
+  /** ...and the DAY ("YYYY-MM-DD") in the server's zone. */
+  scheduled_start_day: string | null;
+  scheduled_end_day: string | null;
+  /** P-5 S1 — the job's RESOLVED window: the ticket's own days when a
+   *  person set them, else the meerwerk's committed window, else the
+   *  customer's wish (`plan_source` says which). One plan, one date. */
+  job_start_day: string | null;
+  job_end_day: string | null;
+  /** P-3 §A.5 — a real plan whose last day is past the deadline. */
+  planned_after_deadline: boolean;
   time_window_label: string;
   schedule_status: TicketScheduleStatus;
   rescheduled_from: string | null;
+  /** P-5 S9.2 — the day it was moved from, in the server's zone. */
+  rescheduled_from_day: string | null;
   reschedule_reason: string;
   // Sprint 4 (backend) / Sprint 5 (frontend) — the ticket's named sub-tasks
   // (each with its compact staff slots + a computed `is_done`) and the
@@ -479,6 +789,13 @@ export interface TicketDetail extends TicketList {
   // the flag via PATCH /tickets/<id>/auto-complete-flag/. Additive.
   sub_tasks: SubTask[];
   auto_complete_on_subtasks: boolean;
+  // Sprint 191 - the per-work photo-visibility setting. False (the
+  // default) means a staff upload on this work lands INTERNAL and waits
+  // for a provider manager to promote it; true means staff uploads here
+  // are customer-visible the moment they arrive. Read-only on the detail
+  // payload; mutated via PATCH
+  // /tickets/<id>/attachment-visibility-policy/ (PA/SA only).
+  staff_uploads_customer_visible: boolean;
   // Per-current-user, per-ticket capability block — backend
   // `TicketDetailSerializer.get_actions`. Optional so older list
   // serializers / pre-cherry-pick caches don't break typing; treat
@@ -572,11 +889,18 @@ export interface MessageRecipient {
 // M1 — in-app notification (mirrors notifications.serializers.
 // NotificationSerializer). Deep-link is derived from `ticket` (-> the
 // ticket detail) or `extra_work` (-> EW detail, wired for B4).
+/** W-LATE addendum 2 — the rung a notification stands on. INFO is
+ *  activity (the soft green); L1 is the standard warning tone (orange);
+ *  L2 red; L3 dark red, and its toast stays until dismissed. Mirrors
+ *  `notifications.models.NotificationSeverity`. */
+export type NotificationSeverity = "INFO" | "L1" | "L2" | "L3";
+
 export interface Notification {
   id: number;
   event_type: string;
   is_directed: boolean;
   summary: string;
+  severity: NotificationSeverity;
   ticket: number | null;
   ticket_no: string | null;
   ticket_title: string | null;
@@ -588,6 +912,11 @@ export interface Notification {
   read_at: string | null;
   is_read: boolean;
   created_at: string;
+  // P-16 Part D — the warning headline, resolved by the API in the
+  // viewer's language (null for rows whose headline is the job's own
+  // name). The client-side notifications.sla.* title map is gone: the
+  // SPA never composes notification copy from parts.
+  title: string | null;
 }
 
 export interface NotificationListResponse {
@@ -598,6 +927,170 @@ export interface NotificationListResponse {
   unread_count: number;
 }
 
+// Sprint W4-Q §1 — the three TIME-DRIVEN feed types. Every other
+// notification in the feed is a reaction to somebody doing something;
+// these three exist because nothing happened and it should have, and
+// the feed renders them as warnings rather than as activity.
+//
+// The strings match `notifications.models.NotificationType` (and, by
+// design, its email twin `NotificationEventType` — one event, two
+// channels, one spelling). An ORDERED exported constant that every
+// consumer iterates, never a second local copy: a hardcoded array
+// literal somewhere else is exactly what hid the `documents` permission
+// group for three sprints.
+export const SLA_WARNING_EVENT_TYPES = [
+  "SLA_APPROVAL_CUTOFF_DUE",
+  "SLA_MANAGER_REVIEW_OVERDUE",
+  "SLA_WORK_NOT_STARTED",
+  // W-LATE §2 — the three escalation steps of the late ladder. They
+  // NAME themselves the same way the SLA three do; their tone comes
+  // from the row's own `severity`, not from this list.
+  "TICKET_LATE_L2_MANAGERS",
+  "TICKET_LATE_L2_ESCALATED",
+  "TICKET_LATE_L3_QUARANTINE",
+] as const;
+export type SlaWarningEventType = (typeof SLA_WARNING_EVENT_TYPES)[number];
+
+export function isSlaWarningEvent(
+  eventType: string,
+): eventType is SlaWarningEventType {
+  return (SLA_WARNING_EVENT_TYPES as readonly string[]).includes(eventType);
+}
+
+// Sprint W4-Q §2 — the per-company warning thresholds
+// (backend/sla/serializers_thresholds.py).
+//
+// `effective`, `override` and `default` are three separate numbers on
+// purpose. `override === null` means this company stored nothing and is
+// running on the platform default; a stored 0 is a real, legal
+// threshold ("warn me the moment it lands") and must never render the
+// same as "not configured".
+export const SLA_THRESHOLD_UNITS = [
+  "days",
+  "business_hours",
+  "hours",
+] as const;
+export type SlaThresholdUnit = (typeof SLA_THRESHOLD_UNITS)[number];
+
+export interface SlaThresholdRow {
+  field: string;
+  unit: SlaThresholdUnit;
+  effective: number;
+  override: number | null;
+  default: number;
+}
+
+/** P-5 S8.1 — the rings a warning may ALSO go to. */
+export type SlaAlsoNotify =
+  | "assigned_staff"
+  | "responsible_manager"
+  | "company_admins";
+
+export interface SlaWarningChoices {
+  also_notify: SlaAlsoNotify[];
+  extra_email: string;
+  /** S8.2 — the third step; null = off. */
+  final_escalate_days: number | null;
+}
+
+export type SlaWarningKey = "not_started" | "manager_review" | "approval_cutoff";
+
+/** P-5 S8 — the choices beside the numbers, defaults when no row. */
+export interface SlaChoices {
+  count_calendar_days: boolean;
+  weekly_summary_enabled: boolean;
+  warnings: Record<SlaWarningKey, SlaWarningChoices>;
+  also_notify_choices: SlaAlsoNotify[];
+}
+
+export interface SlaCompanyThresholds {
+  company: number;
+  company_name: string;
+  updated_at: string | null;
+  updated_by_name: string | null;
+  is_customized: boolean;
+  thresholds: SlaThresholdRow[];
+  choices: SlaChoices;
+}
+
+export interface SlaBusinessWindow {
+  start: string;
+  end: string;
+  /** Python weekday numbers, Mon=0. Labelled by the frontend so the
+   *  sentence translates. */
+  days: number[];
+  hours_per_day: number;
+}
+
+export interface SlaThresholdListResponse {
+  results: SlaCompanyThresholds[];
+  defaults: Record<string, number>;
+  fields: { field: string; unit: SlaThresholdUnit }[];
+  business_window: SlaBusinessWindow;
+}
+
+
+// Sprint 191 - the two new attachment axes, deliberately independent of
+// each other and of `is_hidden`. `visibility` is the customer wall
+// (INTERNAL = provider side only, CUSTOMER = released to the customer);
+// `phase` is a label and decides nothing. Mirrors
+// tickets.models.AttachmentVisibility / AttachmentPhase.
+export const ATTACHMENT_VISIBILITIES = ["INTERNAL", "CUSTOMER"] as const;
+export type AttachmentVisibility = (typeof ATTACHMENT_VISIBILITIES)[number];
+
+export const ATTACHMENT_PHASES = ["UNSPECIFIED", "BEFORE", "AFTER"] as const;
+export type AttachmentPhase = (typeof ATTACHMENT_PHASES)[number];
+
+// W4-P — tickets.models.UploadVisibilitySource. WHICH rung of the
+// resolution ladder decided a stored attachment's visibility at upload:
+// per-ticket > standing > per-work setting > default. "" is every row
+// written before the column existed and reads "unrecorded", never
+// "default".
+export const UPLOAD_VISIBILITY_SOURCES = [
+  "",
+  "UPLOADER_CHOICE",
+  "CUSTOMER_UPLOAD",
+  "TICKET_GRANT",
+  "STANDING_GRANT",
+  "WORK_SETTING",
+  "DEFAULT_INTERNAL",
+  "MANUAL",
+] as const;
+export type UploadVisibilitySource =
+  (typeof UPLOAD_VISIBILITY_SOURCES)[number];
+
+// W4-P — one scope's answer for one person. `uploads_customer_visible`
+// is a TRI-STATE and the three states are not interchangeable:
+//   true  = a grant     — this person's uploads land customer-visible
+//   false = a refusal   — they stay internal, beating anything less
+//                         specific
+//   null  = no decision — the next rung down answers
+export interface UploadVisibilityGrantState {
+  user_id: number;
+  ticket_id: number | null;
+  uploads_customer_visible: boolean | null;
+  reason: string;
+  granted_by_id: number | null;
+  updated_at: string | null;
+}
+
+// W4-P — the per-ticket read (`GET /tickets/<id>/upload-visibility/`),
+// one entry per DISTINCT person holding a slot on the ticket. Carries
+// every rung so the Assignment card can state which one is deciding.
+export interface TicketUploadVisibilityPerson
+  extends UploadVisibilityGrantState {
+  user_email: string;
+  user_full_name: string;
+  standing_uploads_customer_visible: boolean | null;
+  effective_visibility: AttachmentVisibility;
+  effective_source: UploadVisibilitySource;
+}
+
+export interface TicketUploadVisibility {
+  ticket_id: number;
+  staff_uploads_customer_visible: boolean;
+  people: TicketUploadVisibilityPerson[];
+}
 
 export interface TicketAttachment {
   id: number;
@@ -610,6 +1103,10 @@ export interface TicketAttachment {
   mime_type: string;
   file_size: number;
   is_hidden: boolean;
+  visibility: AttachmentVisibility;
+  phase: AttachmentPhase;
+  // W4-P — read-only record of WHICH rung produced `visibility`.
+  visibility_source: UploadVisibilitySource;
   created_at: string;
 }
 
@@ -768,6 +1265,8 @@ export interface BuildingAdmin {
   customer_names?: { names: string[]; total: number };
   created_at: string;
   updated_at: string;
+  /** P-5 S7 — the contracts covering this building (detail only). */
+  contracts?: BuildingContractRef[] | null;
 }
 
 /**
@@ -1488,15 +1987,20 @@ export type ExtraWorkUnitType =
   | "ITEM"
   | "OTHER";
 
-/** Sprint 180 §3 — WHO the finished work is charged to. Exactly two
- *  values, and the pair is the feature: the building (the answer 99% of
- *  the time, and the default) or the customer organisation.
+/** Sprint 180 §3 — WHICH INVOICE this work's amount lands on: one
+ *  addressed to the building, or one addressed to the customer
+ *  organisation. It moves the line between documents and touches no
+ *  amount, no VAT and no hour — `invoicing/billing_target.py` is the
+ *  only reader.
  *
- *  NOT the customer's `invoice_granularity_default`
- *  (CUSTOMER / PER_BUILDING / PER_BUILDING_DEPARTMENT_WORK_TYPE), which
- *  decides how many invoice DOCUMENTS a month's work is cut into. That
- *  one is a property of the customer's paperwork; this one is a
- *  property of the job. Mirrors `extra_work.models.ExtraWorkBilledTo`. */
+ *  NULL is the third state and the normal one (Sprint 182 §6, migration
+ *  0032 nulled every existing row): "this job has no opinion, follow the
+ *  customer's own `invoice_billing_target`". A non-null value overrules
+ *  that customer setting for this one job, which is why it is never a
+ *  default — writing BUILDING into a row nobody touched silently routes
+ *  a customer-level customer per building.
+ *
+ *  Mirrors `extra_work.models.ExtraWorkBilledTo`. */
 export type ExtraWorkBilledTo = "BUILDING" | "CUSTOMER";
 
 /** Sprint 180 §2 — an operational ticket born from an Extra Work.
@@ -1510,6 +2014,14 @@ export interface ExtraWorkSpawnedTicket {
   id: number;
   ticket_no: string | null;
   status: TicketStatus;
+  /** W12 §2 — the ticket's OWN scheduled start, echoed read-only so the
+   *  Extra Work screen can show when a ticket kept a date of its own
+   *  instead of the one the plan set. The ticket still owns it. */
+  scheduled_start_at: string | null;
+  /** RESCHEDULED means a person moved this ticket by hand, which is
+   *  exactly the case `apply_planned_date_to_tickets` refuses to
+   *  overwrite. */
+  schedule_status: "UNSCHEDULED" | "SCHEDULED" | "RESCHEDULED";
 }
 
 // List shape (lean — no description / notes / line items).
@@ -1548,6 +2060,7 @@ export interface ExtraWorkRequestList {
   category: ExtraWorkCategory;
   urgency: ExtraWorkUrgency;
   status: ExtraWorkStatus;
+  display_phase: ExtraWorkDisplayPhase;
   subtotal_amount: string;
   vat_amount: string;
   total_amount: string;
@@ -1584,14 +2097,63 @@ export interface ExtraWorkRequestList {
   // extra work turned into scheduled work.
   has_operational_ticket: boolean;
   spawned_tickets: ExtraWorkSpawnedTicket[];
-  // Sprint 180 §3 — who the finished work is charged to. Not
-  // provider-only: the customer picks it on their own create form.
-  billed_to: ExtraWorkBilledTo;
+  // W5-B — the day-by-day series this row belongs to, or NULL for an
+  // ordinary standalone work. Null is by far the common case and is
+  // what keeps a normal row rendering exactly as it did before series
+  // existed: the list reads a null group as "not a series" and changes
+  // nothing about the row.
+  group: ExtraWorkGroupSummary | null;
+  // Sprint 180 §3 — which invoice this work lands on. Not provider-only:
+  // the customer picks it on their own create form. NULL — the state
+  // nearly every row is in — means "follow the customer's setting", and
+  // is a different answer from BUILDING, not a missing one.
+  billed_to: ExtraWorkBilledTo | null;
   // M4 — billing month / invoice run. Provider-only (the backend redacts
   // these for CUSTOMER_USER), hence optional.
   invoice_date?: string | null;
   is_invoiced?: boolean;
   invoiced_at?: string | null;
+  // P-9 B — the customer-facing intent, which the server has sent on
+  // every list row since Sprint 2A. Optional here only because the
+  // detail shape below extends this one and declares it optional; null
+  // on rows older than the field. The To price tab splits on it.
+  request_intent?: ExtraWorkRequestIntent | null;
+  // P-9 B — the provider's committed day and the budget, which the list
+  // serializer has carried since Sprint 182 / W2-D (the Planned column
+  // reads them). Optional: the detail shape declares them so, and
+  // `budget_hours` is provider-only (redacted for CUSTOMER_USER).
+  provider_planned_date?: string | null;
+  provider_planned_end_date?: string | null;
+  budget_hours?: string | null;
+  // P-9 B — LIST-ONLY facts the four-tab list prints per row, computed
+  // once per page on the server (see `ExtraWorkRequestListSerializer`).
+  // Optional because the detail shape extends this type and does not
+  // carry them; a reader prints "—" for an absent one.
+  /** The cart lines: how many, and the first few names. */
+  line_summary?: { count: number; names: string[] };
+  /** Sum of the AGREED-price lines, excl. VAT; null when every line is
+   *  custom (nothing to estimate from). */
+  contract_estimate_amount?: string | null;
+  /** Everyone assigned (managers first), by name. Provider-only. */
+  people_names?: string[];
+  /** The customer's own words when they declined the price; null when
+   *  the request was not declined. */
+  rejection_note?: string | null;
+  /** When the work was finished (the COMPLETED moment); null before. */
+  completed_at?: string | null;
+  /** The live invoice this work is on, or null. Provider-only. */
+  invoice_ref?: {
+    id: number;
+    number: string | null;
+    status: "DRAFT" | "ISSUED" | "SENT";
+    sent_at: string | null;
+  } | null;
+  /** Who the price was sent to: the requester when a customer asked,
+   *  else the customer's contact address. */
+  contact_name?: string;
+  /** The customer's billing day: a day of the month, "LAST_OF_MONTH",
+   *  or null when no schedule is set. Provider-only. */
+  customer_invoice_day?: number | "LAST_OF_MONTH" | null;
 }
 
 // Provider-side pricing line item — full shape with internal note.
@@ -1624,6 +2186,9 @@ export interface ExtraWorkPricingLineItem {
   total: string;
   customer_visible_note: string;
   internal_cost_note?: string;
+  // P-13 I — actual hours on an HOURS-unit legacy line (read-only;
+  // written via the actual-hours endpoint). NULL = bill `quantity`.
+  actual_hours: string | null;
   // Backend serializer emits these on every line shape. For free-form
   // pricing lines (no service FK by construction) `price_source` is
   // always "CUSTOM" and the contract fields are always null. Quoted by
@@ -1735,6 +2300,19 @@ export interface ProposalLine {
 // internal_cost_note, override_*) are absent on customer responses.
 export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   description: string;
+  /** P-1 — who opened it (a name), and whether the committed window is
+   *  a person's plan and whose. Optional: an older cached payload omits
+   *  them. */
+  created_by_name?: string;
+  has_real_plan?: boolean;
+  planned_by_name?: string | null;
+  planned_at?: string | null;
+  /** FE-3 (§D.11 G3) — signed whole days to the deadline (left when
+   *  positive, over when negative, today at zero), computed server-side
+   *  with the same rule as `is_overdue`. Null without a deadline or once
+   *  the work is finished / cancelled / rejected. Optional: an older
+   *  cached payload omits it, and the chip simply does not render. */
+  days_until_due?: number | null;
   category_other_text: string;
   preferred_date: string | null;
   customer_visible_note: string;
@@ -1757,6 +2335,9 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   is_invoiced: boolean;
   invoiced_at: string | null;
   pricing_line_items: ExtraWorkPricingLineItem[];
+  // P-13 B — `invoice_ref` (inherited from the list shape, P-9) is
+  // served on the DETAIL as well now; the Money tab's third block
+  // renders "On draft #17" / "Sent on invoice 2026-0003" from it.
   // Sprint 28 Batch 6 — cart line items + routing decision.
   // `line_items` is always present on responses (empty array for
   // legacy single-line requests that pre-date the cart shape).
@@ -1783,6 +2364,308 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   // the wire). Detail only — the list serializer omits it to avoid an N+1.
   labels_locked?: boolean;
   labels_locked_invoice?: string | null;
+
+  // ---- W2-D planning layer, consumed by W3-F -------------------------
+  // PROVIDER-ONLY on the wire: the backend strips all four for a
+  // CUSTOMER_USER (`ExtraWorkRequestDetailSerializer._PROVIDER_ONLY_FIELDS`
+  // — "a customer must never see the budget, who is doing what for how
+  // long, or whether we are over our own estimate"). Optional here for
+  // exactly that reason: absent is a real, expected shape, not a legacy
+  // one, and the UI must key on the role check rather than on truthiness.
+  /** Decimal string, e.g. "8.00". The planning number. NEVER a price. */
+  budget_hours?: string | null;
+  planned_hours?: ExtraWorkPlannedHoursRow[];
+  /** Decimal string — the sum of `planned_hours`, computed server-side. */
+  planned_hours_total?: string;
+  /** Present and non-null ONLY when the distribution exceeds the budget.
+   *  A warning the read surface carries so the manager approving the
+   *  work sees the overrun on the screen they approve from. */
+  planned_hours_overrun?: ExtraWorkHoursOverrun | null;
+  /** The two completion requirements, set at plan time, both default
+   *  off. NOT provider-only — they are a promise about the evidence the
+   *  customer will get, not a number about our own people. */
+  file_upload_required?: boolean;
+  completion_notes_required?: boolean;
+  /** W13 — the CUSTOMER's own asks, set when they raised the request.
+   *  A second origin for the same requirement, deliberately kept apart
+   *  from the provider pair above so neither side erases the other's.
+   *  The completion gate requires whatever either side asked for. */
+  customer_requires_photo?: boolean;
+  customer_requires_note?: boolean;
+  /** The window WE committed to. Separate stored values from the
+   *  customer's `preferred_date` / `planned_end_date` / `deadline`, and
+   *  the plan endpoint never touches those. */
+  provider_planned_date?: string | null;
+  provider_planned_end_date?: string | null;
+}
+
+/** W2-D — one person's share of the budget.
+ *
+ *  `is_assigned` false means the person was planned hours and has since
+ *  been taken off the work. The row STAYS in the list and stays in the
+ *  total, deliberately: the reference system builds its grid from the
+ *  assignment list instead, so hours belonging to a removed worker
+ *  vanish from the screen while still counting in every total, and the
+ *  screen and the total disagree with nothing on screen to explain it. */
+export interface ExtraWorkPlannedHoursRow {
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  user_role: string;
+  /** W6-H — the day these hours are planned for, or NULL for "planned,
+   *  day not decided". NULL is a supported state, not a missing value:
+   *  every row written before W6-H has it, and a job whose window is
+   *  not set yet still plans hours. Render it as its own state, never
+   *  as a blank cell that reads like a gap. */
+  date: string | null;
+  /** W7 — WHICH KIND OF HOUR, from the `timesheets.HourType` catalog the
+   *  ACTUALS already use. NULL means ORDINARY hours: every row written
+   *  before W7 has it, and it is the right answer for an operator who
+   *  does not split the day. The name rides along so a grid can label
+   *  the row without a second request; it is null exactly when the id
+   *  is, and the CLIENT owns the wording for that case. */
+  hour_type: number | null;
+  hour_type_name: string | null;
+  /** Decimal string, e.g. "4.00". Zero is legal and means "on the crew,
+   *  no hours budgeted yet" — dropping the row to say so would lose the
+   *  fact that they are on the job. */
+  hours: string;
+  is_assigned: boolean;
+  set_at: string;
+}
+
+/** W2-D — the overrun body, from `planning.hours_overrun`. Every figure
+ *  is a decimal STRING of HOURS. Nothing here is money and nothing here
+ *  goes near `rowAmounts()`. */
+export interface ExtraWorkHoursOverrun {
+  code: string;
+  budget_hours: string;
+  distributed_hours: string;
+  over_by: string;
+}
+
+/** The plan payload, for `POST /extra-work/<id>/plan/` and
+ *  `POST /extra-work/bulk-plan/`.
+ *
+ *  EVERY FIELD IS OPTIONAL AND ABSENCE MEANS "LEAVE IT ALONE" — the
+ *  backend reads this payload by KEY PRESENCE, including the two
+ *  booleans. That is why the client must OMIT a field it did not
+ *  collect rather than send a default: sending `file_upload_required:
+ *  false` because a dialog did not ask about it is precisely the
+ *  reference system's defect, where 0 of 78 live records has either
+ *  flag set because every write path silently discarded them.
+ *
+ *  BOTH ENDPOINTS ARE PINNED TO `JSONParser` AND ANSWER 415 TO FORM
+ *  DATA, on purpose: DRF reads an absent boolean out of form input as
+ *  `false`, which would wipe both flags on every work in a bulk plan.
+ *  axios serialises a plain object as JSON, which is what these calls
+ *  send. */
+export interface ExtraWorkPlanPayload {
+  budget_hours?: string | null;
+  provider_planned_date?: string | null;
+  provider_planned_end_date?: string | null;
+  /** W6-H — one cell of the day grid. `date` omitted or null means
+   *  "planned, day not decided", which is what every pre-W6-H client
+   *  keeps sending and what the bulk table still sends. */
+  planned_hours?: {
+    user: number;
+    date?: string | null;
+    /** W7 — omitted or null means ORDINARY hours, which is what every
+     *  pre-W7 client keeps sending. */
+    hour_type?: number | null;
+    hours: string;
+  }[];
+  file_upload_required?: boolean;
+  completion_notes_required?: boolean;
+  /** P-8R A2 — absent means DO NOT START. A plan is a plan; only an
+   *  explicit `true` starts the work. Every caller sends the key. */
+  start?: boolean;
+}
+
+/** What a plan write reports back, on the `plan` key of the detail
+ *  response. `warnings` carries the hours overrun; a `started` of false
+ *  with a `start_skipped` code is a NORMAL outcome (the work already has
+ *  an operational ticket driving its status), not a failure. */
+export interface ExtraWorkPlanResult {
+  warnings: ExtraWorkHoursOverrun[];
+  started: boolean;
+  start_skipped: string | null;
+  tickets_moved: number[];
+  tickets_kept_own_date: number[];
+}
+
+/** W5-B — when a work happens relative to the handover ("oplevering").
+ *
+ *  NULL is a real value and means NOBODY WAS ASKED — which is the state
+ *  of every ordinary ad-hoc work, and a different fact from "at
+ *  handover". The reference system cannot express the difference: its
+ *  server does `match($entry['condition'] ?? 'at')`, so an unanswered
+ *  slot and an explicit one are the same five characters afterwards.
+ *
+ *  A REAL COLUMN here. Over there the value is never persisted at all —
+ *  it is baked into the title string and every reader recovers it with
+ *  a regex, which is why two incompatible suffix formats now coexist in
+ *  their data and the parser understands only one of them. Never derive
+ *  this from a title. */
+export type ExtraWorkCondition =
+  | "AT_HANDOVER"
+  | "BEFORE_HANDOVER"
+  | "AFTER_HANDOVER";
+
+/** W5-B — one picked day/time/condition on the multi-date create form.
+ *  `time` and `condition` are both optional and both meaningful when
+ *  absent: no time is not midnight, no condition is not "at handover". */
+export interface ExtraWorkSlot {
+  /** ISO date, `YYYY-MM-DD`. */
+  date: string;
+  /** `HH:MM`, or omitted. */
+  time?: string | null;
+  condition?: ExtraWorkCondition | null;
+}
+
+/** W5-B — the series summary carried on every list row.
+ *
+ *  WHOLE-SERIES TRUTH, not page truth: `member_count` and
+ *  `status_counts` describe every member, including ones on another
+ *  page of results. That is what lets the list fold a series into one
+ *  row without the server inventing a header record — the reference
+ *  system marks `group_sequence == 1` as a header and branches its
+ *  status filter on it, which is why its list totals and its own
+ *  statistics endpoint disagree. */
+export interface ExtraWorkGroupSummary {
+  id: number;
+  standard_title: string;
+  member_count: number;
+  status_counts: { status: ExtraWorkStatus; count: number }[];
+}
+
+/** W5-B — one member, as the group editor reads it. */
+export interface ExtraWorkGroupMember {
+  extra_work: number;
+  title: string;
+  status: ExtraWorkStatus;
+  building_name: string;
+  preferred_date: string | null;
+  /** `HH:MM:SS` or null. Null is "no time given", not midnight. */
+  scheduled_time: string | null;
+  condition: ExtraWorkCondition | null;
+  group_sequence: number | null;
+  provider_planned_date: string | null;
+  /** Decimal string, or null for "nobody has budgeted this". */
+  budget_hours: string | null;
+}
+
+export interface ExtraWorkGroupDetail {
+  group: ExtraWorkGroupSummary & { customer: number; building: number };
+  members: ExtraWorkGroupMember[];
+}
+
+/** W5-B — one row of a group-editor save.
+ *
+ *  KEY PRESENCE, like the plan payload: absent leaves the value alone,
+ *  present-and-null clears it. Only the three things that are neither a
+ *  workflow transition nor a planning value live here — date, budget
+ *  hours and assigned people go through `bulk-plan` and `bulk-assign`,
+ *  which already take per-work values. There is no third planning
+ *  path. */
+export interface ExtraWorkGroupMemberEdit {
+  extra_work: number;
+  title?: string;
+  scheduled_time?: string | null;
+  condition?: ExtraWorkCondition | null;
+  /** Recompose the title from this member's COLUMNS after the edits
+   *  above land. One direction only; the old title is never read. */
+  regenerate_title?: boolean;
+}
+
+/** W4-O — ONE work's own plan inside a bulk call.
+ *
+ *  A row is an `ExtraWorkPlanPayload` with an id bolted on and nothing
+ *  else, mirroring the backend's `_BulkPlanItemSerializer`, which is
+ *  `ExtraWorkPlanSerializer` plus `request`. Extending the payload type
+ *  rather than restating its fields is what stops "what may a row set"
+ *  from drifting away from "what may a plan set". */
+export interface ExtraWorkBulkPlanItem extends ExtraWorkPlanPayload {
+  request: number;
+}
+
+/** W4-O — the bulk-plan body, in either of its two spellings.
+ *
+ *  A UNION, not an object with two optional halves, because the server
+ *  refuses a mixture outright: `items` beside a shared field would need
+ *  a precedence rule ("does the row's budget beat the shared one?"),
+ *  and a precedence rule is a thing an operator has to learn and a
+ *  client can get wrong in silence. The union makes the mixture
+ *  unspellable here rather than a 400 discovered at runtime.
+ *
+ *  The shared spelling is not a second endpoint: the server normalises
+ *  it into the per-work list it is shorthand for. It stays because
+ *  `bulk-dates` and `bulk-assign` speak it too, and because "the same
+ *  window on all six" should be sayable once rather than copied six
+ *  times — the fifth copy being subtly different is the data-entry
+ *  failure the endpoint exists to prevent. */
+export type ExtraWorkBulkPlanPayload =
+  | ({ requests: number[] } & ExtraWorkPlanPayload)
+  | { items: ExtraWorkBulkPlanItem[] };
+
+/** W4-O — one person currently assigned to a work, as the bulk planning
+ *  context reports them. Distinct from `ExtraWorkPlannedHoursRow`: this
+ *  is who is ON the job, that is who has HOURS on it, and the two lists
+ *  deliberately do not have to match (see `is_assigned` there). */
+export interface ExtraWorkBulkPlanCrewMember {
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  user_role: string;
+  assignment_role: string;
+}
+
+/** W4-O — what one selected work plans RIGHT NOW.
+ *
+ *  A per-work table has to be seeded or every row opens blank and
+ *  saving looks like it wiped what was there. The list payload carries
+ *  none of these fields (they are provider-only detail fields) and none
+ *  of the crew, so this is the read that fills the table — the whole
+ *  selection in one request rather than one detail fetch per row. */
+export interface ExtraWorkBulkPlanContextRow {
+  extra_work: number;
+  title: string;
+  building_name: string;
+  status: ExtraWorkStatus;
+  /** Decimal string, or null for "nobody has budgeted this yet". Those
+   *  are different facts from "0.00", and the dialog must not render
+   *  them the same. */
+  budget_hours: string | null;
+  provider_planned_date: string | null;
+  provider_planned_end_date: string | null;
+  /** What the CUSTOMER asked for. Read-only context: a plan never
+   *  writes these, and setting our window without seeing the deadline
+   *  it is measured against is planning blind. */
+  preferred_date: string | null;
+  deadline: string | null;
+  file_upload_required: boolean;
+  completion_notes_required: boolean;
+  crew: ExtraWorkBulkPlanCrewMember[];
+  planned_hours: ExtraWorkPlannedHoursRow[];
+  planned_hours_total: string;
+  planned_hours_overrun: ExtraWorkHoursOverrun | null;
+}
+
+export interface ExtraWorkBulkPlanContext {
+  works: ExtraWorkBulkPlanContextRow[];
+}
+
+/** The bulk-plan reply. One entry per work, in id order. */
+export interface ExtraWorkBulkPlanResult {
+  updated: number;
+  results: {
+    extra_work: number;
+    warnings: ExtraWorkHoursOverrun[];
+    started: boolean;
+    start_skipped: string | null;
+  }[];
+  tickets_moved: number[];
+  tickets_kept_own_date: number[];
 }
 
 // Mirrors backend `extra_work/serializers.py::ExtraWorkRequestDetailSerializer.get_actions`.
@@ -1879,11 +2762,10 @@ export interface ExtraWorkRequestCartCreatePayload {
   // (`derive_default_intent`) when omitted, so older callers and the
   // graceful-degradation path (preview unavailable) stay valid.
   request_intent?: ExtraWorkRequestIntent;
-  // Sprint 180 §3 — who the finished work is charged to. Optional on
-  // the wire: the backend defaults to BUILDING, so every existing
-  // caller keeps working and takes the answer that is right 99% of the
-  // time.
-  billed_to?: ExtraWorkBilledTo;
+  // Sprint 180 §3 — which invoice this work lands on. Omitted and null
+  // mean the same thing to the server (Sprint 182 §6 removed the
+  // BUILDING default outright): follow the customer's setting.
+  billed_to?: ExtraWorkBilledTo | null;
   // Each line is either a catalog service (`service`) OR a free-text
   // custom line (`custom_description`) — XOR, the create form guarantees
   // exactly one is set. A custom line carries no `service`; the backend
@@ -1901,7 +2783,11 @@ export interface ExtraWorkRequestCartCreatePayload {
     custom_price?: number;
     // Decimal as string per DRF convention.
     quantity: string;
-    requested_date: string;
+    // W-EW1 §2 — REMOVED from the wire on purpose. The server stamps
+    // every line's `requested_date` from the request-level
+    // `preferred_date`, and a line that still carries one is refused
+    // with `line_requested_date_not_accepted`. The column and the READ
+    // type (`ExtraWorkRequestItem.requested_date`) are unchanged.
     customer_note?: string;
   }>;
 }
@@ -1990,7 +2876,10 @@ export interface ExtraWorkPreviewLinePayload {
   custom_price?: number | null;
   // Decimal as string per DRF convention.
   quantity: string;
-  requested_date: string;
+  // W-EW1 §2 — optional. The preview takes the cart's one date from
+  // the payload-level `preferred_date` and applies it to every line,
+  // so the previewed amount is priced on the same day create stores.
+  requested_date?: string;
   customer_note?: string;
 }
 
@@ -2001,6 +2890,8 @@ export interface ExtraWorkPreviewPayload {
   // Optional candidate intent. When present the response carries
   // `requested_intent_allowed` (+ `requested_intent_error` on rejection).
   request_intent?: ExtraWorkRequestIntent | null;
+  // W-EW1 §2 — the cart's one date, mirroring the create payload.
+  preferred_date?: string | null;
   line_items: ExtraWorkPreviewLinePayload[];
 }
 
@@ -2540,6 +3431,11 @@ export interface CustomerServicePrice {
   folder: number | null;
   service: number;
   service_name: string;
+  /** P-4 (Part A) — the unit the service is priced per, read off the
+   *  catalog row (`Service.unit_type`); `service_unit_label` is the
+   *  operator's own unit word for OTHER ("pallet"), blank otherwise. */
+  service_unit_type: ServiceUnitType;
+  service_unit_label: string;
   unit_price: string;
   vat_pct: string;
   valid_from: string;
@@ -2748,6 +3644,10 @@ export interface InvoiceLine {
   description: string;
   // Source Extra Work id (NULL for a hand-added line).
   extra_work: number | null;
+  /** P-5 S7 — the meerwerk and building behind an extra-work line. */
+  extra_work_title?: string | null;
+  building?: number | null;
+  building_name?: string | null;
   quantity: string;
   unit_price: string;
   vat_pct: string;
@@ -2759,6 +3659,14 @@ export interface InvoiceLine {
   performed_on: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface InvoiceContractRef {
+  id: number;
+  contract_no: string;
+  contract_type_name: string | null;
+  period_start: string;
+  period_end: string;
 }
 
 export interface Invoice {
@@ -2776,6 +3684,8 @@ export interface Invoice {
   customer_name: string;
   building: number | null;
   building_name: string | null;
+  /** P-5 S7 — the contract period this invoice was generated for. */
+  contract?: InvoiceContractRef | null;
   // Sprint 132 — set only when generated at PER_BUILDING_DEPARTMENT_
   // WORK_TYPE granularity; null on every other invoice (mirrors building /
   // building_name's own null-when-unset shape). Compose the display label

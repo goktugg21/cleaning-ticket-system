@@ -1,20 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Plus, RefreshCw } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { FileSignature, Plus, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { EmptyState } from "../../../components/EmptyState";
 import { useTranslation } from "react-i18next";
 
 import { listAllCompanies } from "../../../api/admin";
 import { getApiError } from "../../../api/client";
-import {
-  deleteContract,
-  getContractStats,
-  listContracts,
-} from "../../../api/contracts";
+import { CONTRACT_STATUS_TAG } from "../../../lib/contractStatusTag";
+import { deleteContract, getContractStats, listContracts } from "../../../api/contracts";
 import type {
   Contract,
+  ContractBuildingRef,
   ContractFilters,
   ContractStats,
-  ContractStatus,
 } from "../../../api/contracts.types";
 import type { CompanyAdmin } from "../../../api/types";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
@@ -24,70 +22,75 @@ import { MultiSelectToolbar } from "../../../components/MultiSelectToolbar";
 import { SortableHeader } from "../../../components/SortableHeader";
 import type { SortState } from "../../../components/SortableHeader";
 import { useAuth } from "../../../auth/AuthContext";
-import { canManageContracts } from "../../../auth/permissions";
+import {
+  canAccessAdminArea,
+  canManageContracts,
+  canReadCustomerArea,
+} from "../../../auth/permissions";
 import { useEditMode } from "../../../lib/useEditMode";
 import { ContractFormDialog } from "./ContractFormDialog";
 import { ContractTypesTab } from "./ContractTypesTab";
+import { contractSentence } from "../../../components/contracts/contractSentence";
 import { contractTypeLabel } from "../../../lib/contractTypeLabel";
+import { formatDate, formatMoney } from "./contractTables";
+import { CONTRACT_ROAD } from "../../../lib/contractRoad";
+import type { ContractRoadKey } from "../../../lib/contractRoad";
+import { RoadTabs, TeachHead } from "../../../components/guide/RoadTabs";
+import { StartHere } from "../../../components/guide/StartHere";
+import { ClickableRow } from "../../../components/ClickableRow";
+import { HowThisWorks } from "../../../components/guide/HowThisWorks";
+import { WhatHappens } from "../../../components/guide/WhatHappens";
+import { TeachEmpty } from "../../../components/guide/TeachEmpty";
+import { CompanyScopeSelect } from "../../../components/guide/CompanyScopeSelect";
 import {
-  MAX_PROJECT_COLUMNS,
-  buildProjectColumns,
-  formatMoney,
-  formatNumber,
-  groupContracts,
-  perPeriodValue,
-  withGroupTotals,
-} from "./contractTables";
-import type {
-  ContractGroupRow,
-  GroupBy,
-  Measure,
-  Timeframe,
-} from "./contractTables";
+  readScopeCompany,
+  rememberScopeCompany,
+} from "../../../lib/useCompanyScope";
 
 const DEBOUNCE_MS = 300;
 
-type SortField =
-  | "contract_no"
-  | "customer"
-  | "type"
-  | "start_date"
-  | "end_date"
-  | "status";
+type SortField = "customer" | "start_date" | "status";
 type SortDirection = "asc" | "desc";
 
-const STATUS_OPTIONS: ContractStatus[] = [
-  "ACTIVE",
-  "DRAFT",
-  "EXPIRED",
-  "CANCELLED",
-];
+type ContractListView = ContractRoadKey | "cancelled";
+
+/** What each tab asks the SERVER for. */
+const ROAD_QUERY: Record<
+  ContractListView,
+  { status: NonNullable<ContractFilters["status"]>; ending?: "exclude" }
+> = {
+  draft: { status: "DRAFT" },
+  active: { status: "ACTIVE", ending: "exclude" },
+  ending: { status: "ENDING" },
+  ended: { status: "EXPIRED" },
+  cancelled: { status: "CANCELLED" },
+};
+
+function parseListView(raw: string | null): ContractListView {
+  if (raw === "cancelled") return "cancelled";
+  return (CONTRACT_ROAD as readonly string[]).includes(raw ?? "")
+    ? (raw as ContractRoadKey)
+    : "active";
+}
 
 /**
- * Sprint 160 §3 — the contracts list.
+ * Sprint 160 §3 / P-11 C — the contracts list.
  *
  * The shape Sprints 154/155 settled for the other admin lists: dense
  * sortable table, `MultiSelectToolbar` behind the `useEditMode` gate,
  * and the parallel `.admin-card-list` for phone width kept in step with
  * the table rather than being a second, drifting layout.
  *
- * Three things here are specific to contracts and worth reading before
- * changing:
- *
- *  1. **Three views, ONE fetcher.** List / Customer Summary / Building
- *     Summary are three GROUPINGS of the same fetched page, derived in
- *     `contractTables.groupContracts`. Three fetchers would be three
- *     things to keep in step, and the summaries would silently disagree
- *     with the list the moment a filter changed on one and not the
- *     others.
- *  2. **The per-project columns are dynamic and BOUNDED.** They come
- *     from the contract lines, so the column set is per tenant. A table
- *     that grows a column per project looks fine on four projects and
- *     breaks on forty, so the top N by value are shown and the rest
- *     fold into one "Other" column that SAYS how many it swallowed
- *     (the Sprint 152.2 rule).
- *  3. **The stat tiles read the same filters as the table**, so they
- *     describe what is on screen rather than the whole tenant.
+ * P-11 C is the clarity pass (the functional freeze holds): the page
+ * answers ONE question — "what each customer pays for on a fixed basis,
+ * per building, and for how long" — with five fixed columns (Customer ·
+ * Locations · Period · Monthly amount · Status) and nothing else. The
+ * seven stat tiles are gone (Addendum D §D.22: never a KPI card row),
+ * the three-view grouping and the Prices/Hours + Per maand/Per jaar
+ * selects are gone with them, and with them went the dynamic per-project
+ * columns, the "Other" fold and the grand-total row. The filters stay
+ * folded behind the one Filter button; edit mode keeps its own slim row
+ * above the table so no capability is lost.
  */
 export function ContractsAdminPage() {
   const navigate = useNavigate();
@@ -96,9 +99,14 @@ export function ContractsAdminPage() {
   // The shared predicate, not an inline role list: a second copy of
   // "who may change commercial terms" is the drift CLAUDE.md warns about.
   const canManage = canManageContracts(me?.role);
+  // P-8R F — the connected-facts links on a row point at pages with their
+  // own guards: a building detail is admin-only, a customer detail admits
+  // a BUILDING_MANAGER through its own variant. A link a role cannot
+  // follow is a dead door, so each renders as a plain name instead.
+  const canOpenBuilding = canAccessAdminArea(me?.role);
+  const canOpenCustomer = canReadCustomerArea(me?.role);
 
   const [contracts, setContracts] = useState<Contract[]>([]);
-  const [stats, setStats] = useState<ContractStats | null>(null);
   const [count, setCount] = useState(0);
   const [next, setNext] = useState<string | null>(null);
   const [previous, setPrevious] = useState<string | null>(null);
@@ -109,7 +117,21 @@ export function ContractsAdminPage() {
   const [searchInput, setSearchInput] = useState("");
   const [searchActive, setSearchActive] = useState("");
   const [pageTab, setPageTab] = useState<"list" | "types">("list");
-  const [statusFilter, setStatusFilter] = useState<ContractStatus | "">("");
+  // P-12 C1 — the road tab lives in the URL, so a reload and Back land
+  // where the person was (§D.22 rule 3).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const listView = parseListView(searchParams.get("tab"));
+  const setListView = (next: ContractListView) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === "active") params.delete("tab");
+    else params.set("tab", next);
+    setSearchParams(params, { replace: true });
+    setPage(1);
+  };
+  // The guidance numbers: counts and money per road step, and the
+  // Start-here facts. Company-scoped, deliberately NOT search-scoped —
+  // the tabs describe the road, not the current narrowing.
+  const [stats, setStats] = useState<ContractStats | null>(null);
   // Sprint 187 §6c — WHICH provider company. `company_name` has been
   // in every row's JSON and `?company=` accepted by the endpoint
   // since contracts shipped, so this is frontend-only. The pattern
@@ -118,7 +140,6 @@ export function ContractsAdminPage() {
   // disabled state rather than storing it.
   const [companyFilter, setCompanyFilter] = useState<number | "">("");
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
-  const [companiesLoaded, setCompaniesLoaded] = useState(false);
   const [customerFilter, setCustomerFilter] = useState<number | "">("");
   const [buildingFilter, setBuildingFilter] = useState<number | "">("");
   const [typeFilter, setTypeFilter] = useState<number | "">("");
@@ -126,15 +147,6 @@ export function ContractsAdminPage() {
   const [sortField, setSortField] = useState<SortField>("start_date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
-  const [groupBy, setGroupBy] = useState<GroupBy>("none");
-  const [measure, setMeasure] = useState<Measure>("prices");
-  const [timeframe, setTimeframe] = useState<Timeframe>("monthly");
-
-  /** Sprint 165 §4 — which summary groups are COLLAPSED. Collapsed
-   *  rather than expanded is the stored state, so the default (all
-   *  open) needs no seeding when the grouping changes and a group that
-   *  appears later is not silently hidden. */
-  const [collapsed, setCollapsed] = useState<string[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   // Bumped by Refresh and after a mutation. It is part of the request
@@ -143,7 +155,12 @@ export function ContractsAdminPage() {
   const [reloadToken, setReloadToken] = useState(0);
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
 
-  const editMode = useEditMode<number>(contracts.map((row) => row.id));
+  // P-15 §1.2 — a money-bearing contract (it has invoices) cannot be
+  // deleted from the list at all: its row is not selectable, and the
+  // checkbox says why. The server refuses too (`contract_has_invoices`).
+  const editMode = useEditMode<number>(
+    contracts.filter((row) => !row.has_invoices).map((row) => row.id),
+  );
 
   // The search box debounces into `searchActive`; the fetch depends on
   // the debounced value only, so a keystroke does not fire a request.
@@ -165,26 +182,33 @@ export function ContractsAdminPage() {
         if (cancelled) return;
         setCompanies(rows);
         // Auto-select for a COMPANY_ADMIN with exactly one company in
-        // scope: the filter is then a fact, not a question.
-        if (rows.length === 1) setCompanyFilter(rows[0].id);
+        // scope: the filter is then a fact, not a question. P-12
+        // §D.24.2: with more, the session's shared Finance-pages
+        // choice — else the lowest id — is the working company.
+        if (rows.length === 1) {
+          setCompanyFilter(rows[0].id);
+        } else if (rows.length > 1) {
+          const stored = readScopeCompany();
+          const chosen =
+            stored != null && rows.some((row) => row.id === stored)
+              ? stored
+              : [...rows].sort((a, b) => a.id - b.id)[0].id;
+          setCompanyFilter((current) => (current === "" ? chosen : current));
+        }
       })
       .catch(() => {
         if (!cancelled) setCompanies([]);
       })
-      .finally(() => {
-        if (!cancelled) setCompaniesLoaded(true);
-      });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const companyDropdownDisabled = companiesLoaded && companies.length <= 1;
-
   const filters: ContractFilters = useMemo(
     () => ({
       search: searchActive || undefined,
-      status: statusFilter || undefined,
+      status: ROAD_QUERY[listView].status,
+      ending: ROAD_QUERY[listView].ending,
       company: companyFilter || undefined,
       customer: customerFilter || undefined,
       building: buildingFilter || undefined,
@@ -194,7 +218,7 @@ export function ContractsAdminPage() {
     }),
     [
       searchActive,
-      statusFilter,
+      listView,
       companyFilter,
       customerFilter,
       buildingFilter,
@@ -214,20 +238,17 @@ export function ContractsAdminPage() {
   const requestKey = `${JSON.stringify(filters)}:${reloadToken}`;
   const loading = loadedKey !== requestKey;
 
+  // P-11 C — ONE fetch: the list page. The `/contracts/stats/` call fed
+  // the seven tiles only; it went with them.
   useEffect(() => {
     let cancelled = false;
-    // The tiles take the SAME filters as the table (minus the page), so
-    // they total what is being shown rather than the whole tenant.
-    const tileFilters = { ...filters };
-    delete tileFilters.page;
-    Promise.all([listContracts(filters), getContractStats(tileFilters)])
-      .then(([list, tiles]) => {
+    listContracts(filters)
+      .then((list) => {
         if (cancelled) return;
         setContracts(list.results);
         setCount(list.count);
         setNext(list.next);
         setPrevious(list.previous);
-        setStats(tiles);
         setError("");
       })
       .catch((err) => {
@@ -242,6 +263,22 @@ export function ContractsAdminPage() {
   }, [filters, requestKey]);
 
   const reload = () => setReloadToken((current) => current + 1);
+
+  // P-12 C1 — the road's numbers, in one read beside the list.
+  useEffect(() => {
+    let cancelled = false;
+    getContractStats({ company: companyFilter || undefined })
+      .then((response) => {
+        if (!cancelled) setStats(response);
+      })
+      .catch(() => {
+        // The list still works; the tabs then show no counts.
+        if (!cancelled) setStats(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyFilter, reloadToken]);
 
   const sortStateFor = (field: SortField): SortState => {
     if (field !== sortField) return "none";
@@ -258,42 +295,44 @@ export function ContractsAdminPage() {
     setPage(1);
   };
 
-  const projectColumns = useMemo(
-    () => buildProjectColumns(contracts, measure, timeframe),
-    [contracts, measure, timeframe],
-  );
-
-  const groups = useMemo(
-    () =>
-      withGroupTotals(groupContracts(contracts, groupBy), measure, timeframe),
-    [contracts, groupBy, measure, timeframe],
-  );
-
   const locale = i18n.language;
 
-  /** Hours totals for the contracts ON SCREEN, for the Hours tiles.
-   *  `/contracts/stats/` answers in money only; scaling to a year uses
-   *  the same MONTHS_PER_PERIOD rule the row values do. */
-  const shownHours = useMemo(() => {
-    const monthly = contracts.reduce(
-      (sum, row) => sum + perPeriodValue(row, "hours", "monthly"),
-      0,
-    );
-    return { monthly, yearly: monthly * 12 };
-  }, [contracts]);
+  /** P-11 C — the Period column: the term in the customer's words.
+   *  An open end is not a dash but "since {start}". Shared by the
+   *  table and the phone cards so the two cannot drift. */
+  const periodLabel = (row: Contract): string =>
+    row.end_date
+      ? `${formatDate(row.start_date, locale)} – ${formatDate(row.end_date, locale)}`
+      : t("table.periodSince", { start: formatDate(row.start_date, locale) });
 
   const removeSelected = async () => {
     setBusy(true);
+    // P-15 §1.2 — per-row failure collection (the Services pattern): a
+    // refusal partway must not silently strand the rest of the pick,
+    // and the report names WHICH rows stayed and why.
+    const failed: string[] = [];
+    let firstReason = "";
     try {
       for (const id of editMode.selection) {
-        await deleteContract(id);
+        try {
+          await deleteContract(id);
+        } catch (err) {
+          const row = contracts.find((r) => r.id === id);
+          failed.push(row?.contract_no ?? String(id));
+          if (!firstReason) firstReason = getApiError(err);
+        }
       }
       deleteDialogRef.current?.close();
       editMode.exit();
       reload();
-    } catch (err) {
-      setError(getApiError(err));
-      deleteDialogRef.current?.close();
+      if (failed.length > 0) {
+        setError(
+          t("table.deleteFailedSome", {
+            list: failed.join(", "),
+            reason: firstReason,
+          }),
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -301,47 +340,56 @@ export function ContractsAdminPage() {
 
   const filtersActive =
     Boolean(searchActive) ||
-    statusFilter !== "" ||
-    (companyFilter !== "" && !companyDropdownDisabled) ||
     customerFilter !== "" ||
     buildingFilter !== "" ||
     typeFilter !== "";
+  /* P-4 (Part F) — the chips on the Filter button: one label per
+     active filter, in the person's words. */
+  const activeFilterChips: string[] = [
+    customerFilter !== ""
+      ? (uniqueRefs(contracts.map((row) => ({ id: row.customer, name: row.customer_name ?? "" }))).find(
+          (row) => String(row.id) === String(customerFilter),
+        )?.name ?? t("filters.customer"))
+      : "",
+    buildingFilter !== "" ? t("filters.building") : "",
+    typeFilter !== "" ? t("filters.type") : "",
+  ].filter(Boolean);
+  // P-2 §5 — nothing at all (not "nothing matches"): the one card.
+  // P-11 C — `count` is the list's own total; the stats fetch that used
+  // to answer this is gone with the tiles.
+  const showEmptyCard =
+    !loading && !error && !filtersActive && stats !== null && stats.total === 0;
 
   const clearFilters = () => {
     setSearchInput("");
     setSearchActive("");
-    setStatusFilter("");
     setCustomerFilter("");
     setBuildingFilter("");
     setTypeFilter("");
     setPage(1);
   };
 
-  // Contract statuses reuse the table's existing `cell-tag` vocabulary
-  // rather than inventing a badge palette. Mapping stated once, here, so
-  // the table and the phone cards cannot drift apart.
-  const STATUS_TAG: Record<ContractStatus, string> = {
-    ACTIVE: "cell-tag-open",
-    DRAFT: "cell-tag-muted",
-    EXPIRED: "cell-tag-closed",
-    CANCELLED: "cell-tag-rejected",
+  // P-11 C — five fixed columns (Customer · Locations · Period ·
+  // Monthly amount · Status); the select column joins in edit mode.
+  // Only the empty row spans them now.
+  const totalColumnCount = 5 + (editMode.editMode ? 1 : 0);
+
+  // P-12 C1 — the road's counts and money lines, from the stats read.
+  // Active excludes ending-soon so the four tabs partition.
+  const roadCounts: Record<ContractListView, number> = {
+    draft: stats?.draft ?? 0,
+    active: Math.max((stats?.active ?? 0) - (stats?.ending_soon ?? 0), 0),
+    ending: stats?.ending_soon ?? 0,
+    ended: stats?.expired ?? 0,
+    cancelled: stats?.cancelled ?? 0,
   };
-
-  const measureLabel =
-    measure === "prices"
-      ? timeframe === "monthly"
-        ? t("table.monthly")
-        : t("table.yearly")
-      : t("table.hours");
-
-  // Sprint 187 §6c — 6, not 5: the Company column is a new fixed
-  // header, and every `colSpan={totalColumnCount ...}` below is
-  // derived from this. A stale count here is how a group row stops
-  // spanning the table.
-  const fixedColumnCount = 6 + (editMode.editMode ? 1 : 0);
-  const totalColumnCount =
-    fixedColumnCount + projectColumns.columns.length +
-    (projectColumns.folded > 0 ? 1 : 0) + 1;
+  const roadMoneyValue: Record<ContractListView, string> = {
+    draft: String(stats?.draft ?? 0),
+    active: formatMoney(stats?.monthly_by_status.active ?? "0.00", locale),
+    ending: formatMoney(stats?.monthly_by_status.ending_soon ?? "0.00", locale),
+    ended: String(stats?.expired ?? 0),
+    cancelled: String(stats?.cancelled ?? 0),
+  };
 
   return (
     <div>
@@ -351,11 +399,28 @@ export function ContractsAdminPage() {
             {t("list.eyebrow")}
           </div>
           <h2 className="page-title">{t("list.title")}</h2>
-          <p className="page-sub">
-            {loading ? t("list.loading") : t("table.countLabel", { count })}
+          {/* P-8R F — ONE purpose line (Addendum D §D.15 item 9); the
+              P-11 C wording is the owner's own sentence. */}
+          <p className="page-sub" data-testid="contracts-purpose">
+            {t("list.purpose")}
           </p>
         </div>
         <div className="page-header-actions">
+          {/* P-12 §D.24.2 — one company at a time; the choice is the
+              session's, shared with the other Finance pages. */}
+          <CompanyScopeSelect
+            companies={companies}
+            companyId={companyFilter}
+            onChange={(id) => {
+              setCompanyFilter(id);
+              setCustomerFilter("");
+              setBuildingFilter("");
+              setTypeFilter("");
+              setPage(1);
+              rememberScopeCompany(id);
+            }}
+            testId="contracts-company-filter"
+          />
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -380,12 +445,25 @@ export function ContractsAdminPage() {
         </div>
       </div>
 
+      {/* P-13 §D.24 rule 8 — what this page CAN do. */}
+      <HowThisWorks
+        pageKey="contracts"
+        testId="contracts-how"
+        lines={[
+          t("how.1"),
+          t("how.2"),
+          t("how.3"),
+          t("how.4"),
+          t("how.5"),
+        ]}
+      />
+
       {/* Sprint 168 §5 — the type CATALOG needs a screen, because a new
           company starts with an empty one and the type field on a
           contract is required: without this, a new tenant cannot create
           a single contract. */}
       <div
-        className="composer-toggle"
+        className="customer-tabs"
         role="tablist"
         aria-label={t("types.tabsAria")}
         style={{ marginBottom: 16 }}
@@ -394,7 +472,7 @@ export function ContractsAdminPage() {
           type="button"
           role="tab"
           aria-selected={pageTab === "list"}
-          className={`composer-toggle-btn ${pageTab === "list" ? "active" : ""}`}
+          className={`customer-tab ${pageTab === "list" ? "active" : ""}`}
           onClick={() => setPageTab("list")}
           data-testid="contracts-page-tab-list"
         >
@@ -404,7 +482,7 @@ export function ContractsAdminPage() {
           type="button"
           role="tab"
           aria-selected={pageTab === "types"}
-          className={`composer-toggle-btn ${pageTab === "types" ? "active" : ""}`}
+          className={`customer-tab ${pageTab === "types" ? "active" : ""}`}
           onClick={() => setPageTab("types")}
           data-testid="contracts-page-tab-types"
         >
@@ -412,7 +490,120 @@ export function ContractsAdminPage() {
         </button>
       </div>
 
-      {pageTab === "types" && <ContractTypesTab />}
+      {/* P-14 — a BM is a reader here; the tab hides the writes the
+          server would refuse (`IsContractManager`). */}
+      {pageTab === "types" && <ContractTypesTab canManage={canManage} />}
+
+      {/* P-12 C1 (§D.24 rule 2) — the ONE thing waiting: a draft
+          without lines beats the contract ending soonest. */}
+      {pageTab === "list" &&
+        stats?.start_here &&
+        (stats.start_here.draft_no_lines ? (
+          <StartHere
+            testId="contracts-start-here"
+            action={{
+              label: t("road.start_draft_action"),
+              to: `/admin/contracts/${stats.start_here.draft_no_lines.id}`,
+            }}
+          >
+            {/* P-15 (P-14's S3 finding) — a BM is a server-narrowed
+                READER here: the sentence must not order them to do
+                what the page will refuse. The read voice states the
+                same fact; opening the draft stays legal. */}
+            {t(canManage ? "road.start_draft" : "road.start_draft_read", {
+              no: stats.start_here.draft_no_lines.contract_no,
+              customer: stats.start_here.draft_no_lines.customer_name,
+            })}
+          </StartHere>
+        ) : stats.start_here.ending_soonest ? (
+          <StartHere
+            testId="contracts-start-here"
+            action={{
+              label: t("road.start_ending_action"),
+              to: `/admin/contracts/${stats.start_here.ending_soonest.id}`,
+            }}
+          >
+            {t("road.start_ending", {
+              no: stats.start_here.ending_soonest.contract_no,
+              customer: stats.start_here.ending_soonest.customer_name,
+              date: stats.start_here.ending_soonest.end_date
+                ? formatDate(stats.start_here.ending_soonest.end_date, locale)
+                : "",
+            })}
+          </StartHere>
+        ) : null)}
+
+      {/* P-12 C1 (§D.24 rule 3) — the road: draft, active, ending,
+          ended, numbered in the order things happen. Cancelled is off
+          the road, behind the link at the foot of the last tab. */}
+      {pageTab === "list" && !showEmptyCard && (
+        <>
+          {listView === "cancelled" ? (
+            <div className="guide-teach" data-testid="contracts-cancelled-head">
+              <div className="guide-teach-words">
+                <h2 className="guide-teach-title">
+                  {t("road.cancelled_title")}
+                  {stats ? ` (${stats.cancelled})` : ""}
+                </h2>
+                <p className="guide-teach-body">{t("road.cancelled_body")}</p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setListView("ended")}
+                data-testid="contracts-cancelled-back"
+              >
+                {t("road.cancelled_back")}
+              </button>
+            </div>
+          ) : (
+            <>
+              <RoadTabs
+                steps={CONTRACT_ROAD.map((key) => ({
+                  key,
+                  step: t(`road.${key}_step`),
+                  label: t(`road.${key}_label`),
+                  count: stats ? roadCounts[key] : null,
+                }))}
+                activeKey={listView}
+                onSelect={(key) => setListView(key)}
+                ariaLabel={t("road.aria")}
+                testIdPrefix="contracts-road"
+              />
+              <TeachHead
+                testId="contracts-road-teach"
+                title={t(`road.${listView}_title`)}
+                body={t(`road.${listView}_body`)}
+                money={
+                  stats
+                    ? {
+                        value: roadMoneyValue[listView],
+                        label: t(`road.${listView}_money_label`, {
+                          count: roadCounts[listView],
+                          without_lines: stats.draft_without_lines,
+                        }),
+                      }
+                    : undefined
+                }
+              />
+              {/* §D.22 rule 9 — cancelled behind a link, at the foot of
+                  the last tab, never a tab of its own. */}
+              {listView === "ended" && (stats?.cancelled ?? 0) > 0 && (
+                <p className="muted small" style={{ margin: "-6px 0 10px" }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setListView("cancelled")}
+                    data-testid="contracts-cancelled-link"
+                  >
+                    {t("road.cancelled_link", { count: stats?.cancelled ?? 0 })}
+                  </button>
+                </p>
+              )}
+            </>
+          )}
+        </>
+      )}
 
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
@@ -420,88 +611,42 @@ export function ContractsAdminPage() {
         </div>
       )}
 
-      {/* Tiles, filters, table and pagination live inside ONE card, so the
+      {/* Filters, table and pagination live inside ONE card, so the
           page reads as a single block — the shape BuildingsAdminPage
           settled on rather than header-gap-filters-gap-table.
 
           `hidden` rather than unmounted: the list owns the page's reads
           and its filter state, and tearing all of that down to look at
           a catalog would refetch everything on the way back. */}
+      {/* P-2 §5 — with no contracts at all, ONE card that says what a
+          contract is and offers the one obvious action; the filters and
+          the table appear only once one exists. */}
+      {pageTab === "list" && showEmptyCard && (
+        <EmptyState
+          icon={FileSignature}
+          title={t("empty.title")}
+          description={t("empty.desc")}
+          testId="contracts-empty"
+          action={
+            canManage ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setFormOpen(true)}
+                data-testid="contracts-empty-new"
+              >
+                <Plus size={14} strokeWidth={2.5} />
+                {t("actions.newContract")}
+              </button>
+            ) : undefined
+          }
+        />
+      )}
       <div
         className="card"
         style={{ overflow: "hidden" }}
-        hidden={pageTab !== "list"}
+        hidden={pageTab !== "list" || showEmptyCard}
       >
-        <div
-          className="summary-grid"
-          data-testid="contracts-stats"
-          style={{
-            gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
-            margin: "14px 18px 4px",
-          }}
-        >
-          <div className="summary-stat" data-testid="contracts-stat-total">
-            <span className="summary-stat-label">{t("stats.total")}</span>
-            <span className="summary-stat-value">{stats?.total ?? 0}</span>
-          </div>
-          <div className="summary-stat">
-            <span className="summary-stat-label">{t("stats.active")}</span>
-            <span className="summary-stat-value">{stats?.active ?? 0}</span>
-          </div>
-          <div className="summary-stat">
-            <span className="summary-stat-label">{t("stats.draft")}</span>
-            <span className="summary-stat-value">{stats?.draft ?? 0}</span>
-          </div>
-          <div className="summary-stat">
-            <span className="summary-stat-label">{t("stats.expired")}</span>
-            <span className="summary-stat-value">{stats?.expired ?? 0}</span>
-          </div>
-          {/* Sprint 169 §5 — Geannuleerd was COMPUTED by the stats
-              endpoint and never shown, so the tiles counted three of
-              the four statuses the filter offers. A cancelled contract
-              existed, was filterable, had a badge on its detail page,
-              and was in none of the totals above the table. */}
-          <div className="summary-stat" data-testid="contracts-stat-cancelled">
-            <span className="summary-stat-label">{t("stats.cancelled")}</span>
-            <span className="summary-stat-value">{stats?.cancelled ?? 0}</span>
-          </div>
-          {/* Sprint 165 §4 — the two money tiles follow the
-              Prices / Hours toggle. They used to be money whatever the
-              table showed, which left a euro figure sitting above a
-              column of hours. The reference switches both together.
-
-              The hours figures come from the ROWS on screen rather than
-              from `/stats/`: that endpoint answers in money only, and
-              adding an hours aggregate to it is a backend change this
-              sprint's scope does not include. The tile labels say
-              "shown" so the difference from the money tiles — which are
-              tenant-wide — is stated rather than hidden. */}
-          <div className="summary-stat">
-            <span className="summary-stat-label">
-              {measure === "prices"
-                ? t("stats.monthlyTotal")
-                : t("stats.hoursPerMonth")}
-            </span>
-            <span className="summary-stat-value">
-              {measure === "prices"
-                ? formatMoney(stats?.monthly_total ?? "0", locale)
-                : formatNumber(shownHours.monthly, locale)}
-            </span>
-          </div>
-          <div className="summary-stat">
-            <span className="summary-stat-label">
-              {measure === "prices"
-                ? t("stats.yearlyTotal")
-                : t("stats.hoursPerYear")}
-            </span>
-            <span className="summary-stat-value">
-              {measure === "prices"
-                ? formatMoney(stats?.yearly_total ?? "0", locale)
-                : formatNumber(shownHours.yearly, locale)}
-            </span>
-          </div>
-        </div>
-
         <form
           className="filter-bar"
           onSubmit={(event) => {
@@ -521,59 +666,34 @@ export function ContractsAdminPage() {
               data-testid="contracts-search"
             />
           </div>
-          <div className="filter-field">
-            <span className="filter-label">{t("filters.status")}</span>
-            <select
-              className="filter-control"
-              value={statusFilter}
-              onChange={(event) => {
-                setStatusFilter(event.target.value as ContractStatus | "");
-                setPage(1);
-              }}
-              data-testid="contracts-status-filter"
-            >
-              <option value="">{t("filters.allStatuses")}</option>
-              {STATUS_OPTIONS.map((value) => (
-                <option key={value} value={value}>
-                  {t(`status.${value}`)}
-                </option>
+          <button type="submit" className="btn btn-secondary btn-sm" data-testid="contracts-search-apply">
+            {t("filters.apply")}
+          </button>
+          {/* P-4 (Part F) — the five filters fold behind ONE Filter button
+              with the active ones as chips (the tickets-list pattern);
+              the search and Apply stay outside. P-11 C — the two display
+              selects (Prices/Hours, Per maand/Per jaar) left the fold:
+              the Monthly-amount column is fixed now. */}
+          <details
+            className="filter-fold"
+            open={activeFilterChips.length > 0}
+            data-testid="contracts-filter-fold"
+          >
+            <summary className="filter-fold-summary" data-testid="contracts-filter-toggle">
+              <SlidersHorizontal size={14} strokeWidth={2.4} aria-hidden="true" />
+              {t("filters.fold_label")}
+              {activeFilterChips.length > 0 && (
+                <span className="filter-fold-count">
+                  {t("filters.fold_active", { count: activeFilterChips.length })}
+                </span>
+              )}
+              {activeFilterChips.map((label) => (
+                <span className="filter-fold-chip" key={label}>
+                  {label}
+                </span>
               ))}
-            </select>
-          </div>
-          {/* Sprint 187 §6c — placed BEFORE Customer because it scopes
-              it: a customer belongs to one provider company. Hidden
-              disabled rather than removed on a single-company
-              deployment, matching `BuildingsAdminPage`. */}
-          <div className="filter-field">
-            <span className="filter-label">{t("filters.company")}</span>
-            <select
-              className="filter-control"
-              style={{ maxWidth: 220 }}
-              value={companyFilter === "" ? "" : String(companyFilter)}
-              onChange={(event) => {
-                const value = event.target.value;
-                setCompanyFilter(value === "" ? "" : Number(value));
-                // Customer / building / type ids are all per company, so
-                // a leftover id would filter the new company's list by
-                // something it does not have and quietly return nothing
-                // — the trap `BuildingsAdminPage` records for its own
-                // building-type filter.
-                setCustomerFilter("");
-                setBuildingFilter("");
-                setTypeFilter("");
-                setPage(1);
-              }}
-              disabled={companyDropdownDisabled}
-              data-testid="contracts-company-filter"
-            >
-              <option value="">{t("filters.allCompanies")}</option>
-              {companies.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.name}
-                </option>
-              ))}
-            </select>
-          </div>
+            </summary>
+            <div className="filter-fold-body">
           <div className="filter-field">
             <span className="filter-label">{t("filters.customer")}</span>
             <select
@@ -658,6 +778,8 @@ export function ContractsAdminPage() {
               ))}
             </select>
           </div>
+            </div>
+          </details>
         </form>
 
         {/* The filter-is-on line, one click from clear — the Sprint 158
@@ -680,73 +802,22 @@ export function ContractsAdminPage() {
           </div>
         )}
 
-        <div className="contract-view-bar">
-          <div className="status-tabs" role="group" aria-label={t("views.groupLabel")}>
-            {(
-              [
-                ["none", t("views.list")],
-                ["customer", t("views.byCustomer")],
-                ["building", t("views.byBuilding")],
-              ] as [GroupBy, string][]
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={value === groupBy ? "active" : ""}
-                aria-pressed={value === groupBy}
-                onClick={() => setGroupBy(value)}
-                data-testid={`contracts-groupby-${value}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="status-tabs" role="group" aria-label={t("views.measureLabel")}>
-            {(
-              [
-                ["prices", t("views.prices")],
-                ["hours", t("views.hours")],
-              ] as [Measure, string][]
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={value === measure ? "active" : ""}
-                aria-pressed={value === measure}
-                onClick={() => setMeasure(value)}
-                data-testid={`contracts-measure-${value}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="status-tabs" role="group" aria-label={t("views.timeframeLabel")}>
-            {(
-              [
-                ["monthly", t("views.monthly")],
-                ["yearly", t("views.yearly")],
-              ] as [Timeframe, string][]
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={value === timeframe ? "active" : ""}
-                aria-pressed={value === timeframe}
-                onClick={() => setTimeframe(value)}
-                data-testid={`contracts-timeframe-${value}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {canManage && (
+        {/* P-11 C — the view pills are gone (the list is the one view,
+            Addendum D §D.22), but edit mode was mounted in that bar and
+            must stay reachable: the toggle keeps a slim right-aligned
+            row of its own above the table so no capability is lost. */}
+        {canManage && (
+          <div
+            className="contract-view-bar"
+            style={{ justifyContent: "flex-end" }}
+          >
             <EditModeToggle
               editMode={editMode.editModeRequested}
               onToggle={editMode.toggleMode}
               testId="contracts-edit-toggle"
             />
-          )}
-        </div>
+          </div>
+        )}
 
         {editMode.editMode && (
           <div style={{ padding: "0 18px" }}>
@@ -766,17 +837,13 @@ export function ContractsAdminPage() {
                 },
               ]}
             />
+            {/* P-15 §1.2 — the pre-read under the one destructive
+                action: what goes, what stays, and why some rows
+                cannot be picked at all. */}
+            <WhatHappens testId="contracts-bulk-delete-what">
+              {t("table.whatBulkDelete")}
+            </WhatHappens>
           </div>
-        )}
-
-        {projectColumns.folded > 0 && (
-          <p
-            className="muted small"
-            style={{ margin: "0 18px 8px" }}
-            data-testid="contracts-folded-notice"
-          >
-            {t("table.projectsFolded", { count: projectColumns.folded })}
-          </p>
         )}
 
         {loading && (
@@ -786,7 +853,9 @@ export function ContractsAdminPage() {
         )}
 
         <div className="table-wrap admin-list-wrap">
-          <table className="data-table data-table-dense">
+          {/* FE-6 (§D.8.4) — `data-table-fit` lets cells wrap, so the
+              list reads inside its card instead of scrolling. */}
+          <table className="data-table data-table-dense data-table-fit">
             <thead>
               <tr>
                 {editMode.editMode && (
@@ -805,20 +874,6 @@ export function ContractsAdminPage() {
                   </th>
                 )}
                 <SortableHeader
-                  label={t("table.contractNo")}
-                  sort={sortStateFor("contract_no")}
-                  testId="contracts-sort-no"
-                  sortByLabel={t("table.sortBy", {
-                    column: t("table.contractNo"),
-                  })}
-                  onSort={() => onSort("contract_no")}
-                />
-                {/* Sprint 187 §6c — plain <th>, not sortable: the
-                    backend `sort` whitelist has no `company` field and
-                    offering a header that silently does nothing is worse
-                    than a header that does not claim to sort. */}
-                <th>{t("table.company")}</th>
-                <SortableHeader
                   label={t("table.customer")}
                   sort={sortStateFor("customer")}
                   testId="contracts-sort-customer"
@@ -828,22 +883,17 @@ export function ContractsAdminPage() {
                   onSort={() => onSort("customer")}
                 />
                 <th>{t("table.locations")}</th>
+                {/* P-11 C — the Period column sorts by start date; the
+                    backend `sort` whitelist has no combined period
+                    field, and the start is what orders a term. */}
                 <SortableHeader
-                  label={t("table.type")}
-                  sort={sortStateFor("type")}
-                  testId="contracts-sort-type"
-                  sortByLabel={t("table.sortBy", { column: t("table.type") })}
-                  onSort={() => onSort("type")}
+                  label={t("table.period")}
+                  sort={sortStateFor("start_date")}
+                  testId="contracts-sort-period"
+                  sortByLabel={t("table.sortBy", { column: t("table.period") })}
+                  onSort={() => onSort("start_date")}
                 />
-                {projectColumns.columns.map((column) => (
-                  <th key={column.key} className="contract-num">
-                    {column.label}
-                  </th>
-                ))}
-                {projectColumns.folded > 0 && (
-                  <th className="contract-num">{t("table.otherProjects")}</th>
-                )}
-                <th className="contract-num">{measureLabel}</th>
+                <th className="contract-num">{t("table.monthlyAmount")}</th>
                 <SortableHeader
                   label={t("table.status")}
                   sort={sortStateFor("status")}
@@ -854,69 +904,98 @@ export function ContractsAdminPage() {
               </tr>
             </thead>
             <tbody>
-              {groups.map((group) => (
-                <ContractGroup
-                  key={group.key}
-                  group={group}
-                  groupBy={groupBy}
-                  columns={projectColumns}
-                  measure={measure}
-                  timeframe={timeframe}
-                  locale={locale}
-                  editMode={editMode}
-                  statusTag={STATUS_TAG}
-                  totalColumnCount={totalColumnCount}
-                  onOpen={(id) => navigate(`/admin/contracts/${id}`)}
-                  collapsed={collapsed.includes(group.key)}
-                  onToggleCollapse={() =>
-                    setCollapsed((current) =>
-                      current.includes(group.key)
-                        ? current.filter((key) => key !== group.key)
-                        : [...current, group.key],
-                    )
-                  }
-                  t={t}
-                />
-              ))}
-              {/* Sprint 165 §4 — the GRAND TOTAL the reference ends
-                  each view with. It totals the rows ON SCREEN, which is
-                  what the operator is looking at; the tenant-wide
-                  figures are the tiles above. */}
-              {contracts.length > 0 && (
-                <tr className="contract-grand-total">
-                  <td colSpan={totalColumnCount - 2}>
-                    <strong>{t("table.grandTotal")}</strong>
+              {contracts.map((row) => (
+                // P-8R F built this row's guard by hand; P-13 D (O3)
+                // folds it onto the ONE hook via ClickableRow — same
+                // behaviour, one owner.
+                <ClickableRow
+                  key={row.id}
+                  to={`/admin/contracts/${row.id}`}
+                  ariaLabel={`${t("actions.open")}: ${row.contract_no}`}
+                >
+                  {editMode.editMode && (
+                    <td
+                      className="td-select"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={editMode.isSelected(row.id)}
+                        onChange={() => editMode.toggle(row.id)}
+                        disabled={row.has_invoices}
+                        title={
+                          row.has_invoices
+                            ? t("table.rowHasInvoices")
+                            : undefined
+                        }
+                        aria-label={
+                          row.has_invoices
+                            ? t("table.rowHasInvoices")
+                            : t("table.selectRow", { name: row.contract_no })
+                        }
+                        data-testid={`contracts-select-${row.id}`}
+                      />
+                    </td>
+                  )}
+                  <td>
+                    {row.customer_name && canOpenCustomer ? (
+                      <Link
+                        to={`/admin/customers/${row.customer}`}
+                        className="row-fact-link"
+                        data-testid={`contracts-row-customer-${row.id}`}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {row.customer_name}
+                      </Link>
+                    ) : (
+                      (row.customer_name ?? "")
+                    )}
+                    {/* P-3 §C.1 / P-11 C — the row reads as a sentence,
+                        now under the customer it belongs to. */}
+                    <span
+                      className="contract-sentence"
+                      data-testid={`contracts-sentence-${row.id}`}
+                    >
+                      {contractSentence(row, t, locale)}
+                    </span>
+                  </td>
+                  <td>
+                    {row.buildings.length === 0 ? (
+                      <span className="muted-empty">{t("sentence.no_locations")}</span>
+                    ) : (
+                      <BuildingsCell
+                        buildings={row.buildings}
+                        linked={canOpenBuilding}
+                        testIdPrefix={`contracts-row-building-${row.id}`}
+                        moreLabel={(n) => t("table.andMore", { count: n })}
+                      />
+                    )}
+                  </td>
+                  <td data-testid={`contracts-period-${row.id}`}>
+                    {periodLabel(row)}
                   </td>
                   <td className="contract-num">
-                    <strong>
-                      {measure === "prices"
-                        ? formatMoney(
-                            contracts.reduce(
-                              (sum, row) =>
-                                sum + perPeriodValue(row, "prices", timeframe),
-                              0,
-                            ),
-                            locale,
-                          )
-                        : formatNumber(
-                            contracts.reduce(
-                              (sum, row) =>
-                                sum + perPeriodValue(row, "hours", timeframe),
-                              0,
-                            ),
-                            locale,
-                          )}
-                    </strong>
+                    {formatMoney(row.monthly_amount, locale)}
                   </td>
-                  <td />
-                </tr>
-              )}
+                  <td>
+                    <span className={`cell-tag ${CONTRACT_STATUS_TAG[row.status]}`}>
+                      {t(`status.${row.status}`)}
+                    </span>
+                  </td>
+                </ClickableRow>
+              ))}
               {!loading && contracts.length === 0 && (
                 <tr>
-                  <td colSpan={totalColumnCount} className="muted">
-                    {filtersActive
-                      ? t("table.emptyFiltered")
-                      : t("table.empty")}
+                  <td colSpan={totalColumnCount}>
+                    {filtersActive || Boolean(searchActive) ? (
+                      <span className="muted">{t("table.emptyFiltered")}</span>
+                    ) : (
+                      <TeachEmpty
+                        testId={`contracts-road-empty-${listView}`}
+                        title={t(`road.${listView}_empty_title`)}
+                        body={t(`road.${listView}_empty_body`)}
+                      />
+                    )}
                   </td>
                 </tr>
               )}
@@ -924,7 +1003,8 @@ export function ContractsAdminPage() {
           </table>
         </div>
 
-        {/* The phone-width layout, kept in step with the table above. */}
+        {/* The phone-width layout, kept in step with the table above:
+            the same five facts, nothing more (P-11 C). */}
         <ul className="admin-card-list" data-testid="contracts-card-list">
           {contracts.map((row) => (
             <li key={row.id} className="admin-card">
@@ -933,33 +1013,36 @@ export function ContractsAdminPage() {
                   to={`/admin/contracts/${row.id}`}
                   className="admin-card-title admin-card-link"
                 >
-                  {row.contract_no}
+                  {row.customer_name ?? row.contract_no}
                 </Link>
-                <span className={`cell-tag ${STATUS_TAG[row.status]}`}>
+                <span className={`cell-tag ${CONTRACT_STATUS_TAG[row.status]}`}>
                   {t(`status.${row.status}`)}
                 </span>
               </div>
               <div className="admin-card-meta-row">
-                {/* Sprint 187 §6c — the phone rendering, changed in the
-                    SAME commit as the table: the two render in parallel
-                    and drift the moment only one is touched. */}
-                <span className="admin-card-meta">
-                  {[row.company_name, row.customer_name]
-                    .filter(Boolean)
-                    .join(" · ")}
+                <span className="admin-card-meta contract-sentence">
+                  {contractSentence(row, t, locale)}
                 </span>
+              </div>
+              {row.buildings.length > 0 && (
+                <div className="admin-card-meta-row">
+                  <span className="admin-card-meta">
+                    <BuildingsCell
+                      buildings={row.buildings}
+                      linked={canOpenBuilding}
+                      testIdPrefix={`contracts-card-building-${row.id}`}
+                      moreLabel={(n) => t("table.andMore", { count: n })}
+                    />
+                  </span>
+                </div>
+              )}
+              <div className="admin-card-meta-row">
+                <span className="admin-card-meta">{periodLabel(row)}</span>
               </div>
               <div className="admin-card-meta-row">
                 <span className="admin-card-meta">
-                  {row.buildings.map((b) => b.name).join(", ") || "—"}
-                </span>
-              </div>
-              <div className="admin-card-meta-row">
-                <span className="admin-card-meta">
-                  {measureLabel}:{" "}
-                  {measure === "prices"
-                    ? formatMoney(perPeriodValue(row, "prices", timeframe), locale)
-                    : formatNumber(perPeriodValue(row, "hours", timeframe), locale)}
+                  {t("table.monthlyAmount")}:{" "}
+                  {formatMoney(row.monthly_amount, locale)}
                 </span>
               </div>
             </li>
@@ -1032,145 +1115,6 @@ function uniqueRefs(
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function ContractGroup({
-  group,
-  groupBy,
-  columns,
-  measure,
-  timeframe,
-  locale,
-  editMode,
-  statusTag,
-  totalColumnCount,
-  onOpen,
-  collapsed,
-  onToggleCollapse,
-  t,
-}: {
-  group: ContractGroupRow;
-  groupBy: GroupBy;
-  columns: ReturnType<typeof buildProjectColumns>;
-  measure: Measure;
-  timeframe: Timeframe;
-  locale: string;
-  editMode: ReturnType<typeof useEditMode<number>>;
-  statusTag: Record<ContractStatus, string>;
-  totalColumnCount: number;
-  onOpen: (id: number) => void;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
-  t: (key: string, options?: Record<string, unknown>) => string;
-}) {
-  const format = measure === "prices" ? formatMoney : formatNumber;
-  return (
-    <>
-      {groupBy !== "none" && (
-        <tr
-          className="contract-group-row"
-          data-testid={`contracts-group-${group.key}`}
-        >
-          <td colSpan={totalColumnCount - 2}>
-            {/* The whole header toggles the group — the reference's
-                expandable summary rows. A button rather than a click
-                handler on the cell, so it is keyboard reachable and
-                announces its state. */}
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm contract-group-toggle"
-              aria-expanded={!collapsed}
-              onClick={onToggleCollapse}
-              data-testid={`contracts-group-toggle-${group.key}`}
-            >
-              <span aria-hidden="true">{collapsed ? "\u25b8" : "\u25be"}</span>
-              <strong>{group.label}</strong>
-              <span className="muted small">
-                {t("table.groupCount", { count: group.rows.length })}
-              </span>
-            </button>
-          </td>
-          <td className="contract-num">
-            <strong>{format(group.total, locale)}</strong>
-          </td>
-          <td />
-        </tr>
-      )}
-      {(groupBy === "none" || !collapsed) && group.rows.map((row) => (
-        <tr
-          key={`${group.key}-${row.id}`}
-          className="admin-row-clickable"
-          role="link"
-          tabIndex={0}
-          aria-label={`${t("actions.open")}: ${row.contract_no}`}
-          onClick={() => onOpen(row.id)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              onOpen(row.id);
-            }
-          }}
-        >
-          {editMode.editMode && (
-            <td
-              className="td-select"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <input
-                type="checkbox"
-                checked={editMode.isSelected(row.id)}
-                onChange={() => editMode.toggle(row.id)}
-                aria-label={t("table.selectRow", { name: row.contract_no })}
-                data-testid={`contracts-select-${row.id}`}
-              />
-            </td>
-          )}
-          <td className="td-subject">{row.contract_no}</td>
-          <td className="muted small">
-            {row.company_name ?? <span className="muted-empty">—</span>}
-          </td>
-          <td>{row.customer_name ?? <span className="muted-empty">—</span>}</td>
-          <td>
-            {row.buildings.length === 0 ? (
-              <span className="muted-empty">—</span>
-            ) : (
-              <BuildingsCell
-                names={row.buildings.map((building) => building.name)}
-                moreLabel={(n) => t("table.andMore", { count: n })}
-              />
-            )}
-          </td>
-          <td>
-            {row.contract_type_name ? (
-              contractTypeLabel(
-                row.contract_type_name,
-                row.contract_type_standard_slot,
-                t,
-              )
-            ) : (
-              <span className="muted-empty">—</span>
-            )}
-          </td>
-          {columns.columns.map((column) => (
-            <td key={column.key} className="contract-num">
-              {format(column.valueFor(row), locale)}
-            </td>
-          ))}
-          {columns.folded > 0 && (
-            <td className="contract-num">{format(columns.otherFor(row), locale)}</td>
-          )}
-          <td className="contract-num">
-            {format(perPeriodValue(row, measure, timeframe), locale)}
-          </td>
-          <td>
-            <span className={`cell-tag ${statusTag[row.status]}`}>
-              {t(`status.${row.status}`)}
-            </span>
-          </td>
-        </tr>
-      ))}
-    </>
-  );
-}
-
 /**
  * The Locations cell: the first two names plus a "+N" chip. Bounded on
  * purpose — a contract can cover a dozen buildings, and an unbounded
@@ -1178,17 +1122,39 @@ function ContractGroup({
  * data. Same shape as the buildings list's Customers cell.
  */
 function BuildingsCell({
-  names,
+  buildings,
+  linked,
+  testIdPrefix,
   moreLabel,
 }: {
-  names: string[];
+  buildings: ContractBuildingRef[];
+  /** P-8R F — each shown name is a link to the building's own page.
+   *  Off for a role the building detail's guard would turn away. */
+  linked: boolean;
+  testIdPrefix: string;
   moreLabel: (n: number) => string;
 }) {
-  const shown = names.slice(0, 2);
-  const hidden = names.length - shown.length;
+  const shown = buildings.slice(0, 2);
+  const hidden = buildings.length - shown.length;
   return (
     <span>
-      {shown.join(", ")}
+      {shown.map((building, index) => (
+        <Fragment key={building.id}>
+          {index > 0 ? ", " : ""}
+          {linked ? (
+            <Link
+              to={`/admin/buildings/${building.id}`}
+              className="row-fact-link"
+              data-testid={`${testIdPrefix}-${building.id}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {building.name}
+            </Link>
+          ) : (
+            building.name
+          )}
+        </Fragment>
+      ))}
       {hidden > 0 && (
         <span className="cell-tag cell-tag-muted" style={{ marginLeft: 6 }}>
           {moreLabel(hidden)}
@@ -1198,4 +1164,5 @@ function BuildingsCell({
   );
 }
 
-export { MAX_PROJECT_COLUMNS };
+// P-13 D (O3) — `fromInnerControl` is gone: the rows are `ClickableRow`
+// now and the guard lives once, in `lib/useRowLink.ts`.

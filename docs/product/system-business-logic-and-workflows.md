@@ -1621,6 +1621,54 @@ Otherwise the operator meets the same job in two weeks and cannot tell
 why. That marker is also how a job started before its planned window
 stays visible (see 12A).
 
+### 12B.1 WHOSE planned date? (owner ruling, 2026-08-27 — W-VIEWER)
+
+Everything above answers "which WEEK", and it still stands. It does not
+answer "planned by whom", and the two later waves each answered that
+question differently for every reader at once:
+
+* W-FIX1 E2 / W-PLANTRUTH §1b added the roll-forward — undone work
+  leaves its past column and appears on today, marked with the day it
+  was planned for. Unchanged.
+* W-PLANTRUTH §1a then declared that ONE fact places the board for
+  everybody: the planned day of the WORK, meaning a staff slot's day or
+  a part's window. **That is the part the owner overruled.**
+
+A ticket carries a scheduled date. A person assigned to it carries their
+own working date. **These are different facts and both are true**, and
+treating the second as the first is what put TCK-2026-000361 — a job the
+ticket schedules for 7 September — under 29 August, because one of four
+slots carried that day.
+
+So placement is VIEWER-AWARE:
+
+| Reader | What a card is | Placed by |
+| --- | --- | --- |
+| SA / PA / Manager, company scope | the JOB — one row per ticket | the ticket's own `scheduled_start_at` |
+| Anyone reading their own week (the only shape STAFF get) | one row per slot they hold | the day THEY were given, plus their own parts |
+
+* **One job = one card** for the provider side, however many people are
+  on it. Assignment dates, manager-assignment dates and individual slot
+  dates never move it.
+* **Staff still see the ticket's scheduled date** — on the ticket, in
+  its Scheduling section. The general Work Plan is simply not where that
+  is published, and it says so above the grid.
+* **The fallback chain** when a ticket carries no date of its own is
+  `extra_work.provider_planned_date` (the provider's COMMITMENT) then
+  `extra_work.preferred_date` (what was ASKED for), and then nothing:
+  the job is undated and goes to the "not planned yet" lane. An
+  unrelated staff slot is never promoted into the job's date.
+* **The ladder reads the same date** (`tickets/lateness_index.py`), so
+  a stale slot cannot make a scheduled job late. The widest slot/part
+  window survives only as the fallback for a job that states no date
+  anywhere.
+* **A window containing today hangs on today** (rule 6), so a job
+  planned across a fortnight is on the day it is being worked rather
+  than parked on the day the fortnight opened.
+
+Owner: `backend/tickets/job_dates.py` — the job's date, resolved once,
+in Python and in SQL, and used by both the board and the ladder.
+
 ## 13. Non-negotiable privacy rules
 
 Customers must not see:

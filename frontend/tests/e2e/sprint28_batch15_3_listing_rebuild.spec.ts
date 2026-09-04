@@ -3,109 +3,107 @@ import { DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
 
 /**
- * Sprint 28 Batch 15.3 — Extra Work list rebuild + Users page
- * grouping + Audit log readable diff.
+ * Sprint 28 Batch 15.3 — Extra Work list + Users page grouping + Audit
+ * log readable diff.
+ *
+ * P-10 C3 — the Extra Work half is rewritten against the list as it is.
+ * The FE-1 status tiles and the list total this spec used to read
+ * (`extra-work-status-tile-*`, `extra-work-list-total`) went with P-8R;
+ * the list is P-9's four tabs (`/extra-work/:tab`, each
+ * `extra-work-tab-<tab>[data-count]`) over the guard line
+ * `extra-work-list-loaded-count[data-count]`. The tab arithmetic itself
+ * (four counts + cancelled = the server's count) is
+ * `p9_extra_work_tabs.spec.ts`'s; this file keeps what that spec does
+ * not assert: the money line is money, no raw status enum leaks, and the
+ * Approved tab opens on "Not planned yet" (P-10 B1).
  */
+const TABS = ["to-price", "with-customer", "approved", "finished"] as const;
 
-test.describe("Sprint 28 Batch 15.3 — Extra Work list rebuild", () => {
-  test("KPI strip renders four cards", async ({ page }) => {
+test.describe("Sprint 28 Batch 15.3 — Extra Work list", () => {
+  test("the list opens on a tab, every tab carries a count, the guard line is loaded", async ({
+    page,
+  }) => {
     await loginAs(page, DEMO_USERS.super);
     await page.goto("/extra-work");
-    await expect(
-      page.locator('[data-testid="extra-work-list-page"]'),
-    ).toBeVisible();
-    await expect(
-      page.locator('[data-testid="extra-work-list-kpi-row"]'),
-    ).toBeVisible();
-    for (const id of [
-      "extra-work-list-kpi-open",
-      "extra-work-list-kpi-awaiting",
-      "extra-work-list-kpi-approved",
-      "extra-work-list-kpi-value",
-    ]) {
-      await expect(page.locator(`[data-testid="${id}"]`)).toBeVisible();
+    await expect(page).toHaveURL(
+      /\/extra-work\/(to-price|with-customer|approved|finished)/,
+    );
+    await expect(page.getByTestId("extra-work-list-page")).toBeVisible();
+    const loaded = page.getByTestId("extra-work-list-loaded-count");
+    await expect(loaded).toBeVisible();
+    expect(Number(await loaded.getAttribute("data-count"))).not.toBeNaN();
+    for (const tab of TABS) {
+      const tabButton = page.getByTestId(`extra-work-tab-${tab}`);
+      await expect(tabButton).toBeVisible();
+      expect(Number(await tabButton.getAttribute("data-count"))).not.toBeNaN();
     }
   });
 
-  test("money is formatted with currency symbol", async ({ page }) => {
+  test("money is formatted with a currency symbol", async ({ page }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/extra-work");
+    // P-11 F1 — per P-9's tabs (§D.22 pt 4) each tab has ONE line and
+    // To price's is deliberately a COUNT sentence, not money. The €
+    // pin belongs on a tab whose line IS money: Approved.
+    await page.goto("/extra-work/approved");
     // Wait for at least one row or the empty state to render.
     await page.waitForSelector(
       '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
       { timeout: 10_000 },
     );
-    const valueCard = page.locator(
-      '[data-testid="extra-work-list-kpi-value"]',
+    test.skip(
+      (await page.getByTestId("extra-work-row").count()) === 0,
+      "the Approved tab has no rows, so it draws no money line",
     );
-    const valueText = await valueCard
-      .locator(".ew-kpi-card-value")
-      .textContent();
-    // Either "—" (no rows, formatMoney returns the dash for empty)
-    // or contains the euro sign + a digit.
+    const money = page.getByTestId("extra-work-tab-money");
+    await expect(money).toBeVisible({ timeout: 10_000 });
     expect(
-      valueText,
-      "kpi value should be a formatted money string",
-    ).toMatch(/^(—|.*€.*\d.*)$/);
+      (await money.textContent()) ?? "",
+      "the tab's money line should be a formatted money string",
+    ).toMatch(/€\s?\d/);
   });
 
   test("status uses StatusBadge — no raw enum word visible", async ({
     page,
   }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/extra-work");
-    await page.waitForSelector(
-      '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
-      { timeout: 10_000 },
-    );
-    const body =
-      (await page
-        .locator('[data-testid="extra-work-list-page"]')
-        .textContent()) ?? "";
-    // The raw enum strings should not surface in row cells (they
-    // can still appear inside <select> option values, which are
-    // not part of the text content of the page when rendered).
-    expect(body, "raw status enum should not leak").not.toMatch(
-      /\bPRICING_PROPOSED\b/,
-    );
-    expect(body, "raw status enum should not leak").not.toMatch(
-      /\bCUSTOMER_APPROVED\b/,
-    );
-  });
-
-  test("filtering by status narrows the visible rows", async ({ page }) => {
-    await loginAs(page, DEMO_USERS.super);
-    await page.goto("/extra-work");
-    await page.waitForSelector(
-      '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
-      { timeout: 10_000 },
-    );
-    // The first select inside the filter bar is the status filter
-    // (search input precedes it as a different element type).
-    const statusSelect = page
-      .locator('[data-testid="extra-work-list-filters"] select')
-      .first();
-    await statusSelect.selectOption("CANCELLED");
-    // Either zero rows + filtered empty state, or every visible row
-    // shows the localised "cancelled" label inside its status badge.
-    const rows = page.locator('[data-testid="extra-work-row"]');
-    const count = await rows.count();
-    if (count === 0) {
-      await expect(
-        page.locator('[data-testid="extra-work-list-empty"]'),
-      ).toBeVisible();
-    } else {
-      // Sprint 28 Batch 15.4 — each row now carries a StatusBadge AND
-      // a RouteBadge (both styled with `.badge`). The RouteBadge has
-      // the `.route-badge` modifier class, so filter to the status
-      // badge by excluding it.
-      const statuses = await rows
-        .locator(".badge:not(.route-badge)")
-        .allTextContents();
-      for (const s of statuses) {
-        expect(s.toLowerCase()).toMatch(/cancel|geannuleerd/);
+    for (const tab of TABS) {
+      await page.goto(`/extra-work/${tab}`);
+      await page.waitForSelector(
+        '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
+        { timeout: 10_000 },
+      );
+      const body =
+        (await page
+          .locator('[data-testid="extra-work-list-page"]')
+          .textContent()) ?? "";
+      // The raw enum strings must not surface in row cells (a <select>'s
+      // option values are not part of the rendered text).
+      for (const raw of [
+        "PRICING_PROPOSED",
+        "CUSTOMER_APPROVED",
+        "WAITING_PLANNING",
+        "IN_EXECUTION",
+      ]) {
+        expect(body, `raw status enum ${raw} should not leak on ${tab}`).not.toMatch(
+          new RegExp(`\\b${raw}\\b`),
+        );
       }
     }
+  });
+
+  test("the Approved tab opens on Not planned yet", async ({ page }) => {
+    await loginAs(page, DEMO_USERS.super);
+    await page.goto("/extra-work/approved");
+    await expect(page.getByTestId("extra-work-tab-approved")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // P-11 F1 — the chip key has been `not_planned` since P-10 B1/B2
+    // (the ticket's own words); this line was the rewrite's one miss.
+    await expect(page.getByTestId("extra-work-chip-not_planned")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 });
 
@@ -114,7 +112,7 @@ test.describe("Sprint 28 Batch 15.3 — Users grouping", () => {
     page,
   }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/admin/users");
+    await page.goto("/admin/people/users");
     // The demo seed has both provider and customer users (super-admin
     // sees all five roles). Both group headers should resolve.
     await expect(
@@ -127,7 +125,7 @@ test.describe("Sprint 28 Batch 15.3 — Users grouping", () => {
 
   test("role cells use RoleBadge with side classifier", async ({ page }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/admin/users");
+    await page.goto("/admin/people/users");
     // RoleBadge renders a .role-badge wrapper with either
     // .role-badge-provider or .role-badge-customer modifier.
     const providerBadges = page.locator(".role-badge-provider");

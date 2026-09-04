@@ -161,7 +161,7 @@ export function CustomerSettingsPage() {
 
   return (
     <div data-testid="customer-settings-page">
-      <CustomerSubPageHeader
+      <CustomerSubPageHeader tab="settings" subTab="settings"
         customerName={customerName}
         isActive={isActive}
       />
@@ -190,13 +190,9 @@ export function CustomerSettingsPage() {
         </div>
       ) : customer ? (
         <>
-          <p
-            className="section-explainer"
-            data-testid="customer-settings-explainer"
-          >
-            {t("customer_view.settings.explainer", { customer: customerName })}
-          </p>
-
+          {/* P-4 (§D.15 rule 9) — one teaching line per surface: the
+              billing section's own helper is the one; the page-level
+              paragraph went. */}
           <CustomerFacturatieSection
             customer={customer}
             onUpdated={setCustomer}

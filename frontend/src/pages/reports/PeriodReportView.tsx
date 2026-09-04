@@ -179,10 +179,10 @@ export function PeriodReportView<T extends PeriodPayload>({
   const scope = payload?.scope;
   const scopeParts: string[] = [];
   if (scope?.company_name) {
-    scopeParts.push(`${t("filter_company")}: ${scope.company_name}`);
+    scopeParts.push(t("period_scope_company", { name: scope.company_name }));
   }
   if (scope?.building_name) {
-    scopeParts.push(`${t("filter_building")}: ${scope.building_name}`);
+    scopeParts.push(t("period_scope_building", { name: scope.building_name }));
   }
 
   return (
@@ -250,8 +250,16 @@ export function PeriodReportView<T extends PeriodPayload>({
       )}
 
       {loading && (
-        <div className="loading-bar" style={{ margin: 0 }}>
-          <div className="loading-bar-fill" />
+        <div
+          className="skeleton-lines"
+          aria-hidden="true"
+          data-testid={`${testIdPrefix}-skeleton`}
+          style={{ padding: "8px 0 16px" }}
+        >
+          <span className="skeleton-line" style={{ width: "40%" }} />
+          <span className="skeleton-line" />
+          <span className="skeleton-line" style={{ width: "85%" }} />
+          <span className="skeleton-line short" />
         </div>
       )}
 
@@ -273,6 +281,19 @@ export function PeriodReportView<T extends PeriodPayload>({
             <div className="empty-state" data-testid={`${testIdPrefix}-empty`}>
               <div className="empty-title">{t("period_empty_title")}</div>
               <p className="empty-sub">{emptyHint}</p>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  // One obvious action: a year back from the end date.
+                  const end = new Date(to);
+                  end.setDate(end.getDate() - 365);
+                  setFrom(end.toISOString().slice(0, 10));
+                }}
+                data-testid={`${testIdPrefix}-widen`}
+              >
+                {t("widen_period")}
+              </button>
             </div>
           ) : (
             children(payload)

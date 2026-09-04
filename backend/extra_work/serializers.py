@@ -11,10 +11,10 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
+from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.models import UserRole
-from accounts.permissions import is_customer_side
 from buildings.models import Building
 from companies.models import Company
 from customers.models import (
@@ -75,9 +75,34 @@ logger = logging.getLogger(__name__)
 # a single string to map to a localized message.
 ERR_DEADLINE_PROVIDER_ONLY = "deadline_provider_only"
 
+# W-EW1 §2 — one date flow. A cart line no longer carries a date of
+# its own: the request-level `preferred_date` is the single date the
+# whole cart is wished for, and the server derives every line's
+# `requested_date` from it. The column stays (it is what resolves
+# which agreed-price window applies) and stays readable on every
+# detail payload; only the WRITE path closes. A stale client that
+# still sends a per-line date is told so explicitly rather than
+# having its date silently ignored — a silently-dropped date would
+# price the line against a window the caller never asked for.
+ERR_LINE_REQUESTED_DATE_NOT_ACCEPTED = "line_requested_date_not_accepted"
+
 
 def _is_customer(user) -> bool:
     return user is not None and user.role == UserRole.CUSTOMER_USER
+
+
+def redact_for_customer(data: dict, user, fields) -> dict:
+    """W-FIX1 D4 (audit F8) — ONE redaction for customer readers.
+
+    The detail and list serializers pop their `_PROVIDER_ONLY_FIELDS`
+    for a CUSTOMER_USER; the series endpoint built its member dicts by
+    hand and forgot to, so a customer read `budget_hours` there. Every
+    surface that hands a customer an extra-work dict goes through this.
+    """
+    if _is_customer(user):
+        for field in fields:
+            data.pop(field, None)
+    return data
 
 
 def derive_actor_kind(user, customer, building) -> str:
@@ -222,6 +247,9 @@ class ExtraWorkPricingLineItemSerializer(serializers.ModelSerializer):
             "total",
             "customer_visible_note",
             "internal_cost_note",
+            # P-13 I — actual hours (read-only; written only via the
+            # actual-hours endpoint, like the cart/proposal twins).
+            "actual_hours",
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",
@@ -236,6 +264,7 @@ class ExtraWorkPricingLineItemSerializer(serializers.ModelSerializer):
             "subtotal",
             "vat_amount",
             "total",
+            "actual_hours",
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",
@@ -295,6 +324,9 @@ class ExtraWorkPricingLineItemCustomerSerializer(serializers.ModelSerializer):
             "vat_amount",
             "total",
             "customer_visible_note",
+            # P-13 I — actual hours; customer-visible per SoT §5.12,
+            # matching the cart/proposal customer serializers.
+            "actual_hours",
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",
@@ -484,6 +516,16 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
         allow_null=True,
         default=None,
     )
+    # W-EW1 §2 — server-derived on WRITE, unchanged on READ.
+    #
+    # `required=False` because no client supplies it any more: the
+    # parent's `validate()` stamps every line from the request-level
+    # `preferred_date` before anything reads it. The field stays in
+    # `Meta.fields` so the detail payload keeps rendering the stored
+    # date exactly as before — this serializer is the READ path too
+    # (`ExtraWorkRequestDetailSerializer.line_items`), and dropping the
+    # field would have blanked it there as well.
+    requested_date = serializers.DateField(required=False)
     line_price_source = serializers.CharField(read_only=True)
     # Sprint 8B — actual hours worked (HOURS-unit lines). Read-only on
     # the cart-line read path; written only via the actual-hours
@@ -509,6 +551,20 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
     price_source = serializers.SerializerMethodField()
     contract_unit_price = serializers.SerializerMethodField()
     contract_vat_pct = serializers.SerializerMethodField()
+
+    def validate_requested_date(self, value):
+        # Only ever reached on the WRITE path: on the read path the
+        # serializer is `read_only=True` and field validators never run.
+        # So reaching this method at all means a client PUT a date on a
+        # line, which is exactly what W-EW1 §2 closes.
+        raise serializers.ValidationError(
+            serializers.ErrorDetail(
+                "A per-line requested date is no longer accepted. The "
+                "request-level `preferred_date` is the date for the "
+                "whole cart.",
+                code=ERR_LINE_REQUESTED_DATE_NOT_ACCEPTED,
+            )
+        )
 
     class Meta:
         model = ExtraWorkRequestItem
@@ -659,14 +715,154 @@ def _spawned_tickets_for(obj):
     )
 
 
+def _display_phase_for(obj, user) -> str:
+    """FE-2 (§D.4) — the one presentation phase, shared by the list and
+    the detail serializer. Reads the same canonical spawned-ticket
+    resolution the money definition uses; never stored, never writable,
+    never consulted by backend logic."""
+    from tickets.plan_provenance import ticket_has_own_plan
+
+    from .display_phase import display_phase
+
+    tickets = _spawned_tickets_for(obj)
+    ticket_status = tickets[0].status if tickets else None
+    # P-2 ruling 1 — did a PERSON plan it? The provider's committed
+    # window on the request, or the spawned ticket's own plan (a
+    # schedule row / a recurring occurrence; the list's prefetch carries
+    # the `job_own_plan` annotation so this costs no query per row).
+    has_real_plan = obj.provider_planned_date is not None or any(
+        ticket_has_own_plan(ticket) for ticket in tickets
+    )
+    return display_phase(
+        status=obj.status,
+        routing_decision=obj.routing_decision,
+        request_intent=obj.request_intent,
+        ticket_status=ticket_status,
+        is_invoiced=bool(obj.is_invoiced),
+        viewer_is_customer=_is_customer(user),
+        has_real_plan=has_real_plan,
+    )
+
+
 def _serialize_spawned_tickets(obj):
+    # W12 §2 — the ticket's OWN schedule, published so the screen can
+    # show a conflict it currently computes and throws away.
+    #
+    # `apply_planned_date_to_tickets` refuses to overwrite a ticket
+    # somebody rescheduled by hand and reports it on
+    # `planned_date_ticket_result`. Every caller passes that through, and
+    # nothing in the frontend reads it — so a provider sets a delivery
+    # date, one ticket keeps a different one, and nobody is told. The
+    # response carried the ticket IDS but not their dates, which is
+    # enough to say "something disagreed" and not enough to say WHAT.
+    #
+    # THIS IS NOT A SECOND OWNER. The ticket still owns its schedule;
+    # these two fields are read-only echoes of it, exactly like `status`
+    # beside them, so the Extra Work screen can name the date and link to
+    # the row that holds it instead of storing its own copy.
     return [
         {
             "id": ticket.id,
             "ticket_no": ticket.ticket_no,
             "status": ticket.status,
+            "scheduled_start_at": ticket.scheduled_start_at,
+            "schedule_status": ticket.schedule_status,
         }
         for ticket in _spawned_tickets_for(obj)
+    ]
+
+
+def _is_provider_manager(user) -> bool:
+    """SA / CA / BM. The roles whose job includes the whole crew.
+
+    Deliberately the same three roles the plan endpoints admit, so "who
+    may set the plan" and "who may read all of it" cannot drift apart.
+    """
+    from accounts.models import UserRole
+
+    return getattr(user, "role", None) in {
+        UserRole.SUPER_ADMIN,
+        UserRole.COMPANY_ADMIN,
+        UserRole.BUILDING_MANAGER,
+    }
+
+
+def _serialize_planned_hours(obj, viewer=None):
+    """W2-D — the budget, distributed. One row per person, DETAIL only.
+
+    TWO queries, whatever the crew size: the rows with their user, and
+    the set of user ids currently assigned to this work. `is_assigned`
+    is resolved from that set rather than per row, because the rows this
+    surface must NOT drop are exactly the ones a per-row join would.
+
+    A row whose person is no longer assigned STAYS in the list and stays
+    in the total, flagged `is_assigned: false`. That is the deliberate
+    opposite of the reference system, where the grid is built from the
+    assignment list and hours are matched onto it — so hours belonging
+    to a removed worker vanish from the screen while still counting in
+    every total, and the screen and the total disagree with nothing on
+    screen to explain it (`docs/reference/osius-reference-system/`
+    §4.4; live work 474 shows 13.5 distributed hours against a
+    `hours_planed` of 1.00 with no warning anywhere).
+
+    `user_phone` is deliberately absent: this list exists to plan hours,
+    not to publish a staff directory. `User.phone` is the ungated
+    account field the assignment list already exposes to provider
+    operators, and adding a second exposure here would be a second place
+    to keep the Sprint 154 §K privacy floor in step.
+    """
+    rows = list(obj.planned_hours.select_related("user", "hour_type").all())
+    if not rows:
+        return []
+    from .models import ExtraWorkAssignment
+
+    # W6-H — A WORKER SEES THEIR OWN ROWS AND NOBODY ELSE'S.
+    #
+    # This list is how a worker finds out which days they are on, so it
+    # has to be readable by STAFF — but "readable by STAFF" cannot mean
+    # "the whole crew's hours". Before W6-H the list carried one total
+    # per person and was emitted in full to every non-customer; giving
+    # it days without narrowing it would turn a coarse leak into a
+    # detailed one.
+    #
+    # Narrowed by ROLE, not by assignment: a provider manager sees the
+    # crew because managing the crew is their job, and everyone else
+    # sees the row with their own name on it.
+    if viewer is not None and not _is_provider_manager(viewer):
+        rows = [row for row in rows if row.user_id == viewer.id]
+        if not rows:
+            return []
+
+    assigned = set(
+        ExtraWorkAssignment.objects.filter(
+            extra_work_request=obj,
+            user_id__in=[row.user_id for row in rows],
+        ).values_list("user_id", flat=True)
+    )
+    return [
+        {
+            "user_id": row.user_id,
+            "user_email": row.user.email,
+            "user_full_name": row.user.full_name,
+            "user_role": row.user.role,
+            # W6-H — NULL means "planned, day not decided". Rendered as
+            # its own state on screen, never as a blank that reads like
+            # a missing value.
+            "date": row.date,
+            # W7 — NULL means ORDINARY hours, and the NAME comes with the
+            # id so the grid can label a row without a second request
+            # and without inventing a word for the null case (the client
+            # owns that wording, the way it owns "CONCEPT" for an unsent
+            # invoice number).
+            "hour_type": row.hour_type_id,
+            "hour_type_name": (
+                row.hour_type.name if row.hour_type_id else None
+            ),
+            "hours": f"{row.hours:.2f}",
+            "is_assigned": row.user_id in assigned,
+            "set_at": row.set_at,
+        }
+        for row in rows
     ]
 
 
@@ -710,13 +906,31 @@ def _is_priced(obj) -> bool:
     from .final_amounts import active_priced_lines
 
     _kind, lines = active_priced_lines(obj)
-    return bool(lines)
+    if lines:
+        return True
+    # W-FIX1 A3 — the un-annotated twin of `views_financials.
+    # is_priced_expression`: a SENT proposal with lines is a price on
+    # the record. Same order as the expression: approved lines first,
+    # then a sent proposal, then nothing.
+    return ProposalLine.objects.filter(
+        proposal__extra_work_request_id=obj.pk,
+        proposal__status=ProposalStatus.SENT,
+    ).exists()
+
+
+# P-9 B — renders the list's own datetimes (finish moment, invoice sent
+# moment) the way every declared DateTimeField does, so the two shapes
+# on one row cannot differ in format or zone.
+_P9_DATETIME = serializers.DateTimeField()
 
 
 class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     is_overdue = serializers.BooleanField(read_only=True)
     started_before_plan = serializers.BooleanField(read_only=True)
     is_priced = serializers.SerializerMethodField()
+    # FE-2 (§D.4) — the one phase the tracker groups by. Method field,
+    # so it is read-only by construction and per-viewer by context.
+    display_phase = serializers.SerializerMethodField()
 
     # Sprint 180 §1/§2 — the reverse of `Ticket.extra_work_origin`,
     # which had no serializer field at all in either direction from the
@@ -724,6 +938,21 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     # `spawned_tickets` is the number and the link.
     has_operational_ticket = serializers.SerializerMethodField()
     spawned_tickets = serializers.SerializerMethodField()
+
+    # W5-B — the day-by-day series this row belongs to, or null.
+    #
+    # WHOLE-GROUP TRUTH, not page truth. The counts describe every
+    # member of the series, even the ones on another page of results, so
+    # a badge reading "12" never depends on how the list happened to be
+    # paginated. That is what lets the frontend fold a series into one
+    # row without inventing a header record.
+    #
+    # The reference system instead marks the member with
+    # `group_sequence == 1` as a header row and branches its status
+    # filter on it, "which is the group-header inflation that makes list
+    # totals and statistics totals disagree" (A7 §2.1). Nothing here
+    # branches on sequence.
+    group = serializers.SerializerMethodField()
 
     company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.CharField(source="building.name", read_only=True)
@@ -753,6 +982,24 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
         source="price_folder.name", read_only=True, allow_null=True
     )
 
+    # P-9 B — the facts the four-tab list prints per row that the row
+    # did not carry: the cart lines (What), the agreed-price estimate
+    # (To price), who is on it (Approved), the customer's reason for a
+    # no (With the customer), when it finished and which invoice holds
+    # it (Finished). Read-only by construction (method fields), and
+    # NEVER a query per row: the three that need a table are loaded
+    # ONCE PER PAGE through `_p9_per_row` (the `get_group` memo shape),
+    # the rest read relations the list queryset already joins or
+    # prefetches. `ListQueryGrowthTests` pins the growth at zero.
+    line_summary = serializers.SerializerMethodField()
+    contract_estimate_amount = serializers.SerializerMethodField()
+    people_names = serializers.SerializerMethodField()
+    rejection_note = serializers.SerializerMethodField()
+    completed_at = serializers.SerializerMethodField()
+    invoice_ref = serializers.SerializerMethodField()
+    contact_name = serializers.SerializerMethodField()
+    customer_invoice_day = serializers.SerializerMethodField()
+
     class Meta:
         model = ExtraWorkRequest
         fields = [
@@ -775,6 +1022,16 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "category",
             "urgency",
             "status",
+            "display_phase",
+            # P-9 B — see the field declarations above.
+            "line_summary",
+            "contract_estimate_amount",
+            "people_names",
+            "rejection_note",
+            "completed_at",
+            "invoice_ref",
+            "contact_name",
+            "customer_invoice_day",
             # Sprint 173 §4 — the deadline, the planned window's end, and
             # the two derived flags. These were declared on this
             # serializer but only added to the DETAIL serializer's
@@ -794,6 +1051,20 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             # the provider says the work will actually happen, and it is
             # what lets the Work Plan schedule an extra work at all.
             "provider_planned_date",
+            # W2-D — the other half of the provider's committed window,
+            # and the planning fields the bulk-plan table edits. Plain
+            # columns, so they cost the list nothing; the per-person
+            # distribution is DETAIL-ONLY on purpose (a nested list per
+            # row is the N+1 Sprint 120 exists to prevent).
+            "provider_planned_end_date",
+            "budget_hours",
+            "file_upload_required",
+            "completion_notes_required",
+            # W13 — the customer's own asks, read-only wherever they
+            # appear except the create form. Not provider-only: the
+            # customer wrote them and must be able to see they stuck.
+            "customer_requires_photo",
+            "customer_requires_note",
             "is_overdue",
             "started_before_plan",
             # Sprint 28 Batch 6 — cart routing taxonomy. Surfaced on
@@ -806,6 +1077,7 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             # operational ticket(s) it produced. Visible to every
             # audience: the customer is entitled to know that their
             # extra work turned into scheduled work.
+            "group",
             "has_operational_ticket",
             "spawned_tickets",
             # Sprint 180 §3 — who the finished work is charged to. Not
@@ -846,10 +1118,65 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
 
     # Mirror ExtraWorkRequestDetailSerializer's redaction: a CUSTOMER_USER
     # never sees billing metadata on the list either.
-    _PROVIDER_ONLY_FIELDS = ("invoice_date", "is_invoiced", "invoiced_at")
+    #
+    # W2-D — `budget_hours` joins them. Planning is a provider action and
+    # a customer must never see how long we said the job would take, on
+    # any surface. The two completion flags stay visible: they are a
+    # promise about the evidence the customer will get, not a number
+    # about our own people.
+    _PROVIDER_ONLY_FIELDS = (
+        "invoice_date",
+        "is_invoiced",
+        "invoiced_at",
+        "budget_hours",
+        # P-9 B — who we put on the job, which of OUR invoices holds it
+        # and when the customer is billed are the provider's business,
+        # like the budget above. The cart lines, the contact, the
+        # customer's own reason and the finish date are theirs to see.
+        "people_names",
+        "invoice_ref",
+        "customer_invoice_day",
+    )
 
     def get_has_operational_ticket(self, obj) -> bool:
         return _has_operational_ticket(obj)
+
+    def get_group(self, obj):
+        """The series summary, or null for an ordinary standalone work.
+
+        `None` is the common case by a wide margin and it is what makes
+        the normal row render exactly as it did before this field
+        existed — the frontend reads a null group as "not a series" and
+        changes nothing.
+        """
+        group_id = obj.group_id
+        if group_id is None:
+            return None
+        # MEMOISED PER PAGE. The counts are a property of the SERIES,
+        # not of the row, so twelve siblings on one page must not run
+        # twelve identical count queries. `many=True` builds one
+        # serializer instance for the whole page, so this cache lives
+        # exactly as long as it should.
+        cache = getattr(self, "_w5b_group_cache", None)
+        if cache is None:
+            cache = {}
+            self._w5b_group_cache = cache
+        if group_id not in cache:
+            from .groups import group_status_counts
+
+            group = obj.group
+            cache[group_id] = {
+                "id": group.id,
+                "standard_title": group.standard_title,
+                "member_count": group.members.count(),
+                "status_counts": group_status_counts(group),
+            }
+        return cache[group_id]
+
+    def get_display_phase(self, obj) -> str:
+        request = self.context.get("request") if self.context else None
+        user = getattr(request, "user", None) if request else None
+        return _display_phase_for(obj, user)
 
     def get_is_priced(self, obj) -> bool:
         return _is_priced(obj)
@@ -857,19 +1184,230 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     def get_spawned_tickets(self, obj):
         return _serialize_spawned_tickets(obj)
 
+    # ---- P-9 B — per-page loaders ------------------------------------
+    #
+    # `many=True` builds ONE child serializer for the whole page, and
+    # DRF hands it the page as `self.instance`, so a table loaded on the
+    # first row serves every row after it. A row outside the page (a
+    # serializer built with no instance, as a unit test may) costs one
+    # query of its own and is cached the same way. Same shape and same
+    # reasoning as `get_group` above.
+
+    def _p9_page_pks(self) -> list[int]:
+        pks = getattr(self, "_p9_page_pks_cache", None)
+        if pks is None:
+            instance = self.instance
+            if instance is None:
+                pks = []
+            elif isinstance(instance, ExtraWorkRequest):
+                pks = [instance.pk]
+            else:
+                pks = [row.pk for row in instance]
+            self._p9_page_pks_cache = pks
+        return pks
+
+    def _p9_per_row(self, name: str, obj, load):
+        """`load(pks) -> {pk: value}`, run once for the page."""
+        cache = getattr(self, "_p9_cache", None)
+        if cache is None:
+            cache = {}
+            self._p9_cache = cache
+        table = cache.get(name)
+        if table is None:
+            page_pks = self._p9_page_pks()
+            table = load(page_pks)
+            # A page row the loader found nothing for is ANSWERED (None),
+            # not unknown: without this every empty row would fall
+            # through to the per-row query below, which is the N+1.
+            for pk in page_pks:
+                table.setdefault(pk, None)
+            cache[name] = table
+        if obj.pk not in table:
+            table.update(load([obj.pk]))
+            table.setdefault(obj.pk, None)
+        return table.get(obj.pk)
+
+    @staticmethod
+    def _p9_load_lines(pks):
+        """The cart lines per request: a count, the first three names,
+        and the agreed-price estimate (excl. VAT) — or None for it when
+        no line carries an agreed price."""
+        out: dict = {}
+        items = (
+            ExtraWorkRequestItem.objects.filter(extra_work_request_id__in=pks)
+            .select_related("service")
+            .order_by("extra_work_request_id", "id")
+        )
+        for item in items:
+            entry = out.setdefault(
+                item.extra_work_request_id,
+                {"count": 0, "names": [], "contract": None},
+            )
+            entry["count"] += 1
+            name = (
+                item.snapshot_service_name
+                or item.custom_description
+                or (item.service.name if item.service_id else "")
+            )
+            if len(entry["names"]) < 3:
+                entry["names"].append(name)
+            if (
+                item.line_price_source
+                == ExtraWorkLinePriceSource.AGREED_CUSTOMER_PRICE
+                and item.snapshot_unit_price is not None
+            ):
+                entry["contract"] = (entry["contract"] or Decimal("0.00")) + (
+                    item.quantity * item.snapshot_unit_price
+                )
+        return out
+
+    @staticmethod
+    def _p9_load_people(pks):
+        from .models import ExtraWorkAssignment
+
+        out: dict = {}
+        assignments = (
+            ExtraWorkAssignment.objects.filter(extra_work_request_id__in=pks)
+            .select_related("user")
+            .order_by("role", "id")
+        )
+        for assignment in assignments:
+            names = out.setdefault(assignment.extra_work_request_id, [])
+            person = assignment.user
+            name = (person.full_name or "").strip() or person.email
+            if name not in names:
+                names.append(name)
+        return out
+
+    @staticmethod
+    def _p9_load_invoice_refs(pks):
+        """The live invoice holding each request — the same claim
+        predicate `invoicing.selectors` uses (not deleted, not
+        reversed). The newest when legacy data holds more than one."""
+        from invoicing.models import InvoiceLine
+
+        out: dict = {}
+        lines = (
+            InvoiceLine.objects.filter(
+                extra_work_id__in=pks,
+                invoice__deleted_at__isnull=True,
+                invoice__reversed_by__isnull=True,
+            )
+            .select_related("invoice")
+            .order_by("extra_work_id", "-invoice_id")
+        )
+        for line in lines:
+            if line.extra_work_id in out:
+                continue
+            invoice = line.invoice
+            out[line.extra_work_id] = {
+                "id": invoice.id,
+                "number": invoice.number,
+                "status": invoice.status,
+                "sent_at": _P9_DATETIME.to_representation(invoice.sent_at)
+                if invoice.sent_at
+                else None,
+            }
+        return out
+
+    def get_line_summary(self, obj):
+        entry = self._p9_per_row("lines", obj, self._p9_load_lines)
+        if entry is None:
+            return {"count": 0, "names": []}
+        return {"count": entry["count"], "names": list(entry["names"])}
+
+    def get_contract_estimate_amount(self, obj):
+        entry = self._p9_per_row("lines", obj, self._p9_load_lines)
+        if entry is None or entry["contract"] is None:
+            return None
+        return f"{entry['contract']:.2f}"
+
+    def get_people_names(self, obj):
+        return list(self._p9_per_row("people", obj, self._p9_load_people) or [])
+
+    def get_invoice_ref(self, obj):
+        return self._p9_per_row("invoice_refs", obj, self._p9_load_invoice_refs)
+
+    @staticmethod
+    def _p9_last_history(obj, new_status):
+        # `.all()` reads the list queryset's prefetch; a `.filter()` here
+        # would be the per-row query `started_before_plan` was cured of.
+        rows = [
+            row for row in obj.status_history.all() if row.new_status == new_status
+        ]
+        if not rows:
+            return None
+        return max(rows, key=lambda row: (row.created_at, row.id))
+
+    def get_rejection_note(self, obj):
+        """The customer's own words, from the history row the reject
+        door wrote them into (`[Reject reason] ...`). Null unless the
+        request is declined; "" when it was declined without words."""
+        if obj.status != ExtraWorkStatus.CUSTOMER_REJECTED:
+            return None
+        row = self._p9_last_history(obj, ExtraWorkStatus.CUSTOMER_REJECTED)
+        if row is None:
+            return ""
+        note = row.note or ""
+        prefix = "[Reject reason] "
+        if note.startswith(prefix):
+            note = note[len(prefix):]
+        return note.split("\n\n", 1)[0].strip()
+
+    def get_completed_at(self, obj):
+        if obj.status != ExtraWorkStatus.COMPLETED:
+            return None
+        row = self._p9_last_history(obj, ExtraWorkStatus.COMPLETED)
+        if row is None:
+            return None
+        return _P9_DATETIME.to_representation(row.created_at)
+
+    def get_contact_name(self, obj) -> str:
+        """Who the price went to: the requester when a customer asked
+        for the work themselves, else the customer's contact address."""
+        author = obj.created_by
+        if author is not None and author.role == UserRole.CUSTOMER_USER:
+            return (author.full_name or "").strip() or author.email
+        return obj.customer.contact_email or ""
+
+    def get_customer_invoice_day(self, obj):
+        customer = obj.customer
+        if customer.invoice_day_of_month:
+            return customer.invoice_day_of_month
+        if customer.invoice_day_rule == Customer.InvoiceDayRule.FIRST_OF_MONTH:
+            return 1
+        if customer.invoice_day_rule == Customer.InvoiceDayRule.LAST_OF_MONTH:
+            return "LAST_OF_MONTH"
+        return None
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         user = self.context.get("request").user if self.context.get("request") else None
-        if _is_customer(user):
-            for field in self._PROVIDER_ONLY_FIELDS:
-                data.pop(field, None)
-        return data
+        return redact_for_customer(data, user, self._PROVIDER_ONLY_FIELDS)
 
 
 # ---------------------------------------------------------------------------
 # Extra Work — detail (role-aware)
 # ---------------------------------------------------------------------------
 class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
+    # FE-3 (Addendum D SS D.11 G3) -- the deadline chip's number, with the
+    # SAME rule `is_overdue` uses (no deadline / finished work -> None),
+    # so the chip and the late badge can never disagree. Read-only,
+    # presentation only, zero storage.
+    days_until_due = serializers.SerializerMethodField()
+
+    def get_days_until_due(self, obj):
+        from django.utils import timezone as _tz
+        if obj.deadline is None:
+            return None
+        if obj.status in {
+            ExtraWorkStatus.COMPLETED,
+            ExtraWorkStatus.CANCELLED,
+            ExtraWorkStatus.CUSTOMER_REJECTED,
+        }:
+            return None
+        return (obj.deadline - _tz.localdate()).days
+
     """
     Role-aware detail serializer. Provider operators see every
     field. CUSTOMER_USER never sees `manager_note`,
@@ -877,6 +1415,22 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     `internal_cost_note` rows.
     """
 
+    # FE-2 (§D.4) — read-only by construction, per-viewer by context.
+    display_phase = serializers.SerializerMethodField()
+    customer_invoice_day = serializers.SerializerMethodField()
+    # P-13 B — WHERE this work's money is, on the DETAIL too: the
+    # Money tab's third block says "On draft #17" / "Sent on invoice
+    # 2026-0003" instead of the bare is_invoiced flag. The LIST has
+    # carried this since P-9 (`_p9_load_invoice_refs`); the detail
+    # reuses that loader for one row so the two shapes cannot drift.
+    # Provider-only, like the list's (the draft/issued window is
+    # billing-internal; customers meet the invoice when it is SENT, in
+    # their own invoices area).
+    invoice_ref = serializers.SerializerMethodField()
+
+    def get_invoice_ref(self, obj):
+        refs = ExtraWorkRequestListSerializer._p9_load_invoice_refs([obj.pk])
+        return refs.get(obj.pk)
     company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
@@ -886,6 +1440,39 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     created_by_email = serializers.CharField(
         source="created_by.email", read_only=True
     )
+    # P-1 — the plain facts every detail states: who opened it, and
+    # whether the window is a PERSON's plan (the provider's committed
+    # window, `tickets/plan_provenance.py`) and whose. Read-only, read
+    # off history that already exists.
+    created_by_name = serializers.SerializerMethodField()
+    has_real_plan = serializers.SerializerMethodField()
+    planned_by_name = serializers.SerializerMethodField()
+    planned_at = serializers.SerializerMethodField()
+
+    def get_created_by_name(self, obj) -> str:
+        author = obj.created_by
+        if author is None:
+            return ""
+        return (author.full_name or "").strip() or author.email
+
+    def _plan_provenance(self, obj):
+        cached = getattr(obj, "_p1_provenance", None)
+        if cached is None:
+            from tickets.plan_provenance import extra_work_plan_provenance
+
+            cached = extra_work_plan_provenance(obj)
+            obj._p1_provenance = cached
+        return cached
+
+    def get_has_real_plan(self, obj) -> bool:
+        return self._plan_provenance(obj).has_real_plan
+
+    def get_planned_by_name(self, obj):
+        return self._plan_provenance(obj).planned_by_name
+
+    def get_planned_at(self, obj):
+        return self._plan_provenance(obj).planned_at
+
     # Sprint 127 — per-customer labels. `allow_null` so an untagged row
     # (null FK) renders the key as null rather than dropping it. Visible to
     # every viewer, customers included — the label is not sensitive.
@@ -930,6 +1517,12 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     # the ticket list to name the ticket.
     has_operational_ticket = serializers.SerializerMethodField()
     spawned_tickets = serializers.SerializerMethodField()
+    # W2-D — the budget, distributed. Provider-only (stripped in
+    # `to_representation`), DETAIL-only, and computed in ONE place so the
+    # list of people and the total can never disagree.
+    planned_hours = serializers.SerializerMethodField()
+    planned_hours_total = serializers.SerializerMethodField()
+    planned_hours_overrun = serializers.SerializerMethodField()
 
     class Meta:
         model = ExtraWorkRequest
@@ -941,6 +1534,8 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "building_name",
             "customer",
             "customer_name",
+            "customer_invoice_day",
+            "invoice_ref",
             "department",
             "department_name",
             "work_type",
@@ -965,10 +1560,31 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             # the provider says the work will actually happen, and it is
             # what lets the Work Plan schedule an extra work at all.
             "provider_planned_date",
+            # W2-D — the committed window's end, the budget, the
+            # distribution and the two completion requirements. Read the
+            # six dates as TWO PAIRS (see the model): `preferred_date` ->
+            # `planned_end_date` is what the customer asked for,
+            # `provider_planned_date` -> `provider_planned_end_date` is
+            # what we committed to, and the plan action writes only the
+            # second.
+            "provider_planned_end_date",
+            "budget_hours",
+            "planned_hours",
+            "planned_hours_total",
+            "planned_hours_overrun",
+            "file_upload_required",
+            "completion_notes_required",
+            # W13 — the customer's own asks, read-only wherever they
+            # appear except the create form. Not provider-only: the
+            # customer wrote them and must be able to see they stuck.
+            "customer_requires_photo",
+            "customer_requires_note",
             "deadline",
             "is_overdue",
+            "days_until_due",
             "started_before_plan",
             "status",
+            "display_phase",
             # Sprint 28 Batch 6 — cart routing taxonomy + nested line
             # items. routing_decision is computed at submission time by
             # the create serializer and is read-only thereafter (Batch 7
@@ -1013,6 +1629,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             # Bookkeeping.
             "created_by",
             "created_by_email",
+            "created_by_name",
+            # P-1 — is the committed window a person's plan, and whose.
+            "has_real_plan",
+            "planned_by_name",
+            "planned_at",
             "requested_at",
             "updated_at",
             "pricing_proposed_at",
@@ -1059,6 +1680,19 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "invoice_date",
             "is_invoiced",
             "invoiced_at",
+            # W2-D — written by the plan action (`extra_work.planning`)
+            # and by nothing else. This ViewSet has no update action, so
+            # listing them as writable would be a promise no endpoint
+            # keeps.
+            "provider_planned_end_date",
+            "budget_hours",
+            "file_upload_required",
+            "completion_notes_required",
+            # W13 — the customer's own asks, read-only wherever they
+            # appear except the create form. Not provider-only: the
+            # customer wrote them and must be able to see they stuck.
+            "customer_requires_photo",
+            "customer_requires_note",
             "created_by",
             "created_by_email",
             "requested_at",
@@ -1078,6 +1712,20 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         "invoice_date",
         "is_invoiced",
         "invoiced_at",
+        # P-12 D6 — the customer's billing day is billing-internal.
+        "customer_invoice_day",
+        # P-13 B — the draft/issued window is billing-internal too.
+        "invoice_ref",
+        # P-1 — which employee planned it is internal, like the crew.
+        "planned_by_name",
+        # W2-D — planning is a provider action end to end. A customer
+        # must never see the budget, who is doing what for how long, or
+        # whether we are over our own estimate; those are numbers about
+        # our own people, and one of them names them.
+        "budget_hours",
+        "planned_hours",
+        "planned_hours_total",
+        "planned_hours_overrun",
     )
 
     def get_has_operational_ticket(self, obj) -> bool:
@@ -1086,8 +1734,43 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     def get_spawned_tickets(self, obj):
         return _serialize_spawned_tickets(obj)
 
+    def get_display_phase(self, obj) -> str:
+        request = self.context.get("request") if self.context else None
+        user = getattr(request, "user", None) if request else None
+        return _display_phase_for(obj, user)
+
+    def get_customer_invoice_day(self, obj):
+        # P-12 D6 — one impl, the list serializer's: the resolved
+        # billing day (int, "LAST_OF_MONTH", or null).
+        return ExtraWorkRequestListSerializer.get_customer_invoice_day(
+            self, obj
+        )
+
     def get_is_priced(self, obj) -> bool:
         return _is_priced(obj)
+
+    def get_planned_hours(self, obj):
+        request = self.context.get("request")
+        return _serialize_planned_hours(
+            obj, viewer=request.user if request else None
+        )
+
+    def get_planned_hours_total(self, obj) -> str:
+        from .planning import distributed_hours
+
+        return f"{distributed_hours(obj):.2f}"
+
+    def get_planned_hours_overrun(self, obj):
+        """The overrun warning body, or null. A WARNING — never a block.
+
+        On the READ surface as well as on the write response, so the
+        manager approving the work sees the overrun on the screen they
+        approve from and not only in the reply to a save somebody else
+        made.
+        """
+        from .planning import hours_overrun
+
+        return hours_overrun(obj)
 
     def get_pricing_line_items(self, obj):
         user = self.context.get("request").user if self.context.get("request") else None
@@ -1184,6 +1867,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
                 "can_post_ew_public_reply": False,
                 "can_post_ew_internal_note": False,
                 "can_post_ew_customer_internal": False,
+                "can_plan": False,
             }
 
         allowed = self._resolve_allowed_next_statuses(obj)
@@ -1309,6 +1993,14 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         can_post_ew_internal_note = provider_mgmt
         can_post_ew_customer_internal = is_customer
 
+        # W2-D — may this actor plan the work (budget hours, the
+        # committed window, hours per person, the two completion
+        # requirements)? Planning is a provider action end to end, so
+        # this is provider roles in scope and nobody else: the endpoint
+        # refuses a customer-side actor at the door, and this flag says
+        # so before the button is drawn rather than after it 403s.
+        can_plan = is_super or is_ca_in or is_bm_in
+
         return {
             "allowed_next_statuses": list(allowed),
             "can_prepare_extra_work_proposal": can_prepare_extra_work_proposal,
@@ -1321,15 +2013,13 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "can_post_ew_public_reply": can_post_ew_public_reply,
             "can_post_ew_internal_note": can_post_ew_internal_note,
             "can_post_ew_customer_internal": can_post_ew_customer_internal,
+            "can_plan": can_plan,
         }
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
         user = self.context.get("request").user if self.context.get("request") else None
-        if _is_customer(user):
-            for field in self._PROVIDER_ONLY_FIELDS:
-                data.pop(field, None)
-        return data
+        return redact_for_customer(data, user, self._PROVIDER_ONLY_FIELDS)
 
 
 # ---------------------------------------------------------------------------
@@ -1479,6 +2169,12 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             "request_intent",
             # Sprint 180 §3 — the billing target, chosen at create time.
             "billed_to",
+            # W13 — what the CUSTOMER asks to see before this is called
+            # done. Writable at create because that is when they are
+            # asking; the provider's own two flags are written at plan
+            # time through the plan endpoint and are not on this form.
+            "customer_requires_photo",
+            "customer_requires_note",
             "line_items",
         ]
         read_only_fields = ["id"]
@@ -1519,6 +2215,20 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
         building = attrs["building"]
         customer = attrs["customer"]
 
+        # W-EW1 §2 — one date flow. Stamp every line with the cart's one
+        # date BEFORE anything reads it: `_validate_custom_price_orderable`
+        # below and `create()` both index `line["requested_date"]`, and
+        # the agreed-price window a line resolves against is decided by
+        # exactly this value.
+        #
+        # `preferred_date` is optional, so a cart with no stated wish
+        # falls back to today — the same date the line would have
+        # resolved against back when the form made the operator type a
+        # date per line and every line defaulted to the day of entry.
+        cart_date = attrs.get("preferred_date") or timezone.localdate()
+        for line in attrs.get("line_items", []) or []:
+            line["requested_date"] = cart_date
+
         # Sprint 186 — no extra work is left untagged.
         #
         # An untagged row falls out of every report that groups by
@@ -1545,33 +2255,35 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
                 .first()
             )
 
-        # Sprint 176 §3 — the deadline is a PROVIDER commitment, so the
-        # create form refuses one from a customer-side actor.
+        # W-EW1 §1 — Sprint 176 §3's provider-only deadline gate is LIFTED
+        # on create, deliberately and only here.
         #
-        # Customers can and do create Extra Work here
-        # (`customer_users_can_create_extra_work`, default on), and they
-        # already have `preferred_date` — "I would like it around then".
-        # The `deadline` is different in kind: it is what turns a row red
-        # on the list and in the Work Plan, and what an operator is
-        # measured against. A customer who could set it could make the
-        # provider late by typing a date. So the customer states a wish;
-        # the provider decides what it commits to.
+        # §3 refused a customer-side deadline because "the deadline is
+        # what an operator is measured against". The model's own reading
+        # of the six date columns (models.py) is the answer to that: the
+        # deadline sits in the ASKED FOR / OWED pair beside
+        # `preferred_date` and `planned_end_date`, while the date the
+        # provider is measured against having COMMITTED to is
+        # `provider_planned_date` / `provider_planned_end_date`, which
+        # only the plan action writes and which nothing here touches. A
+        # customer stating a deadline is stating the date the work is
+        # owed by; it is not, and cannot become, the provider's own
+        # commitment.
         #
-        # Read from `attrs` (the parsed field) rather than `initial_data`,
-        # so this does not depend on how the serializer was constructed.
-        # An explicit `null` is a no-op, not an attempt to commit the
-        # provider to anything, so truthiness is the right test here.
-        if is_customer_side(user) and attrs.get("deadline"):
-            raise serializers.ValidationError(
-                {
-                    "deadline": (
-                        "Only provider staff can set a deadline. Use "
-                        "preferred_date to say when you would like this "
-                        "done."
-                    ),
-                    "code": ERR_DEADLINE_PROVIDER_ONLY,
-                }
-            )
+        # Scope is unchanged and still enforced. The membership and
+        # `customer.extra_work.create` checks live further down this same
+        # `validate()`, and any of them raising rejects the whole create,
+        # so lifting this gate widens WHICH FIELD a customer-side actor
+        # may fill, never WHICH REQUESTS it may create: a deadline can
+        # only ever land on a request that actor was already entitled to
+        # make (H-1/H-2 untouched).
+        #
+        # The two EDIT paths stay provider-only on purpose — a deadline
+        # may be stated when the work is asked for, but moving one
+        # afterwards is renegotiation: `PATCH /extra-work/<id>/dates/`
+        # (views.py) and `POST /extra-work/bulk-dates/` (views_dates.py)
+        # both still answer a customer-side caller with 403
+        # `deadline_provider_only`.
 
         # Single-company invariant: the customer's company is the
         # only valid `company` for this Extra Work request, and the
@@ -1816,7 +2528,39 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             # Backward compatibility for Batch 6/7/8 clients that
             # never sent an intent. Derive a safe default (never
             # AUTO_START — that would skip customer approval).
+            #
+            # P-15 (P-14's S3 finding, EW 315) — the derived default
+            # goes through the SAME validator an explicit choice
+            # faces. A provider omitting the intent on a non-agreed
+            # cart used to get REQUEST_QUOTE stamped — the very intent
+            # the validator forbids a provider to choose (the preview
+            # advertised the contradiction: allowed
+            # [AUTO_START_AFTER_PRICING] beside default REQUEST_QUOTE).
+            # A default that fails validation is not silently swapped
+            # for a stronger one (auto-start by omission would
+            # pre-authorise skipping the customer's approval): the
+            # caller is asked to choose, by name.
             effective_intent = derive_default_intent(cart_classification)
+            try:
+                validate_intent_for_cart(
+                    intent=effective_intent,
+                    cart=cart_classification,
+                    actor_kind=actor_kind,
+                )
+            except IntentValidationError:
+                raise serializers.ValidationError(
+                    {
+                        "request_intent": [
+                            serializers.ErrorDetail(
+                                "Choose how this request should run: "
+                                "no default applies here. The preview's "
+                                "allowed_intents lists the choices for "
+                                "this cart.",
+                                code="intent_required",
+                            )
+                        ]
+                    }
+                )
 
         validated_data["request_intent"] = effective_intent
 
@@ -1966,7 +2710,13 @@ class ExtraWorkPreviewLineSerializer(serializers.Serializer):
         default=None,
     )
     quantity = serializers.DecimalField(max_digits=12, decimal_places=2)
-    requested_date = serializers.DateField()
+    # W-EW1 §2 — optional, and overwritten by the parent from the cart's
+    # one date. NOT refused the way the create path refuses it: preview
+    # is strictly non-mutating, so the only thing that matters here is
+    # that it prices against the SAME date create will store. A caller
+    # that still sends one gets the cart date applied instead, and its
+    # preview therefore keeps matching what create would write.
+    requested_date = serializers.DateField(required=False)
     customer_note = serializers.CharField(
         required=False, allow_blank=True, default=""
     )
@@ -2019,6 +2769,15 @@ class ExtraWorkPreviewSerializer(serializers.Serializer):
         allow_null=True,
         default=None,
     )
+    # W-EW1 §2 — the cart's one date, mirroring the create payload. The
+    # preview resolves agreed prices `on=` a date; if it kept resolving
+    # on today while create resolved on the customer's stated date, the
+    # amount on screen and the amount stored would differ the moment a
+    # price window changes between the two. Optional, exactly as it is
+    # on create.
+    preferred_date = serializers.DateField(
+        required=False, allow_null=True, default=None
+    )
     line_items = ExtraWorkPreviewLineSerializer(many=True)
 
     def validate_line_items(self, value):
@@ -2034,6 +2793,16 @@ class ExtraWorkPreviewSerializer(serializers.Serializer):
 
         building = attrs["building"]
         customer = attrs["customer"]
+
+        # W-EW1 §2 — identical rule to
+        # `ExtraWorkRequestCreateSerializer.validate`, deliberately
+        # duplicated rather than shared: these two serializers already
+        # keep parallel copies of the scope, cross-company and
+        # custom-price guards, and the property that matters is that the
+        # preview prices on the same date create will store.
+        cart_date = attrs.get("preferred_date") or timezone.localdate()
+        for line in attrs.get("line_items", []) or []:
+            line["requested_date"] = cart_date
 
         if customer.company_id != building.company_id:
             raise serializers.ValidationError(
@@ -2230,6 +2999,111 @@ class ExtraWorkDatesSerializer(serializers.Serializer):
     deadline = serializers.DateField(required=False, allow_null=True)
     planned_end_date = serializers.DateField(required=False, allow_null=True)
     provider_planned_date = serializers.DateField(required=False, allow_null=True)
+
+
+# ---------------------------------------------------------------------------
+# W2-D — the plan payload
+# ---------------------------------------------------------------------------
+class ExtraWorkPlannedHoursRowSerializer(serializers.Serializer):
+    """One `{user, hours}` line of the distribution.
+
+    `hours` is `min_value=0` and has NO upper bound and no cap against
+    the parent's budget. Over-distributing is a WARNING the response
+    carries, never a refusal — see `extra_work.planning` for the
+    evidence behind that rule.
+
+    Zero is legal and means something: a person on the crew with no
+    hours budgeted for them yet. Dropping their line to say so would
+    lose the fact that they are on the job.
+    """
+
+    user = serializers.IntegerField(min_value=1)
+    #: W6-H — WHICH DAY. Optional and nullable, and both absences mean
+    #: the same thing: "planned, day not decided". A payload that never
+    #: mentions a date still works exactly as it did before the column
+    #: existed, which is what keeps the bulk table and every older
+    #: client running unchanged.
+    date = serializers.DateField(required=False, allow_null=True)
+    #: W7 — WHICH KIND OF HOUR. Optional and nullable, and both absences
+    #: mean the same thing: ORDINARY hours. A payload that never mentions
+    #: an hour type behaves exactly as it did before the column existed,
+    #: which is what keeps the bulk table and every older client running
+    #: unchanged.
+    #:
+    #: A bare id, validated in `planning.resolve_planned_hours` against
+    #: the catalog of the work's OWN company rather than by a
+    #: `PrimaryKeyRelatedField` over every HourType there is. A global
+    #: queryset here would 400-with-a-different-message for another
+    #: tenant's id than for a nonexistent one, which is an existence
+    #: oracle across companies — the same reason the crew check refuses
+    #: an unassigned person and an unknown person with one body.
+    hour_type = serializers.IntegerField(
+        min_value=1, required=False, allow_null=True
+    )
+    hours = serializers.DecimalField(
+        max_digits=8, decimal_places=2, min_value=0
+    )
+
+
+class ExtraWorkPlanSerializer(serializers.Serializer):
+    """The plan, as it arrives — for ONE work and for a bulk selection.
+
+    THE POINT OF THIS CLASS IS THAT THERE IS ONLY ONE OF IT. The single
+    `POST /api/extra-work/<id>/plan/` and the bulk
+    `POST /api/extra-work/bulk-plan/` both validate against this
+    serializer, so a field the single form knows about cannot be a field
+    the bulk table silently drops.
+
+    That is the defect this shape exists to prevent, and the reference
+    system has it in its strongest form: over there the plan modal sends
+    `upload_is_required` and `notes_is_required` and the config-driven
+    update persists neither, so both are silently discarded on EVERY
+    write path and 0 of 78 live records has either flag set
+    (`docs/reference/osius-reference-system/01-extra-work.md` §1.6). A
+    payload field that no writer carries is a control that lies to the
+    person using it.
+
+    EVERY FIELD IS OPTIONAL, AND ABSENCE MEANS "LEAVE IT ALONE" —
+    including the two booleans. `required=False` on a BooleanField is
+    exactly what makes "the bulk dialog did not touch this" expressible;
+    a default of False here would rebuild the reference's bug in our own
+    code.
+
+    `start` is the exception, and deliberately so: plan and start are
+    ONE action, as they are in the reference system where the button is
+    labelled "Start Work". A caller that wants to plan without starting
+    sends `start: false`.
+    """
+
+    budget_hours = serializers.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        min_value=0,
+        required=False,
+        allow_null=True,
+    )
+    provider_planned_date = serializers.DateField(
+        required=False, allow_null=True
+    )
+    provider_planned_end_date = serializers.DateField(
+        required=False, allow_null=True
+    )
+    planned_hours = ExtraWorkPlannedHoursRowSerializer(
+        many=True, required=False
+    )
+    file_upload_required = serializers.BooleanField(required=False)
+    completion_notes_required = serializers.BooleanField(required=False)
+    # No `default=` on purpose: key presence keeps meaning what it means
+    # everywhere else here. P-8R A2 — an ABSENT `start` means "do not
+    # start" (`planning.apply_plan`); starting is an explicit
+    # `start: true`, never a side effect of writing a plan field.
+    start = serializers.BooleanField(required=False)
+    # Task 3 — the recorded override for editing PAST days in the hours
+    # grid. Not a plan field (it sets nothing); `apply_plan` demands it
+    # when, and only when, a row dated before today actually changes.
+    past_days_override_reason = serializers.CharField(
+        required=False, allow_blank=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3049,10 +3923,17 @@ class ProposalDetailSerializer(serializers.ModelSerializer):
         # endpoint. The parent-status guard is cheap and accurate, so
         # we DO include it here so the frontend doesn't render a Send
         # button against a REQUESTED parent (which would always 400).
+        # W-FIX1 A3 (audit F3) — nothing to send without a line. A
+        # proposal with no lines used to advertise Send and be refused
+        # at POST time by the cart-coverage gate; the button now says
+        # why it is disabled instead. `can_send_reason` names the gate
+        # so the client does not have to guess which one fired.
+        has_lines = obj.lines.exists()
         can_send = bool(
             provider_can_mutate
             and obj.status == ProposalStatus.DRAFT
             and extra_work.status == ExtraWorkStatus.UNDER_REVIEW
+            and has_lines
         )
 
         # Cancel is allowed from DRAFT or SENT. SENT cancellation is

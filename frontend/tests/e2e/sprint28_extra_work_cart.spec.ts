@@ -6,16 +6,30 @@ import { loginAs } from "./fixtures/login";
 
 /**
  * Sprint 28 Batch 6 — Extra Work cart UI.
+ * FE-2 / FE-4 (Addendum D §D.5) — REWRITTEN onto the customer Meerwerk
+ * flow. A CUSTOMER_USER opening `/extra-work/new` lands on
+ * `MeerwerkFlowPage`: four steps — where (building) / what (tick the
+ * agreed-price services, add "other" free-text lines) / when (wish
+ * date) / confirm — and the confirm step STATES the outcome from the
+ * server's own preview (`meerwerk-outcome`, `data-kind="instant"` when
+ * every line has an agreed price, `"quote"` otherwise). The Sprint 28
+ * cart (title / description / per-line service select, quantity,
+ * date, note, add/remove line, submit, result banners) is gone; the
+ * flow derives the request title from the picked lines.
  *
- * Coverage:
- *   1. Customer submits a cart with one priced line → INSTANT banner.
- *   2. Customer submits a cart with one unpriced line → PROPOSAL
- *      banner.
- *   3. Empty cart blocks submission (inline error, no API call).
- *   4. Duplicate service blocks submission (inline error).
- *   5. After a successful submission, the detail page renders the
- *      cart line item correctly (service / quantity / requested_date
- *      / customer_note).
+ * Coverage (same intent as Batch 6):
+ *   1. Customer submits one priced line → INSTANT outcome + created
+ *      screen saying so.
+ *   2. Customer submits a line without an agreed price ("other" line)
+ *      → QUOTE outcome.
+ *   3. Empty cart blocks progress (the Next button stays disabled on
+ *      the "what" step; no API call).
+ *   4. A priced service can only be in the cart ONCE (it is a checkbox,
+ *      not a repeatable line) — the duplicate-service guard is
+ *      structural now.
+ *   5. After a successful submission, the created screen links to the
+ *      customer detail (`meerwerk-detail-page`) and the API row carries
+ *      the line item (service / quantity / requested_date).
  *
  * Auth: CUSTOMER_USER (Tom Verbeek) for the UI flows; SUPER_ADMIN
  * via the REST API for seeding/cleanup so the catalog rows the
@@ -98,6 +112,23 @@ async function resolveBuildingId(
   return match!.id;
 }
 
+
+/**
+ * Sprint 142 — a catalog row is per provider COMPANY, and `company` is
+ * REQUIRED on create as soon as more than one company exists (the dev
+ * database now holds four). Seed everything under "Osius Demo".
+ */
+async function resolveOsiusCompanyId(api: APIRequestContext): Promise<number> {
+  const response = await api.get("/api/companies/?page_size=50");
+  expect(response.status()).toBe(200);
+  const body = (await response.json()) as {
+    results: Array<{ id: number; name: string }>;
+  };
+  const match = body.results.find((c) => c.name === "Osius Demo");
+  expect(match, 'company "Osius Demo" present').toBeTruthy();
+  return match!.id;
+}
+
 interface CategoryRow {
   id: number;
   name: string;
@@ -123,7 +154,7 @@ interface ExtraWorkRow {
     service: number | null;
     service_name: string;
     quantity: string;
-    requested_date: string;
+    requested_date: string | null;
     customer_note: string;
   }>;
 }
@@ -133,9 +164,11 @@ async function ensureSeedService(
   suffix: string,
 ): Promise<{ category: CategoryRow; service: ServiceRow }> {
   const ts = Date.now();
+  const companyId = await resolveOsiusCompanyId(api);
   const tag = `${suffix}-${ts}-${Math.random().toString(36).slice(2, 7)}`;
   const catResponse = await api.post("/api/services/categories/", {
     data: {
+      company: companyId,
       name: `B6 Cat ${tag}`,
       description: "",
       is_active: true,
@@ -146,6 +179,7 @@ async function ensureSeedService(
 
   const svcResponse = await api.post("/api/services/", {
     data: {
+      company: companyId,
       category: cat.id,
       name: `B6 Svc ${tag}`,
       description: "",
@@ -183,6 +217,28 @@ async function listPricesForService(
   return body.results;
 }
 
+async function seedCustomerPrice(
+  api: APIRequestContext,
+  customerId: number,
+  serviceId: number,
+  unitPrice: string,
+): Promise<void> {
+  const priceResponse = await api.post(
+    `/api/customers/${customerId}/pricing/`,
+    {
+      data: {
+        service: serviceId,
+        unit_price: unitPrice,
+        vat_pct: "21.00",
+        valid_from: todayISO(),
+        valid_to: null,
+        is_active: true,
+      },
+    },
+  );
+  expect(priceResponse.status()).toBe(201);
+}
+
 async function deletePriceById(
   api: APIRequestContext,
   customerId: number,
@@ -202,6 +258,31 @@ async function deleteExtraWorkRequest(
   // tolerate 404 / 405 so test cleanup never fails the suite.
   const response = await api.delete(`/api/extra-work/${requestId}/`);
   expect([204, 404, 405]).toContain(response.status());
+}
+
+/**
+ * The flow derives the request title from the picked lines (one line
+ * → its label, the service name). Find the request by the service it
+ * was created for, newest first.
+ */
+async function findExtraWorkForService(
+  api: APIRequestContext,
+  serviceId: number,
+): Promise<ExtraWorkRow | null> {
+  const response = await api.get("/api/extra-work/?page_size=100");
+  if (response.status() !== 200) return null;
+  const body = (await response.json()) as {
+    results: Array<{ id: number; title: string }>;
+  };
+  for (const row of body.results) {
+    const detail = await api.get(`/api/extra-work/${row.id}/`);
+    if (detail.status() !== 200) continue;
+    const full = (await detail.json()) as ExtraWorkRow;
+    if ((full.line_items ?? []).some((line) => line.service === serviceId)) {
+      return full;
+    }
+  }
+  return null;
 }
 
 async function findExtraWorkByTitle(
@@ -231,77 +312,102 @@ function uniqueTitle(label: string): string {
   return `B6 ${label} ${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-test("Sprint 28 B6 — Customer cart submission with one priced line → INSTANT banner", async ({
+/** Step 1 (where): Tom has B1 + B2 + B3, so the building is a select. */
+async function openFlowAtWhat(
+  page: import("@playwright/test").Page,
+  buildingId: number,
+): Promise<void> {
+  await page.goto("/extra-work/new");
+  await page.waitForLoadState("networkidle");
+  await expect(page.locator("[data-testid='meerwerk-flow-page']")).toBeVisible({
+    timeout: 10_000,
+  });
+  const fixed = page.locator("[data-testid='meerwerk-building-fixed']");
+  if ((await fixed.count()) === 0) {
+    await page
+      .locator("[data-testid='meerwerk-building']")
+      .selectOption({ value: String(buildingId) });
+  }
+  await page.locator("[data-testid='meerwerk-next']").click();
+  // The "what" step: the agreed-price picker (or its empty line) and
+  // the "other" lines editor.
+  await expect(
+    page.locator(
+      "[data-testid='meerwerk-picker'], [data-testid='meerwerk-picker-empty']",
+    ).first(),
+  ).toBeVisible({ timeout: 10_000 });
+}
+
+/** Steps 3 + 4: wish date, then the confirm step with its outcome. */
+async function advanceToConfirm(
+  page: import("@playwright/test").Page,
+  wishDate: string,
+): Promise<void> {
+  await page.locator("[data-testid='meerwerk-next']").click();
+  const date = page.locator("[data-testid='meerwerk-date']");
+  await expect(date).toBeVisible({ timeout: 5_000 });
+  await date.fill(wishDate);
+  await page.locator("[data-testid='meerwerk-next']").click();
+  await expect(page.locator("[data-testid='meerwerk-confirm']")).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(page.locator("[data-testid='meerwerk-outcome']")).toBeVisible({
+    timeout: 15_000,
+  });
+}
+
+test("FE-2 — Customer submits one priced line → INSTANT outcome", async ({
   page,
   baseURL,
 }) => {
   const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
   const customerId = await resolveCustomerId(sa, OSIUS_CUSTOMER_NAME);
+  const buildingId = await resolveBuildingId(sa, OSIUS_BUILDING_NAME);
   const { category, service } = await ensureSeedService(sa, "instant");
 
-  // Seed an active customer-specific price → routes the cart to INSTANT.
-  const priceResponse = await sa.post(
-    `/api/customers/${customerId}/pricing/`,
-    {
-      data: {
-        service: service.id,
-        unit_price: "55.00",
-        vat_pct: "21.00",
-        valid_from: todayISO(),
-        valid_to: null,
-        is_active: true,
-      },
-    },
-  );
-  expect(priceResponse.status()).toBe(201);
+  // Seed an active customer-specific price → the line is agreed →
+  // INSTANT.
+  await seedCustomerPrice(sa, customerId, service.id, "55.00");
 
-  const title = uniqueTitle("instant");
-
+  let createdRequestId: number | null = null;
   try {
     await loginAs(page, DEMO_USERS.customerAll);
-    await page.goto("/extra-work/new");
-    await page.waitForLoadState("networkidle");
-    await expect(
-      page.locator("[data-testid='extra-work-create-page']"),
-    ).toBeVisible({ timeout: 10_000 });
+    await openFlowAtWhat(page, buildingId);
 
-    await page
-      .locator("[data-testid='extra-work-create-title']")
-      .fill(title);
-    await page
-      .locator("[data-testid='extra-work-create-description']")
-      .fill("Cart submission — instant path");
-
-    // The page seeds one empty cart line by default. Select the priced
-    // service in line 0.
-    await page
-      .locator("[data-testid='extra-work-create-line-service-0']")
-      .selectOption({ value: String(service.id) });
-
-    const qty = page.locator(
-      "[data-testid='extra-work-create-line-quantity-0']",
+    // Tick the priced service; a quantity box appears next to it.
+    const serviceCheckbox = page.locator(
+      `[data-testid='meerwerk-service-${service.id}']`,
     );
-    await qty.fill("");
+    await expect(serviceCheckbox).toBeVisible({ timeout: 10_000 });
+    await serviceCheckbox.check();
+    const qty = page
+      .locator("[data-testid='meerwerk-services'] input[type='number']")
+      .first();
+    await expect(qty).toBeVisible();
     await qty.fill("3");
 
-    const dateInput = page.locator(
-      "[data-testid='extra-work-create-line-date-0']",
+    await advanceToConfirm(page, todayISO());
+    await expect(page.locator("[data-testid='meerwerk-outcome']")).toHaveAttribute(
+      "data-kind",
+      "instant",
     );
-    await dateInput.fill(todayISO());
-
-    await page
-      .locator("[data-testid='extra-work-create-line-note-0']")
-      .fill("Top floor windows");
-
-    await page.locator("[data-testid='extra-work-create-submit']").click();
-
     await expect(
-      page.locator("[data-testid='extra-work-result-instant']"),
-    ).toBeVisible({ timeout: 15_000 });
+      page.locator("[data-testid='meerwerk-confirm-line']"),
+    ).toHaveCount(1);
+
+    await page.locator("[data-testid='meerwerk-submit']").click();
+    await expect(page.locator("[data-testid='meerwerk-created']")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const created = await findExtraWorkForService(sa, service.id);
+    expect(created, "request should exist after submit").toBeTruthy();
+    createdRequestId = created!.id;
+    expect(created!.routing_decision).toBe("INSTANT");
+    expect(Number(created!.line_items[0].quantity)).toBe(3);
   } finally {
-    const created = await findExtraWorkByTitle(sa, title);
-    if (created) {
-      await deleteExtraWorkRequest(sa, created.id);
+    if (createdRequestId !== null) {
+      await deleteExtraWorkRequest(sa, createdRequestId);
     }
     for (const p of await listPricesForService(sa, customerId, service.id)) {
       await deletePriceById(sa, customerId, p.id);
@@ -311,66 +417,50 @@ test("Sprint 28 B6 — Customer cart submission with one priced line → INSTANT
   }
 });
 
-test("Sprint 28 B6 — Customer cart submission without agreed price → PROPOSAL banner", async ({
+test("FE-2 — Customer submits a line without an agreed price → QUOTE outcome", async ({
   page,
   baseURL,
 }) => {
   const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
-  const customerId = await resolveCustomerId(sa, OSIUS_CUSTOMER_NAME);
-  const { category, service } = await ensureSeedService(sa, "proposal");
-  // No CustomerServicePrice seeded — cart routes to PROPOSAL.
-
-  const title = uniqueTitle("proposal");
+  const buildingId = await resolveBuildingId(sa, OSIUS_BUILDING_NAME);
+  await resolveCustomerId(sa, OSIUS_CUSTOMER_NAME);
+  // No service / price seeded: the customer types an "other" line,
+  // which the server cannot price → a quote first.
+  const title = uniqueTitle("quote");
 
   try {
     await loginAs(page, DEMO_USERS.customerAll);
-    await page.goto("/extra-work/new");
-    await page.waitForLoadState("networkidle");
-    await expect(
-      page.locator("[data-testid='extra-work-create-page']"),
-    ).toBeVisible({ timeout: 10_000 });
+    await openFlowAtWhat(page, buildingId);
 
-    await page
-      .locator("[data-testid='extra-work-create-title']")
-      .fill(title);
-    await page
-      .locator("[data-testid='extra-work-create-description']")
-      .fill("Cart submission — proposal path");
+    const other = page.locator("[data-testid='meerwerk-other']");
+    await expect(other).toBeVisible({ timeout: 10_000 });
+    await other.fill(title);
+    // P-9 C1 — the box is not a line: the text becomes one on Add.
+    await page.locator("[data-testid='meerwerk-other-add']").click();
 
-    await page
-      .locator("[data-testid='extra-work-create-line-service-0']")
-      .selectOption({ value: String(service.id) });
-
-    const qty = page.locator(
-      "[data-testid='extra-work-create-line-quantity-0']",
+    await advanceToConfirm(page, todayISO());
+    await expect(page.locator("[data-testid='meerwerk-outcome']")).toHaveAttribute(
+      "data-kind",
+      /quote|auto_start/,
     );
-    await qty.fill("");
-    await qty.fill("1");
 
-    const dateInput = page.locator(
-      "[data-testid='extra-work-create-line-date-0']",
-    );
-    await dateInput.fill(todayISO());
-
-    await page.locator("[data-testid='extra-work-create-submit']").click();
-
-    await expect(
-      page.locator("[data-testid='extra-work-result-proposal']"),
-    ).toBeVisible({ timeout: 15_000 });
+    await page.locator("[data-testid='meerwerk-submit']").click();
+    await expect(page.locator("[data-testid='meerwerk-created']")).toBeVisible({
+      timeout: 15_000,
+    });
+    const created = await findExtraWorkByTitle(sa, title);
+    expect(created, "request should exist after submit").toBeTruthy();
+    expect(created!.routing_decision).toBe("PROPOSAL");
   } finally {
     const created = await findExtraWorkByTitle(sa, title);
     if (created) {
       await deleteExtraWorkRequest(sa, created.id);
     }
-    for (const p of await listPricesForService(sa, customerId, service.id)) {
-      await deletePriceById(sa, customerId, p.id);
-    }
-    await deleteSeedService(sa, category, service);
     await sa.dispose();
   }
 });
 
-test("Sprint 28 B6 — Empty cart blocks submission with inline error", async ({
+test("FE-2 — Empty cart blocks progress with no API call", async ({
   page,
   baseURL,
 }) => {
@@ -379,30 +469,11 @@ test("Sprint 28 B6 — Empty cart blocks submission with inline error", async ({
   // reaches the API.
   const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
   await resolveCustomerId(sa, OSIUS_CUSTOMER_NAME);
-  await resolveBuildingId(sa, OSIUS_BUILDING_NAME);
+  const buildingId = await resolveBuildingId(sa, OSIUS_BUILDING_NAME);
   await sa.dispose();
 
   await loginAs(page, DEMO_USERS.customerAll);
-  await page.goto("/extra-work/new");
-  await page.waitForLoadState("networkidle");
-  await expect(
-    page.locator("[data-testid='extra-work-create-page']"),
-  ).toBeVisible({ timeout: 10_000 });
-
-  await page
-    .locator("[data-testid='extra-work-create-title']")
-    .fill("Empty cart test");
-  await page
-    .locator("[data-testid='extra-work-create-description']")
-    .fill("Should be blocked by empty cart check");
-
-  // Remove the default seeded cart line (index 0) so the cart is empty.
-  await page
-    .locator("[data-testid='extra-work-create-remove-line-0']")
-    .click();
-  await expect(
-    page.locator("[data-testid='extra-work-create-cart-empty']"),
-  ).toBeVisible();
+  await openFlowAtWhat(page, buildingId);
 
   // Track POSTs to /api/extra-work/ — there should be NONE.
   const submitRequests: string[] = [];
@@ -415,188 +486,124 @@ test("Sprint 28 B6 — Empty cart blocks submission with inline error", async ({
     }
   });
 
-  await page.locator("[data-testid='extra-work-create-submit']").click();
-
-  await expect(
-    page.locator("[data-testid='extra-work-create-error']"),
-  ).toBeVisible({ timeout: 5_000 });
-  // We never navigated to the result panel.
-  await expect(
-    page.locator("[data-testid='extra-work-create-result']"),
-  ).toHaveCount(0);
+  // Nothing ticked, nothing typed: the step is not valid, Next is
+  // disabled and the confirm step (with its submit) is unreachable.
+  const next = page.locator("[data-testid='meerwerk-next']");
+  await expect(next).toBeDisabled();
+  await next.click({ force: true });
+  await expect(page.locator("[data-testid='meerwerk-date']")).toHaveCount(0);
+  await expect(page.locator("[data-testid='meerwerk-submit']")).toHaveCount(0);
+  await expect(page.locator("[data-testid='meerwerk-created']")).toHaveCount(0);
   // And no submission hit the wire.
   expect(submitRequests.length).toBe(0);
 });
 
-test("Sprint 28 B6 — Duplicate service in cart blocks submission", async ({
-  page,
-  baseURL,
-}) => {
-  const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
-  await resolveCustomerId(sa, OSIUS_CUSTOMER_NAME);
-  const { category, service } = await ensureSeedService(sa, "duplicate");
-
-  try {
-    await loginAs(page, DEMO_USERS.customerAll);
-    await page.goto("/extra-work/new");
-    await page.waitForLoadState("networkidle");
-    await expect(
-      page.locator("[data-testid='extra-work-create-page']"),
-    ).toBeVisible({ timeout: 10_000 });
-
-    await page
-      .locator("[data-testid='extra-work-create-title']")
-      .fill("Duplicate-service test");
-    await page
-      .locator("[data-testid='extra-work-create-description']")
-      .fill("Two lines that pick the same service should be rejected.");
-
-    // Line 0: pick the service.
-    await page
-      .locator("[data-testid='extra-work-create-line-service-0']")
-      .selectOption({ value: String(service.id) });
-    const date0 = page.locator(
-      "[data-testid='extra-work-create-line-date-0']",
-    );
-    await date0.fill(todayISO());
-
-    // Add a second cart line.
-    await page.locator("[data-testid='extra-work-create-add-line']").click();
-    await expect(
-      page.locator("[data-testid='extra-work-create-cart-line']"),
-    ).toHaveCount(2, { timeout: 5_000 });
-
-    // Line 1: pick the SAME service.
-    await page
-      .locator("[data-testid='extra-work-create-line-service-1']")
-      .selectOption({ value: String(service.id) });
-    const date1 = page.locator(
-      "[data-testid='extra-work-create-line-date-1']",
-    );
-    await date1.fill(todayISO());
-
-    // No POST should reach the wire.
-    const submitRequests: string[] = [];
-    page.on("request", (req) => {
-      if (
-        req.method() === "POST" &&
-        req.url().includes("/api/extra-work/")
-      ) {
-        submitRequests.push(req.url());
-      }
-    });
-
-    await page.locator("[data-testid='extra-work-create-submit']").click();
-
-    await expect(
-      page.locator("[data-testid='extra-work-create-error']"),
-    ).toBeVisible({ timeout: 5_000 });
-    await expect(
-      page.locator("[data-testid='extra-work-create-result']"),
-    ).toHaveCount(0);
-    expect(submitRequests.length).toBe(0);
-  } finally {
-    await deleteSeedService(sa, category, service);
-    await sa.dispose();
-  }
-});
-
-test("Sprint 28 B6 — Detail page renders cart line item after submission", async ({
+test("FE-2 — A priced service is one checkbox: it cannot be added twice", async ({
   page,
   baseURL,
 }) => {
   const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
   const customerId = await resolveCustomerId(sa, OSIUS_CUSTOMER_NAME);
+  const buildingId = await resolveBuildingId(sa, OSIUS_BUILDING_NAME);
+  const { category, service } = await ensureSeedService(sa, "duplicate");
+  await seedCustomerPrice(sa, customerId, service.id, "40.00");
+
+  try {
+    await loginAs(page, DEMO_USERS.customerAll);
+    await openFlowAtWhat(page, buildingId);
+
+    // Exactly one control for the service; ticking it twice toggles
+    // it back OUT of the cart rather than adding a second line.
+    const serviceCheckbox = page.locator(
+      `[data-testid='meerwerk-service-${service.id}']`,
+    );
+    await expect(serviceCheckbox).toHaveCount(1);
+    await serviceCheckbox.check();
+    await expect(serviceCheckbox).toBeChecked();
+    await serviceCheckbox.uncheck();
+    await expect(serviceCheckbox).not.toBeChecked();
+    await expect(page.locator("[data-testid='meerwerk-next']")).toBeDisabled();
+
+    // In the cart once → the confirm list carries exactly one line.
+    await serviceCheckbox.check();
+    await advanceToConfirm(page, todayISO());
+    await expect(
+      page.locator("[data-testid='meerwerk-confirm-line']"),
+    ).toHaveCount(1);
+  } finally {
+    for (const p of await listPricesForService(sa, customerId, service.id)) {
+      await deletePriceById(sa, customerId, p.id);
+    }
+    await deleteSeedService(sa, category, service);
+    await sa.dispose();
+  }
+});
+
+test("FE-2 — Created screen opens the customer detail; the API row carries the line", async ({
+  page,
+  baseURL,
+}) => {
+  const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
+  const customerId = await resolveCustomerId(sa, OSIUS_CUSTOMER_NAME);
+  const buildingId = await resolveBuildingId(sa, OSIUS_BUILDING_NAME);
   const { category, service } = await ensureSeedService(sa, "detail");
 
-  // Seed an active customer-specific price so the cart routes to INSTANT.
-  const priceResponse = await sa.post(
-    `/api/customers/${customerId}/pricing/`,
-    {
-      data: {
-        service: service.id,
-        unit_price: "65.00",
-        vat_pct: "21.00",
-        valid_from: todayISO(),
-        valid_to: null,
-        is_active: true,
-      },
-    },
-  );
-  expect(priceResponse.status()).toBe(201);
+  // Seed an active customer-specific price so the line is agreed.
+  await seedCustomerPrice(sa, customerId, service.id, "65.00");
 
-  const title = uniqueTitle("detail");
-  const note = "Detail-render check";
   const requestedDate = todayISO();
   const quantity = "4";
   let createdRequestId: number | null = null;
 
   try {
     await loginAs(page, DEMO_USERS.customerAll);
-    await page.goto("/extra-work/new");
-    await page.waitForLoadState("networkidle");
-    await expect(
-      page.locator("[data-testid='extra-work-create-page']"),
-    ).toBeVisible({ timeout: 10_000 });
+    await openFlowAtWhat(page, buildingId);
 
-    await page
-      .locator("[data-testid='extra-work-create-title']")
-      .fill(title);
-    await page
-      .locator("[data-testid='extra-work-create-description']")
-      .fill("Cart submission verifying detail render");
-
-    await page
-      .locator("[data-testid='extra-work-create-line-service-0']")
-      .selectOption({ value: String(service.id) });
-    const qty = page.locator(
-      "[data-testid='extra-work-create-line-quantity-0']",
+    const serviceCheckbox = page.locator(
+      `[data-testid='meerwerk-service-${service.id}']`,
     );
-    await qty.fill("");
-    await qty.fill(quantity);
-    await page
-      .locator("[data-testid='extra-work-create-line-date-0']")
-      .fill(requestedDate);
-    await page
-      .locator("[data-testid='extra-work-create-line-note-0']")
-      .fill(note);
-
-    await page.locator("[data-testid='extra-work-create-submit']").click();
-    await expect(
-      page.locator("[data-testid='extra-work-result-instant']"),
-    ).toBeVisible({ timeout: 15_000 });
-
-    // Navigate to the detail page via the result-panel link.
-    await page
-      .locator("[data-testid='extra-work-result-view-link']")
-      .click();
-    await expect(
-      page.locator("[data-testid='extra-work-detail-page']"),
-    ).toBeVisible({ timeout: 10_000 });
-
-    const lineItemRow = page
-      .locator("[data-testid='extra-work-detail-line-item-row']")
+    await expect(serviceCheckbox).toBeVisible({ timeout: 10_000 });
+    await serviceCheckbox.check();
+    const qty = page
+      .locator("[data-testid='meerwerk-services'] input[type='number']")
       .first();
-    await expect(lineItemRow).toBeVisible({ timeout: 10_000 });
-    await expect(lineItemRow).toContainText(service.name);
-    await expect(lineItemRow).toContainText(requestedDate);
-    await expect(lineItemRow).toContainText(note);
+    await qty.fill(quantity);
 
-    // Capture the request id so cleanup can DELETE it.
-    const created = await findExtraWorkByTitle(sa, title);
-    if (created) createdRequestId = created.id;
+    await advanceToConfirm(page, requestedDate);
+    await page.locator("[data-testid='meerwerk-submit']").click();
+    await expect(page.locator("[data-testid='meerwerk-created']")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Navigate to the customer detail via the created screen's link.
+    await page.locator("[data-testid='meerwerk-created-open']").click();
+    await expect(
+      page.locator("[data-testid='meerwerk-detail-page']"),
+    ).toBeVisible({ timeout: 10_000 });
+    await page.waitForURL(/\/extra-work\/\d+$/, { timeout: 10_000 });
+    // The detail is titled after the picked line (the service name)
+    // and tells the request's story in the timeline.
+    await expect(page.locator("[data-testid='meerwerk-detail-page']")).toContainText(
+      service.name,
+    );
+    await expect(page.locator("[data-testid='meerwerk-timeline']")).toBeVisible();
+
+    // The request row carries the cart line: service / quantity /
+    // requested date (the flow's wish date).
+    const created = await findExtraWorkForService(sa, service.id);
     expect(created, "request should exist after submit").toBeTruthy();
+    createdRequestId = created!.id;
+    expect(String(created!.id)).toBe(new URL(page.url()).pathname.split("/").pop());
     expect(created!.routing_decision).toBe("INSTANT");
     expect(created!.line_items.length).toBe(1);
     expect(created!.line_items[0].service).toBe(service.id);
     expect(Number(created!.line_items[0].quantity)).toBe(Number(quantity));
     expect(created!.line_items[0].requested_date).toBe(requestedDate);
-    expect(created!.line_items[0].customer_note).toBe(note);
   } finally {
     if (createdRequestId !== null) {
       await deleteExtraWorkRequest(sa, createdRequestId);
     } else {
-      const fallback = await findExtraWorkByTitle(sa, title);
+      const fallback = await findExtraWorkForService(sa, service.id);
       if (fallback) await deleteExtraWorkRequest(sa, fallback.id);
     }
     for (const p of await listPricesForService(sa, customerId, service.id)) {

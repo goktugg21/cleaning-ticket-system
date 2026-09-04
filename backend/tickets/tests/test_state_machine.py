@@ -8,6 +8,10 @@ from tickets.state_machine import TransitionError, apply_transition
 
 class TicketStateMachineTests(TenantFixtureMixin, APITestCase):
     def test_staff_transition_creates_history(self):
+        # W13-FIX §1 — starting work needs somebody doing it and a start
+        # time (`tickets/transition_requirements.py`). This test is about
+        # the HISTORY ROW, so it states the precondition and moves on.
+        self.make_workable()
         self.authenticate(self.manager)
         response = self.client.post(
             f"/api/tickets/{self.ticket.id}/status/",

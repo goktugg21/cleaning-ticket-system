@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     TicketAttachmentDownloadView,
     TicketAttachmentListCreateView,
+    TicketAttachmentVisibilityView,
     TicketMessageListCreateView,
     TicketMessageRecipientsView,
     TicketViewSet,
@@ -13,14 +14,20 @@ from .views_manager_assignments import (
     TicketManagerAssignmentListCreateView,
 )
 from .views_staff_assignments import (
+    SlotCompletionRequirementsView,
     StaffAssignmentSlotAgendaView,
     TicketStaffAssignmentDetailView,
     TicketStaffAssignmentListCreateView,
 )
 from .views_staff_requests import StaffAssignmentRequestViewSet
+from .views_upload_visibility import (
+    StandingUploadVisibilityView,
+    TicketUploadVisibilityView,
+)
 from .views_work_plan import WorkPlanView
 from .views_sub_tasks import (
     TicketSubTaskDetailView,
+    TicketSubTaskDoneView,
     TicketSubTaskListCreateView,
 )
 
@@ -38,28 +45,45 @@ staff_request_router.register(
     basename="staff-assignment-request",
 )
 
+from .views_bulk_triage import TicketBulkTriageView
 from .views_bulk_assign import (
     TicketAssignableUsersView,
     TicketBulkAssignView,
 )
-from .views_work_categories import (
-    WorkCategoryDetailView,
-    WorkCategoryListCreateView,
+from .views_ticket_categories import (
+    TicketCategoryDetailView,
+    TicketCategoryListCreateView,
 )
 
 urlpatterns = [
-    # Sprint 185 E §1 — the work-category catalog. Before the router for
-    # the same reason `bulk-assign/` and `my-slots/` are: the router's
-    # `<pk>` detail pattern would otherwise swallow the literal.
+    # W13 — the ticket-category catalog. Before the router for the same
+    # reason `bulk-assign/` and `my-slots/` are: the router's `<pk>`
+    # detail pattern would otherwise swallow the literal.
     path(
         "categories/",
-        WorkCategoryListCreateView.as_view(),
-        name="work-category-list",
+        TicketCategoryListCreateView.as_view(),
+        name="ticket-category-list",
     ),
     path(
         "categories/<int:category_id>/",
-        WorkCategoryDetailView.as_view(),
-        name="work-category-detail",
+        TicketCategoryDetailView.as_view(),
+        name="ticket-category-detail",
+    ),
+    # W4-P — the STANDING upload-visibility permission (every ticket).
+    # Before the router for the same reason `bulk-assign/` is: the
+    # router's `<pk>` detail pattern would otherwise swallow the literal.
+    # It lives under `/api/tickets/` because the thing it decides is a
+    # ticket attachment's visibility, and mounting it anywhere else would
+    # put the two halves of one rule in two URL trees.
+    path(
+        "upload-visibility/standing/",
+        StandingUploadVisibilityView.as_view(),
+        name="upload-visibility-standing",
+    ),
+    path(
+        "upload-visibility/standing/<int:user_id>/",
+        StandingUploadVisibilityView.as_view(),
+        name="upload-visibility-standing-detail",
     ),
     # Sprint 158 §1 — bulk assign, and the picker's candidate read.
     # Before the router for the same reason `my-slots/` is: the router's
@@ -68,6 +92,13 @@ urlpatterns = [
         "bulk-assign/",
         TicketBulkAssignView.as_view(),
         name="ticket-bulk-assign",
+    ),
+    # P-6 V4 — stale-work triage (park / close many, one reason). Before
+    # the router for the same reason `bulk-assign/` is.
+    path(
+        "bulk-triage/",
+        TicketBulkTriageView.as_view(),
+        name="ticket-bulk-triage",
     ),
     path(
         "<int:pk>/assignments/candidates/",
@@ -95,10 +126,30 @@ urlpatterns = [
         TicketAttachmentDownloadView.as_view(),
         name="ticket-attachment-download",
     ),
+    # Sprint 191 §2.5 — promote one attachment across the customer wall
+    # (provider management only). Before the list route for the same
+    # reason the download route is: a longer, more specific path.
+    path(
+        "<int:ticket_id>/attachments/<int:attachment_id>/visibility/",
+        TicketAttachmentVisibilityView.as_view(),
+        name="ticket-attachment-visibility",
+    ),
     path(
         "<int:ticket_id>/attachments/",
         TicketAttachmentListCreateView.as_view(),
         name="ticket-attachments",
+    ),
+    # W4-P — the PER-TICKET upload-visibility permission (this ticket
+    # only). The Assignment card's surface; chat M renders it.
+    path(
+        "<int:ticket_id>/upload-visibility/",
+        TicketUploadVisibilityView.as_view(),
+        name="ticket-upload-visibility",
+    ),
+    path(
+        "<int:ticket_id>/upload-visibility/<int:user_id>/",
+        TicketUploadVisibilityView.as_view(),
+        name="ticket-upload-visibility-detail",
     ),
     path(
         "<int:ticket_id>/messages/",
@@ -129,6 +180,15 @@ urlpatterns = [
         TicketStaffAssignmentDetailView.as_view(),
         name="ticket-staff-assignment-detail",
     ),
+    # W3-G — what this slot must carry before it can be reported done,
+    # so the completion dialog can say so before the worker fills it in.
+    # Read-only; the serializer on the PATCH above is still the gate.
+    path(
+        "<int:ticket_id>/staff-assignments/<int:assignment_id>/"
+        "completion-requirements/",
+        SlotCompletionRequirementsView.as_view(),
+        name="ticket-slot-completion-requirements",
+    ),
     # Sprint 10B — explicit per-ticket responsible-manager M:N. Same
     # hand-mounted shape as the staff-assignment endpoints above (the
     # DELETE `<user_id>` path arg is awkward through a DRF action).
@@ -149,6 +209,12 @@ urlpatterns = [
         "<int:ticket_id>/sub-tasks/",
         TicketSubTaskListCreateView.as_view(),
         name="ticket-sub-tasks",
+    ),
+    # W-PLANTRUTH §3c — the manager's mark done / undone.
+    path(
+        "<int:ticket_id>/sub-tasks/<int:sub_task_id>/done/",
+        TicketSubTaskDoneView.as_view(),
+        name="ticket-sub-task-done",
     ),
     path(
         "<int:ticket_id>/sub-tasks/<int:sub_task_id>/",

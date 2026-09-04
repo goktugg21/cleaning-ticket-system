@@ -9,7 +9,9 @@ import { loginAs } from "./fixtures/login";
  *
  * Closes the frontend half of Batch 11:
  *   - TicketDetailPage now renders a "Complete work" button for an
- *     assigned STAFF user on an IN_PROGRESS ticket. The button opens
+ *     assigned STAFF user on an IN_PROGRESS ticket (FE-3: it IS the
+ *     page's one primary action, in the phase banner; no generic
+ *     "move to" buttons are offered next to it). The button opens
  *     a modal that resolves the destination via
  *     `GET /api/tickets/<id>/staff-completion-route/` and submits the
  *     corresponding status transition.
@@ -65,19 +67,6 @@ interface UserSearchRow {
   id: number;
   email: string;
 }
-interface TicketListItem {
-  id: number;
-  status: string;
-  building_name?: string;
-}
-interface TicketDetailBody {
-  id: number;
-  status: string;
-  is_assigned_staff: boolean;
-  building: number;
-  assigned_staff: Array<{ id?: number; anonymous?: boolean }>;
-}
-
 async function resolveUserId(
   api: APIRequestContext,
   email: string,
@@ -93,56 +82,91 @@ async function resolveUserId(
 }
 
 /**
- * Find (or freshly prepare) an Osius IN_PROGRESS ticket that Ahmet
- * (staffOsius) is directly assigned to. Strategy:
- *   1. List Osius tickets, look for an IN_PROGRESS ticket whose
- *      assigned_staff already contains Ahmet.
- *   2. If none — pick the first IN_PROGRESS ticket, POST a direct
- *      staff-assignment for Ahmet via the admin endpoint, then
- *      return that ticket id.
- *
- * The spec does NOT clean up the assignment; subsequent runs will
- * find the existing assigned row at step 1 and reuse it.
+ * P-12 H — seed a FRESH IN_PROGRESS ticket for Ahmet instead of
+ * borrowing one from the database. The old find-or-prepare picked the
+ * first IN_PROGRESS seed row, and on dev that is a ticket spawned from
+ * an extra work with `file_upload_required=True`: the server (rightly)
+ * refused the note-only completion with "requires a file". A plain
+ * ticket (no extra-work origin) is completable with a note alone
+ * (`tickets/completion_requirements.py`), so the spec creates its own:
+ *   1. pick an Amsterdam building and a customer linked to it,
+ *   2. POST /api/tickets/ (a plain melding — no evidence flags),
+ *   3. assign Ahmet, and move it OPEN -> IN_PROGRESS with the
+ *      `scheduled_start_at` answer the transition-requirements gate
+ *      asks for (WHO is the assignment, WHEN is the answer field).
+ * Each run seeds its own ticket; nothing in the seed data is mutated.
  */
-async function findOrPrepareInProgressTicketForAhmet(
+async function seedInProgressTicketForAhmet(
   sa: APIRequestContext,
 ): Promise<number> {
-  const listResponse = await sa.get("/api/tickets/?page_size=100");
-  expect(listResponse.status()).toBe(200);
-  const list = (await listResponse.json()) as { results: TicketListItem[] };
-  const osiusTickets = list.results.filter((t) =>
-    /Amsterdam/i.test(t.building_name ?? ""),
-  );
-  expect(
-    osiusTickets.length,
-    "expected at least one Osius ticket in the seed",
-  ).toBeGreaterThan(0);
-
-  const inProgress = osiusTickets.filter((t) => t.status === "IN_PROGRESS");
   const ahmetId = await resolveUserId(sa, DEMO_USERS.staffOsius.email);
 
-  for (const t of inProgress) {
-    const detail = await sa.get(`/api/tickets/${t.id}/`);
-    if (detail.status() !== 200) continue;
-    const body = (await detail.json()) as TicketDetailBody;
-    const isAhmetAssigned = (body.assigned_staff ?? []).some(
-      (entry) => "id" in entry && entry.id === ahmetId,
-    );
-    if (isAhmetAssigned) return t.id;
-  }
-
-  // None pre-assigned — grab the first IN_PROGRESS and add Ahmet.
-  expect(
-    inProgress.length,
-    "expected at least one IN_PROGRESS Osius ticket in the seed",
-  ).toBeGreaterThan(0);
-  const target = inProgress[0];
-  const assign = await sa.post(
-    `/api/tickets/${target.id}/staff-assignments/`,
-    { data: { user_id: ahmetId } },
+  const buildingsResponse = await sa.get(
+    "/api/buildings/?search=Amsterdam&page_size=50",
   );
+  expect(buildingsResponse.status()).toBe(200);
+  const buildings = (await buildingsResponse.json()) as {
+    results: Array<{ id: number; name: string }>;
+  };
+  expect(
+    buildings.results.length,
+    "expected an Amsterdam building in the seed",
+  ).toBeGreaterThan(0);
+
+  // A customer linked to the building (the M:N membership; the legacy
+  // single-building anchor still mirrors it on old rows).
+  const customersResponse = await sa.get("/api/customers/?page_size=100");
+  expect(customersResponse.status()).toBe(200);
+  const customers = (await customersResponse.json()) as {
+    results: Array<{
+      id: number;
+      building?: number | null;
+      linked_building_ids?: number[];
+    }>;
+  };
+  let buildingId: number | null = null;
+  let customerId: number | null = null;
+  for (const b of buildings.results) {
+    const match = customers.results.find(
+      (c) => (c.linked_building_ids ?? []).includes(b.id) || c.building === b.id,
+    );
+    if (match) {
+      buildingId = b.id;
+      customerId = match.id;
+      break;
+    }
+  }
+  expect(customerId, "a customer linked to an Amsterdam building").toBeTruthy();
+
+  const create = await sa.post("/api/tickets/", {
+    data: {
+      title: "P-12 e2e completion seed",
+      description:
+        "Seeded by staff-completion-routing.spec.ts — a plain ticket with no evidence requirements.",
+      building: buildingId,
+      customer: customerId,
+      priority: "NORMAL",
+    },
+  });
+  expect(create.status(), await create.text()).toBe(201);
+  const ticket = (await create.json()) as { id: number };
+
+  const assign = await sa.post(`/api/tickets/${ticket.id}/staff-assignments/`, {
+    data: { user_id: ahmetId },
+  });
   expect([200, 201]).toContain(assign.status());
-  return target.id;
+
+  // OPEN -> IN_PROGRESS is a legal move; the gate wants WHO (assigned
+  // above) and WHEN (answered inline).
+  const start = await sa.post(`/api/tickets/${ticket.id}/status/`, {
+    data: {
+      to_status: "IN_PROGRESS",
+      note: "P-12 e2e seed: started for the completion-routing walk",
+      scheduled_start_at: new Date().toISOString(),
+    },
+  });
+  expect(start.status(), await start.text()).toBe(200);
+  return ticket.id;
 }
 
 test.describe("Sprint 28 Batch 11 — STAFF completion routing", () => {
@@ -153,7 +177,7 @@ test.describe("Sprint 28 Batch 11 — STAFF completion routing", () => {
     test.setTimeout(180_000);
 
     const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
-    const ticketId = await findOrPrepareInProgressTicketForAhmet(sa);
+    const ticketId = await seedInProgressTicketForAhmet(sa);
     await sa.dispose();
 
     await loginAs(page, DEMO_USERS.staffOsius);
@@ -163,30 +187,17 @@ test.describe("Sprint 28 Batch 11 — STAFF completion routing", () => {
     const completeBtn = page.getByTestId("ticket-staff-complete-button");
     await expect(completeBtn).toBeVisible({ timeout: 15_000 });
 
-    // Sprint 28 Batch 11 UX hotfix — the Workflow card must show the
-    // dedicated "Complete your assigned work" subtitle AND must NOT
-    // expose any of the generic next-status UI for STAFF. The card
-    // subtitle is rendered via `card_workflow_subtitle_staff_complete`
-    // which the testid below anchors stably across locales.
+    // FE-3 — "Complete work" is THE primary action: it sits in the
+    // phase banner at the head of the page, and the page must NOT
+    // offer the generic next-status buttons (`workflow-move-*`) to
+    // STAFF alongside it. The generic buttons are what a manager gets;
+    // for the assigned STAFF the completion modal is the only door.
     await expect(
-      page.getByTestId("ticket-staff-complete-card-subtitle"),
+      page.locator('[data-testid="ticket-facts"]'),
     ).toBeVisible();
-
-    // No generic Status-note input. The workflow card uses
-    // id="status-note" for that input; getByRole + name is fragile
-    // across locales, so we anchor on the stable DOM id instead.
-    await expect(page.locator("#status-note")).toHaveCount(0);
-
-    // No generic "Move to X" buttons. They are rendered via
-    // `workflow_move_to` in both locales; their EN/NL labels both
-    // contain the string "Move" / "Verplaats" respectively, but the
-    // structural assertion is "the workflow card contains exactly
-    // one status-btn — the Complete work CTA". We verify by counting
-    // `.status-btn` elements inside the workflow card.
-    const workflowCard = page
-      .locator(`xpath=//*[@data-testid="ticket-staff-complete-button"]/ancestor::div[contains(@class, "card")][1]`);
-    await expect(workflowCard).toBeVisible();
-    await expect(workflowCard.locator(".status-btn")).toHaveCount(1);
+    await expect(
+      page.locator('[data-testid^="workflow-move-"]'),
+    ).toHaveCount(0);
 
     // Open the modal.
     await completeBtn.click();
@@ -269,16 +280,14 @@ test.describe("Sprint 28 Batch 11 — STAFF completion routing", () => {
       page.getByTestId("staff-details-section"),
     ).toBeVisible({ timeout: 15_000 });
 
+    // The switch's testid sits on a visually hidden checkbox input; the
+    // `.toggle-switch` label around it is the click target.
     const checkboxTestid = `staff-completion-routes-to-customer-${targetRow.building_id}`;
     const checkbox = page.getByTestId(checkboxTestid);
-    await expect(checkbox).toBeVisible({ timeout: 10_000 });
+    await expect(checkbox).toBeAttached({ timeout: 10_000 });
 
     // The initial UI state must mirror the API state.
-    if (initial) {
-      await expect(checkbox).toBeChecked();
-    } else {
-      await expect(checkbox).not.toBeChecked();
-    }
+    expect(await checkbox.isChecked()).toBe(initial);
 
     // Toggle to the inverse value.
     await Promise.all([
@@ -291,19 +300,15 @@ test.describe("Sprint 28 Batch 11 — STAFF completion routing", () => {
             ) && r.request().method() === "PATCH",
         { timeout: 15_000 },
       ),
-      checkbox.click(),
+      checkbox.locator("xpath=..").click(),
     ]);
 
     // Reload the page to confirm the flag persisted server-side.
     await page.reload();
     await page.waitForLoadState("networkidle");
     const reloadedCheckbox = page.getByTestId(checkboxTestid);
-    await expect(reloadedCheckbox).toBeVisible({ timeout: 10_000 });
-    if (initial) {
-      await expect(reloadedCheckbox).not.toBeChecked();
-    } else {
-      await expect(reloadedCheckbox).toBeChecked();
-    }
+    await expect(reloadedCheckbox).toBeAttached({ timeout: 10_000 });
+    expect(await reloadedCheckbox.isChecked()).toBe(!initial);
 
     // Restore initial state so subsequent runs start from a known
     // baseline.

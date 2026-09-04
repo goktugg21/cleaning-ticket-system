@@ -53,6 +53,7 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+from .plan_gate_fixture import make_plan_complete
 from notifications.models import Notification, NotificationType
 
 User = get_user_model()
@@ -170,6 +171,8 @@ class _B6Fixture(TestCase):
             unit_type=ExtraWorkPricingUnitType.HOURS,
             requested_date=date(2026, 6, 15), customer_note="",
         )
+        # W-PLAN — pricing is gated on a complete plan.
+        make_plan_complete(ew)
         return ew
 
     # -- helpers ---------------------------------------------------------

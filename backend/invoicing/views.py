@@ -41,9 +41,14 @@ from .line_services import (
     update_invoice_meta,
 )
 from .models import Invoice, InvoiceLine
+from .permissions import (
+    ERR_INVOICE_ADMIN_ONLY,
+    INVOICE_ADMIN_ONLY_DETAIL,
+    is_invoice_admin,
+)
 from .preview import plan_invoices
 from .preview_pdf import render_preview_pdf
-from .schedule import billing_day_reached, scheduled_customers
+from .schedule import billing_day_reached
 from .why_nothing import diagnose_nothing_to_invoice
 from .selectors import (
     scope_customer_invoices_for,
@@ -74,6 +79,17 @@ def _validation_detail(exc) -> str:
     if messages:
         return " ".join(messages)
     return str(exc)
+
+
+def _validation_body(exc) -> dict:
+    """P-15 (P-14's S4 refusal-shape finding) — the machine-standard
+    `{"detail", "code"}` body: every InvoiceTransitionError now carries
+    a stable code beside its sentence, like every other machine's."""
+    body = {"detail": _validation_detail(exc)}
+    code = getattr(exc, "code", None)
+    if code:
+        body["code"] = code
+    return body
 
 
 class InvoicePdfView(views.APIView):
@@ -162,6 +178,25 @@ class InvoiceViewSet(viewsets.GenericViewSet):
             )
         return None
 
+    def _forbid_non_admin(self, request):
+        """P-15 §0.1 / H-12 — issue / send / un-issue / reverse are
+        company-level (CA / SA only). Operator first, so a customer or
+        STAFF still gets the generic operator refusal; a BUILDING_MANAGER
+        gets the sentence that names the next actor, with the stable code
+        the screen renders from."""
+        guard = self._forbid_non_operator(request)
+        if guard is not None:
+            return guard
+        if not is_invoice_admin(request.user):
+            return Response(
+                {
+                    "detail": INVOICE_ADMIN_ONLY_DETAIL,
+                    "code": ERR_INVOICE_ADMIN_ONLY,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
     # -- collection --------------------------------------------------------
 
     def list(self, request):
@@ -200,6 +235,17 @@ class InvoiceViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         granularity = request.data.get("granularity") or None
+        # P-16 (P-14 S4, the preview-vs-generate month question) — the
+        # caller may ask the THROUGH question: this period or any
+        # earlier one, the same rule the /due/ panel, the preview and
+        # the nightly run use. The Facturen screen passes it, so the
+        # button produces exactly the list its own preview showed
+        # instead of the exact-month subset (6 predicted, 1 produced —
+        # the P-14 trap). Default stays exact-month for any caller that
+        # does not ask. Double-billing stays impossible either way: the
+        # CLAIM (is_invoiced + the live line link) is what prevents it,
+        # not the month window.
+        through = bool(request.data.get("through"))
         # Resolve the customer through the actor's customer scope so a
         # cross-tenant customer id is a clean 404 (never leaks / generates).
         customer = get_object_or_404(
@@ -213,6 +259,7 @@ class InvoiceViewSet(viewsets.GenericViewSet):
                 year,
                 month,
                 granularity,
+                through=through,
             )
         except DjangoValidationError as exc:
             return Response(
@@ -387,15 +434,40 @@ class InvoiceViewSet(viewsets.GenericViewSet):
         # exactly the rule this panel reports. They were inline here; the
         # job would have been a second copy, and the two drifting apart
         # reads to an operator as "the panel said due, no invoice came".
-        customers = scheduled_customers(
-            scope_customers_for(request.user).filter(is_active=True)
-        ).order_by("name")
+        #
+        # P-13 A (W1) — the list is no longer narrowed to
+        # `scheduled_customers`. A customer whose billing day was never
+        # set used to disappear from this panel entirely, taking every
+        # finished, unbilled job with them — the quiet way money misses
+        # month-end. Now: a SCHEDULED customer keeps their row
+        # unconditionally (a zero-count row carries its nothing_reason);
+        # an UNSCHEDULED customer gets a row exactly when they have
+        # finished unbilled work (rule "" + day None on the wire is the
+        # panel's "no billing day set" fact). The daily job still
+        # triggers on `is_billing_day`, so an unscheduled customer is
+        # never invoiced automatically — this only makes them visible.
+        customers = (
+            scope_customers_for(request.user)
+            .filter(is_active=True)
+            .order_by("name")
+        )
+        # P-12 §D.24.2 — `?company=` narrows WITHIN scope (an id outside
+        # it matches nothing); the page shows one company at a time.
+        company_param = request.query_params.get("company")
+        if company_param and str(company_param).isdigit():
+            customers = customers.filter(company_id=int(company_param))
         payload = []
         for customer in customers:
             unbilled = unbilled_extra_work_through(
                 request.user, customer.company_id, customer.id, year, month
             )
             count = len(unbilled)
+            scheduled = (
+                customer.invoice_day_of_month is not None
+                or customer.invoice_day_rule != ""
+            )
+            if not scheduled and count == 0:
+                continue
             total = sum(
                 (_earned_amounts(e)[2] for e in unbilled), Decimal("0.00")
             )
@@ -489,8 +561,10 @@ class InvoiceViewSet(viewsets.GenericViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def _transition(self, request, fn, *, created=False):
-        """Shared body for issue / send / reverse."""
-        guard = self._forbid_non_operator(request)
+        """Shared body for issue / send / un-issue / reverse — all four
+        are company-level commits (P-15 §0.1 / H-12), so the shared gate
+        here is the ADMIN one, not the operator one."""
+        guard = self._forbid_non_admin(request)
         if guard is not None:
             return guard
         invoice = self.get_object()
@@ -498,7 +572,7 @@ class InvoiceViewSet(viewsets.GenericViewSet):
             result = fn(request.user, invoice)
         except DjangoValidationError as exc:
             return Response(
-                {"detail": _validation_detail(exc)},
+                _validation_body(exc),
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(

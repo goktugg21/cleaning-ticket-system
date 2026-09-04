@@ -33,6 +33,7 @@ from rest_framework import status, views
 from rest_framework.response import Response
 
 from accounts.models import UserRole
+from accounts.permissions import is_customer_side
 from accounts.permissions import IsAuthenticatedAndActive
 from accounts.permissions_v2 import (
     user_has_osius_permission,
@@ -61,6 +62,7 @@ from .models import (
 )
 from .proposal_pdf import render_proposal_pdf
 from .proposal_state_machine import (
+    ALLOWED_TRANSITIONS,
     TransitionError,
     apply_proposal_transition,
     emit_proposal_event,
@@ -199,6 +201,19 @@ class ProposalListCreateView(views.APIView):
         guard = _require_provider_in_scope(request, extra_work)
         if guard is not None:
             return guard
+        # W-PLAN — THE LAW: planning gates pricing. Creating a proposal
+        # IS entering pricing (both routes: the quote's "Prepare the
+        # proposal" and auto-start's "Price the work" both land here),
+        # so the four plan requirements are asked at this door. The one
+        # bypass is the recorded override with a mandatory reason —
+        # `check_pricing_plan_gate` writes its history row.
+        from .planning import check_pricing_plan_gate
+
+        gate = check_pricing_plan_gate(
+            extra_work, request.data, actor=request.user
+        )
+        if gate is not None:
+            return Response(gate, status=status.HTTP_400_BAD_REQUEST)
         serializer = ProposalCreateSerializer(
             data=request.data,
             context={"request": request, "extra_work_request": extra_work},
@@ -276,6 +291,48 @@ class ProposalTransitionView(views.APIView):
         payload = ProposalTransitionSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
+        # P-8R B — parity with the request door (Sprint 28 Batch 15.4):
+        # a customer rejecting a quote says why. The walk found this
+        # door accepted a bare CUSTOMER_REJECTED from a customer while
+        # `/extra-work/<id>/transition/` refuses one without a reason.
+        # The UI always sends the reason as `note`; the rule now lives
+        # where the UI cannot be bypassed.
+        if (
+            data["to_status"] == ProposalStatus.CUSTOMER_REJECTED
+            and is_customer_side(request.user)
+            and not (data.get("note") or "").strip()
+        ):
+            return Response(
+                {
+                    "detail": "A reason is required when rejecting a quote.",
+                    "code": "rejection_note_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # W-PLAN — the send/start action keeps the same plan gate the
+        # create door asked (cheap: by then the plan is complete, and a
+        # plan un-made between create and send is exactly what this
+        # catches). A DRAFT written before the gate existed is also
+        # caught here. Same bypass: `override_reason` in the body.
+        #
+        # P-16 (P-14 S4) — but only when the MOVE ITSELF is legal: an
+        # impossible pair (a CANCELLED proposal asked to SENT) must be
+        # refused as `invalid_transition`, the true FIRST reason, not as
+        # a plan problem it would still have after fixing the plan. The
+        # pair check duplicates one set lookup the machine does anyway;
+        # the machine below remains the authority.
+        if data["to_status"] == ProposalStatus.SENT and (
+            (proposal.status, ProposalStatus.SENT) in ALLOWED_TRANSITIONS
+        ):
+            from .planning import check_pricing_plan_gate
+
+            gate = check_pricing_plan_gate(
+                proposal.extra_work_request,
+                request.data,
+                actor=request.user,
+            )
+            if gate is not None:
+                return Response(gate, status=status.HTTP_400_BAD_REQUEST)
         try:
             updated = apply_proposal_transition(
                 proposal,

@@ -1,24 +1,37 @@
-// Sprint 28 Batch 6 — Create Extra Work cart UI.
-//
-// Replaces the Sprint 26B single-line form with a shopping-cart
-// workflow per the 2026-05-15 stakeholder meeting (§4):
-//   * Customer composes a request by adding multiple service catalog
-//     items to a cart, each with its own quantity, requested date,
-//     and optional note.
-//   * Submission produces one parent request with N line items.
-//   * Backend routes the request based on whether every line has an
-//     active CustomerServicePrice (INSTANT) or not (PROPOSAL).
-//
-// View-first compliance: the form itself is the "Create" surface
-// (an add page is intentionally a form). After submission the
-// result panel is read-only.
+/**
+ * FE-5 (Addendum D §D.5.2 / §D.6 rule 12) — the provider's meerwerk
+ * create page: ONE page, staged, dense.
+ *
+ *   Voor wie   — customer + building. Choosing them fills afdeling,
+ *                werktype and the invoice target from the customer's
+ *                own defaults, shown as facts with a pencil.
+ *   Wat        — the SAME cart the customer flow uses: their agreed
+ *                prices with amounts, "iets anders" lines with "prijs
+ *                volgt", a note per line. Folder is a filter inside
+ *                the picker. Title and notes fold; left empty, they are
+ *                derived from the cart like the customer flow does.
+ *   Wanneer    — ONE wish date ("a wish; the plan follows") and the
+ *                multi-day series switch. P-10 B6: the "Planning" fold
+ *                (planned end, deadline) is gone — one plan, one place:
+ *                the plan is made by a person on the request page
+ *                (P-1 provenance); the dates stay editable there.
+ *   Urgentie   — Normaal by default, one "spoed" control.
+ *   The end    — the cart as it will be created, the sums, and the
+ *                SYSTEM's sentence about what happens next (the server's
+ *                preview), with a choice only when the server offers
+ *                more than one intent for this actor (SoT §5.3).
+ *
+ * The old "Request a quote" page folded in here: which intent applies
+ * is derived at the bottom, never by which nav entry was clicked.
+ *
+ * Server contract UNCHANGED: the existing create / batch-create /
+ * preview endpoints with the existing fields.
+ */
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, ChevronLeft, Plus, Trash2 } from "lucide-react";
+import { CheckCircle2, Pencil, Siren } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
-import { useAuth } from "../auth/AuthContext";
 
 import {
   listAllBuildings,
@@ -26,11 +39,17 @@ import {
   listCustomerCustomPrices,
   listCustomerPriceFolders,
   listCustomerPrices,
-  listServices,
 } from "../api/admin";
 import { getApiError } from "../api/client";
 import { listLabels } from "../api/customerLabels";
-import { createExtraWork, getExtraWorkPreview } from "../api/extraWork";
+import { useAuth } from "../auth/AuthContext";
+import { isProviderAdmin } from "../auth/permissions";
+import {
+  batchCreateExtraWork,
+  createExtraWork,
+  getExtraWorkPreview,
+} from "../api/extraWork";
+import { SlotPicker } from "../components/extra-work/SlotPicker";
 import type {
   Building,
   Customer,
@@ -40,78 +59,47 @@ import type {
   CustomerServicePrice,
   ExtraWorkBilledTo,
   ExtraWorkIntentErrorCode,
-  ExtraWorkPreviewLine,
-  ExtraWorkPreviewPriceSource,
   ExtraWorkPreviewResponse,
   ExtraWorkRequestDetail,
   ExtraWorkRequestIntent,
-  ExtraWorkUrgency,
-  Service,
-  ServiceUnitType,
+  ExtraWorkSlot,
 } from "../api/types";
 import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
-import { formatMoney, formatNumber } from "../lib/intl";
+import { PageHeader } from "../components/PageHeader";
+import {
+  cartLineItemsPayload,
+  derivedDescription,
+  derivedTitle,
+  otherLineFromText,
+  lineAmounts,
+  otherLinesToCart,
+  outcomeKey,
+  type MeerwerkCartLine,
+  type MeerwerkOutcomeKind,
+  type OtherLineDraft,
+} from "../components/meerwerk/cart";
+import { CartSummaryList } from "../components/meerwerk/CartSummaryList";
+import { MeerwerkOutcome } from "../components/meerwerk/MeerwerkOutcome";
+import {
+  OtherLinesEditor,
+  UnaddedOtherLineNotice,
+} from "../components/meerwerk/OtherLinesEditor";
+import { PricedServicePicker } from "../components/meerwerk/PricedServicePicker";
+import { formatDate, formatMoney } from "../lib/intl";
 import { customerLabelName } from "../lib/customerLabelName";
-
 
 interface ParentFormState {
   building: string;
   customer: string;
   title: string;
   description: string;
-  // Sprint 144 §1 — `category` / `category_other_text` are GONE from the
-  // form. The operator classifies with `categoryFilter` (a catalog
-  // category or a customer folder) instead; the enum column keeps its
-  // `default=OTHER` server-side.
-  urgency: ExtraWorkUrgency;
+  urgent: boolean;
   preferred_date: string;
-  planned_end_date: string;
+  // P-11 A3 — the hard date, back on create. P-10 B6 cut the Planning
+  // fold and took this input with it; the fold was the over-cut, the
+  // deadline was not. Optional; the wish stays a wish.
   deadline: string;
-}
-
-interface CartLineState {
-  tempId: string;
-  serviceId: string;
-  // Free-text service description, used ONLY when serviceId ===
-  // CUSTOM_SERVICE_VALUE. A custom line is submitted with this text as
-  // `custom_description` (and NO `service`); the backend treats it as
-  // needs-provider-pricing and routes the request to a proposal.
-  customDescription: string;
-  quantity: string;
-  requestedDate: string;
-  customerNote: string;
-}
-
-// Sentinel serviceId for the "Custom…" option in the per-line service
-// dropdown. A cart line is "custom" iff line.serviceId === this value.
-// It is never a real service id (numeric), so it never collides with a
-// catalog service or the agreed-price lookups.
-const CUSTOM_SERVICE_VALUE = "__custom__";
-
-/**
- * Sprint 137 item 6 — prefix for the "order a per-customer custom
- * price" options in the same per-line dropdown. `CustomerCustomPrice`
- * rows carry a name, a unit and an amount but deliberately have NO
- * `service` FK, so they could never be selected before: the owner
- * priced his customer's real work types through that path and was then
- * baffled they never appeared here.
- *
- * A prefixed string keeps ONE control (no second picker to keep in
- * sync) and can never collide with a numeric service id or with
- * CUSTOM_SERVICE_VALUE.
- */
-const CUSTOM_PRICE_PREFIX = "custom-price:";
-
-function customPriceValue(id: number): string {
-  return `${CUSTOM_PRICE_PREFIX}${id}`;
-}
-
-/** The CustomerCustomPrice id a cart line orders, or null. */
-function parseCustomPriceId(serviceId: string): number | null {
-  if (!serviceId.startsWith(CUSTOM_PRICE_PREFIX)) return null;
-  const parsed = Number(serviceId.slice(CUSTOM_PRICE_PREFIX.length));
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 const EMPTY_PARENT: ParentFormState = {
@@ -119,28 +107,12 @@ const EMPTY_PARENT: ParentFormState = {
   customer: "",
   title: "",
   description: "",
-  urgency: "NORMAL",
+  urgent: false,
   preferred_date: "",
-  planned_end_date: "",
   deadline: "",
 };
 
-const URGENCY_VALUES: ExtraWorkUrgency[] = ["NORMAL", "HIGH", "URGENT"];
-
-const URGENCY_I18N_KEY: Record<ExtraWorkUrgency, string> = {
-  NORMAL: "urgency.normal",
-  HIGH: "urgency.high",
-  URGENT: "urgency.urgent",
-};
-
-// Sprint 5 — service unit-type label keys for the agreed-prices panel.
-const UNIT_TYPE_I18N_KEY: Record<ServiceUnitType, string> = {
-  HOURS: "unit_type.hours",
-  SQUARE_METERS: "unit_type.square_meters",
-  FIXED: "unit_type.fixed",
-  ITEM: "unit_type.item",
-  OTHER: "unit_type.other",
-};
+type FactKey = "department" | "work_type" | "billed_to";
 
 // Sprint 14 helper — match a customer to a building via legacy
 // Customer.building OR the M:N linked_building_ids list.
@@ -161,59 +133,14 @@ function todayISO(): string {
   ).padStart(2, "0")}`;
 }
 
-function nextTempId(): string {
-  // Lightweight client-only id — no crypto needed because this never
-  // leaves the browser.
-  return `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function emptyCartLine(): CartLineState {
-  return {
-    tempId: nextTempId(),
-    serviceId: "",
-    customDescription: "",
-    quantity: "1",
-    requestedDate: todayISO(),
-    customerNote: "",
-  };
-}
-
-// Sprint 5 (frontend) — debounce window for the live preview re-fetch.
 const PREVIEW_DEBOUNCE_MS = 350;
 
-// i18n keys for the intent options. The set of options actually shown
-// is driven ENTIRELY by the backend's `allowed_intents`; these maps
-// only provide the label/description copy for whichever intents the
-// backend allows.
-const INTENT_LABEL_KEY: Record<ExtraWorkRequestIntent, string> = {
-  DIRECT_AGREED_PRICE_ORDER: "create.intent.direct.label",
-  AUTO_START_AFTER_PRICING: "create.intent.auto_start.label",
-  REQUEST_QUOTE: "create.intent.request_quote.label",
-};
-const INTENT_DESC_KEY: Record<ExtraWorkRequestIntent, string> = {
-  DIRECT_AGREED_PRICE_ORDER: "create.intent.direct.desc",
-  AUTO_START_AFTER_PRICING: "create.intent.auto_start.desc",
-  REQUEST_QUOTE: "create.intent.request_quote.desc",
+const INTENT_OUTCOME: Record<ExtraWorkRequestIntent, MeerwerkOutcomeKind> = {
+  DIRECT_AGREED_PRICE_ORDER: "instant",
+  AUTO_START_AFTER_PRICING: "auto_start",
+  REQUEST_QUOTE: "quote",
 };
 
-// Per-line price-source badge copy (preview vocabulary).
-const PREVIEW_SOURCE_KEY: Record<ExtraWorkPreviewPriceSource, string> = {
-  AGREED_CUSTOMER_PRICE: "create.preview.source_agreed",
-  NEEDS_PROVIDER_PRICING: "create.preview.source_needs_pricing",
-  AD_HOC: "create.preview.source_ad_hoc",
-};
-// Reuse InvoiceLineRow's existing source-pill CSS by mapping the
-// preview vocabulary onto the closest persisted-line modifier class.
-// This is purely a colour choice for a backend-provided source — NOT
-// client-side inference of the source itself.
-const PREVIEW_SOURCE_TAG: Record<ExtraWorkPreviewPriceSource, string> = {
-  AGREED_CUSTOMER_PRICE: "contract",
-  NEEDS_PROVIDER_PRICING: "needs_proposal",
-  AD_HOC: "custom",
-};
-
-// Stable backend intent-rejection code -> i18n key. Unknown codes fall
-// back to the backend-supplied `detail` string (see intentErrorText).
 const INTENT_ERROR_KEY: Record<ExtraWorkIntentErrorCode, string> = {
   intent_requires_all_agreed: "create.intent.error.requires_all_agreed",
   intent_requires_non_agreed_line:
@@ -223,73 +150,8 @@ const INTENT_ERROR_KEY: Record<ExtraWorkIntentErrorCode, string> = {
   intent_required: "create.intent.error.required",
 };
 
-interface AgreedTotals {
-  subtotal: number;
-  vat: number;
-  total: number;
-  agreedCount: number;
-  unpricedCount: number;
-}
-
-// DISPLAY-ONLY cosmetic arithmetic over the backend-provided agreed
-// prices. NOT business logic: it never decides routing/intent and never
-// touches non-agreed lines (those carry no price and are shown as
-// "to be priced by the provider"). If the preview endpoint later
-// returns server-computed totals, switch to those.
-/**
- * Sprint 137 item 6 — the unit price + VAT a preview line is KNOWN to
- * carry, from whichever backend-provided channel supplied it:
- * `agreed_*` on an AGREED_CUSTOMER_PRICE line, `custom_price_*` on a
- * line ordered from a CustomerCustomPrice. Still zero client-side
- * inference — both numbers come from the backend, and `price_source`
- * is never second-guessed here.
- */
-function knownLinePrice(
-  line: ExtraWorkPreviewLine,
-): { unit: number; vatPct: number } | null {
-  const rawUnit =
-    line.price_source === "AGREED_CUSTOMER_PRICE"
-      ? line.agreed_unit_price
-      : line.custom_price !== null
-        ? line.custom_price_unit_price
-        : null;
-  if (rawUnit === null) return null;
-  const unit = Number(rawUnit);
-  if (!Number.isFinite(unit)) return null;
-  const rawVat =
-    line.price_source === "AGREED_CUSTOMER_PRICE"
-      ? line.agreed_vat_pct
-      : line.custom_price_vat_pct;
-  const vatPct = rawVat !== null ? Number(rawVat) : 0;
-  return { unit, vatPct: Number.isFinite(vatPct) ? vatPct : 0 };
-}
-
-function computeAgreedTotals(lines: ExtraWorkPreviewLine[]): AgreedTotals {
-  let subtotal = 0;
-  let vat = 0;
-  let agreedCount = 0;
-  let unpricedCount = 0;
-  for (const line of lines) {
-    const qty = Number(line.quantity);
-    const known = knownLinePrice(line);
-    const unit = known ? known.unit : null;
-    if (known !== null && unit !== null && Number.isFinite(qty)) {
-      const lineSubtotal = qty * unit;
-      subtotal += lineSubtotal;
-      vat += lineSubtotal * (known.vatPct / 100);
-      agreedCount += 1;
-    } else {
-      unpricedCount += 1;
-    }
-  }
-  return { subtotal, vat, total: subtotal + vat, agreedCount, unpricedCount };
-}
-
-// True when a create rejection is an intent rejection. The backend
-// emits `{ "request_intent": ["<message>"] }`; DRF does not serialize
-// the stable error code on the wire, so we can only detect the field
-// and fall back to a friendly generic message (the precise codes are
-// surfaced via the preview channel).
+// True when a create rejection is an intent rejection (DRF does not put
+// the stable code on the wire; the field name is the tell).
 function isIntentSubmitError(err: unknown): boolean {
   const data = (err as { response?: { data?: unknown } } | null)?.response
     ?.data;
@@ -300,58 +162,76 @@ function isIntentSubmitError(err: unknown): boolean {
   );
 }
 
-export interface CreateExtraWorkPageProps {
-  /** M3 (SoT Addendum A.5) — entry-point separation. "standard" is the
-   *  generic /extra-work/new flow with REQUEST_QUOTE filtered OUT of
-   *  the intent options; "quote" is the dedicated
-   *  /extra-work/request-quote page with the intent picker hidden and
-   *  the selection pinned to REQUEST_QUOTE (never silently another
-   *  intent). All preview/cart/submit behaviour is otherwise shared. */
-  intentMode?: "quote" | "standard";
-}
-
-export function CreateExtraWorkPage({
-  intentMode = "standard",
-}: CreateExtraWorkPageProps) {
+export function CreateExtraWorkPage() {
   const { t } = useTranslation(["extra_work", "common"]);
+  // P-15 — the provider-only pricing reads are prechecked by role
+  // instead of asked-and-403'd on every customer pick.
   const { me } = useAuth();
-  // Sprint 147 — a customer sees ONLY the services they have an agreed
-  // price for (see `catalogForActor`).
-  const isCustomerActor = me?.role === "CUSTOMER_USER";
-  const isQuoteMode = intentMode === "quote";
 
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [services, setServices] = useState<Service[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  // Sprint 29 Batch 29.8.5 — soft warning channel used when the service
-  // catalog endpoint succeeds but is empty, OR when it errors. Either
-  // case still lets the form render (buildings + customers carry the
-  // hard scope contract); without a service the user cannot submit
-  // the cart, but the dropdowns still appear so they can see what they
-  // would normally pick from.
-  // Sprint 147 — the KIND of catalog problem, not its wording. The
-  // load effect classifies; the message is chosen at render, where the
-  // actor's role is already in scope. Keeping the role out of the
-  // effect keeps its dep array honest — pulling `isCustomerActor` in
-  // would re-run the whole mount-time load when `me` resolves.
-  const [catalogWarningKind, setCatalogWarningKind] = useState<
-    "" | "empty" | "unavailable"
-  >("");
   const [form, setForm] = useState<ParentFormState>(EMPTY_PARENT);
-  const [cartLines, setCartLines] = useState<CartLineState[]>([emptyCartLine()]);
 
-  // Post-submit result state — once present, the form is collapsed
-  // into a read-only confirmation panel.
+  /* W5-B — SINGLE or MULTIPLE (a series: one real meerwerk per chosen
+     day, same content). One idempotency key per series submission. */
+  const [entryMode, setEntryMode] = useState<"SINGLE" | "MULTIPLE">("SINGLE");
+  const [slots, setSlots] = useState<ExtraWorkSlot[]>([]);
+  const batchKeyRef = useRef<string>(crypto.randomUUID());
+  const [batchResult, setBatchResult] = useState<{
+    group: { id: number; standard_title: string };
+    created: number;
+    /** P-4 (Part A) — the days that were chosen, named on the result. */
+    days: string[];
+  } | null>(null);
   const [result, setResult] = useState<ExtraWorkRequestDetail | null>(null);
 
-  // Sprint 5 (frontend) — intent layer. `selectedIntent` is seeded from
-  // the preview's `default_intent` and only ever holds an intent the
-  // backend currently allows (reconciled on every preview). `preview`
-  // is tagged with the cart `key` it was computed for so a stale
-  // response is never rendered against a changed cart.
+  /* W12 — the explicit invoice-target pick, or null for "left alone"
+     (posts null = follow the customer's own setting). */
+  const [billedTo, setBilledTo] = useState<ExtraWorkBilledTo | null>(null);
+  /* W13 asked "what must be there before this may be called done?" on
+     this form; P-1 §4 moved the question to the plan dialog, which is
+     where the planner answers it. The create payload no longer sends a
+     choice, so the server default (nothing required) stands until the
+     plan says otherwise. */
+  /* Sprint 128/186 — the explicit label picks; "" = the seeded default. */
+  const [departmentId, setDepartmentId] = useState("");
+  const [workTypeId, setWorkTypeId] = useState("");
+  /** Which derived fact is open for editing, at most one. */
+  const [editingFact, setEditingFact] = useState<FactKey | null>(null);
+
+  // Per-customer lists, each tagged with the customer it was fetched
+  // for so a stale list is never shown against the current one.
+  const [customerPrices, setCustomerPrices] = useState<{
+    customerId: number;
+    rows: CustomerServicePrice[];
+  } | null>(null);
+  const [customCustomPrices, setCustomCustomPrices] = useState<{
+    customerId: number;
+    rows: CustomerCustomPrice[];
+  } | null>(null);
+  const [customerFolders, setCustomerFolders] = useState<{
+    customerId: number;
+    rows: CustomerPriceFolder[];
+  } | null>(null);
+  const [labelLists, setLabelLists] = useState<{
+    customerId: number;
+    departments: CustomerLabel[];
+    workTypes: CustomerLabel[];
+  } | null>(null);
+
+  /* The cart — the FE-2 shape, shared with the customer flow. */
+  const [cart, setCart] = useState<MeerwerkCartLine[]>([]);
+  /* P-9 C1 — the "iets anders" lines that were ADDED, and the box's
+     own text. Only added lines reach the cart; the box is asked about
+     at submit when it still holds something. */
+  const [others, setOthers] = useState<OtherLineDraft[]>([]);
+  const [otherDraft, setOtherDraft] = useState("");
+  const [unaddedAsk, setUnaddedAsk] = useState(false);
+
+  /* The server's preview, tagged with the cart key it answers for. */
   const [selectedIntent, setSelectedIntent] =
     useState<ExtraWorkRequestIntent | null>(null);
   const [preview, setPreview] = useState<
@@ -360,378 +240,28 @@ export function CreateExtraWorkPage({
     | null
   >(null);
 
-  // Sprint 5 — the selected customer's agreed contract prices, shown
-  // upfront so the customer knows which services have an agreed price
-  // (and what it is) BEFORE composing the cart. Tagged with the
-  // customerId it was fetched for so a stale list is never shown.
-  const [customerPrices, setCustomerPrices] = useState<{
-    customerId: number;
-    rows: CustomerServicePrice[];
-  } | null>(null);
-  // Sprint 137 item 6 — the customer's orderable CUSTOM price lines.
-  // Tagged with customerId like the contract rows above so a stale
-  // list is never offered. The endpoint is provider-only
-  // (backend/extra_work/views_pricing.py::CustomerCustomPriceListCreateView
-  // is gated on IsSuperAdminOrCompanyAdmin), so a customer-side actor
-  // gets a 403 and simply sees no custom-price options — the same
-  // graceful degradation the contract-price fetch already uses.
-  const [customCustomPrices, setCustomCustomPrices] = useState<{
-    customerId: number;
-    rows: CustomerCustomPrice[];
-  } | null>(null);
-  // Sprint 128 — the selected customer's active Department / Work Type lists
-  // for the two optional pickers. Tagged with customerId so a stale list from
-  // the previously chosen customer is never shown, and the selection is
-  // cleared on customer change so a stale id can never reach the payload.
-  const [labelLists, setLabelLists] = useState<{
-    customerId: number;
-    departments: CustomerLabel[];
-    workTypes: CustomerLabel[];
-  } | null>(null);
-  const [departmentId, setDepartmentId] = useState("");
-  const [workTypeId, setWorkTypeId] = useState("");
-  // Sprint 180 §3 — who the finished work is charged to. Seeded to
-  // BUILDING, which is both the model default and the owner's own
-  // "99% of the time", so an operator who ignores the control gets the
-  // right answer rather than an empty one.
-  const [billedTo, setBilledTo] = useState<ExtraWorkBilledTo>("BUILDING");
-  // Search filter for the agreed-prices dropdown (scales to long
-  // contract lists — the list scrolls and filters rather than dumping
-  // every row inline).
-  const [priceSearch, setPriceSearch] = useState("");
-
-  // Sprint 137 item 5 — REAL service-catalog category filter over the
-  // cart's service pickers. Note this is a different axis from the
-  // `category` field on the request itself (`ExtraWorkCategory`, the
-  // fixed DEEP_CLEANING/WINDOW_CLEANING/... enum): that classifies the
-  // REQUEST, this narrows the CATALOG. They were always two unrelated
-  // things; the form now says so instead of implying one.
-  //
-  // "" is "All categories" and is the DEFAULT — filtering is opt-in,
-  // per the hard requirement that there is never a loop where a
-  // service cannot be found.
-  // Sprint 143 §4 — the value is PREFIXED so one control can offer two
-  // different kinds of grouping without their ids colliding:
-  //   ""          = no filter
-  //   "cat:<id>"  = a company `ServiceCategory`
-  //   "fol:<id>"  = this customer's `CustomerPriceFolder`
-  const [categoryFilter, setCategoryFilter] = useState("");
-  // The chosen customer's folders, tagged with the customer id so a set
-  // fetched for a previously chosen customer is never offered against
-  // the current one (same guard shape as `labelLists`).
-  const [customerFolders, setCustomerFolders] = useState<{
-    customerId: number;
-    rows: CustomerPriceFolder[];
-  } | null>(null);
-  // Free-text service search. Deliberately searches the WHOLE catalog,
-  // never the filtered subset, so a category filter can never hide a
-  // service the operator is explicitly looking for.
-  const [serviceSearch, setServiceSearch] = useState("");
-
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      // Sprint 29 Batch 29.8.5 — split the three mount fetches into
-      // independent settle paths. Buildings and customers are the
-      // hard scope contract: without them there is nothing to render.
-      // Services are soft-required: a 4xx/5xx (e.g. an admin who hasn't
-      // seeded the catalog yet) downgrades to a yellow warning instead
-      // of blocking the form, so STAFF/CUSTOMER_USER personas don't get
-      // stuck behind a backend hiccup.
-      const [buildingResult, customerResult, servicesResult] =
-        await Promise.allSettled([
-          listAllBuildings(),
-          listAllCustomers(),
-          // Sprint 28 Batch 5 — reuse the catalog helper. Only active
-          // services are eligible for the cart.
-          listServices({ is_active: true }),
-        ]);
-      if (cancelled) return;
-
-      // Hard-required: buildings.
-      if (buildingResult.status === "rejected") {
-        setError(getApiError(buildingResult.reason));
+    Promise.all([listAllBuildings(), listAllCustomers()])
+      .then(([buildingRows, customerRows]) => {
+        if (cancelled) return;
+        setBuildings(buildingRows);
+        setCustomers(customerRows);
         setLoadingOptions(false);
-        return;
-      }
-      // Hard-required: customers.
-      if (customerResult.status === "rejected") {
-        setError(getApiError(customerResult.reason));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(getApiError(err));
         setLoadingOptions(false);
-        return;
-      }
-
-      const buildingResults = buildingResult.value;
-      const customerResults = customerResult.value;
-      setBuildings(buildingResults);
-      setCustomers(customerResults);
-
-      // Soft-required: services.
-      if (servicesResult.status === "fulfilled") {
-        setServices(servicesResult.value);
-        if (servicesResult.value.length === 0) {
-          setCatalogWarningKind("empty");
-        }
-      } else {
-        setServices([]);
-        setCatalogWarningKind("unavailable");
-      }
-
-      // Sprint 143 §1 — NOTHING is pre-selected here any more.
-      //
-      // This block used to default `building` to the first building and
-      // then `customer` to the one customer linked to it. Together with
-      // the two effects below (now gone) that made the customer field
-      // effectively read-only: a building was always set, so the customer
-      // list was always filtered to that building, and any attempt to
-      // pick another customer was snapped straight back. The operator
-      // could only ever create Extra Work for B Amsterdam.
-      //
-      // Customer is the PRIMARY choice and building follows from it, so
-      // there is nothing sensible to pre-select: guessing the building
-      // first is what inverted the relationship in the first place.
-      setLoadingOptions(false);
-    }
-    load();
+      });
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, []);
 
-  // Sprint 143 §1 — CUSTOMER IS THE PRIMARY CHOICE. Every customer the
-  // operator has access to is always offerable; the building list is what
-  // narrows, from the customer, never the other way round.
-  //
-  // What this replaces: `filteredCustomers` used to be the customers
-  // linked to `form.building`, and two effects kept `form.customer`
-  // pinned inside that list — one auto-selecting the sole match, one
-  // snapping any other choice back to `filteredCustomers[0]`. With a
-  // building pre-selected on load the customer field was unusable: pick
-  // anyone else and the effect immediately undid it. Reported as a
-  // regression that had been fixed once before, which is exactly what a
-  // setState-in-an-effect resync invites — it re-creates itself the
-  // moment anyone touches the filter it depends on.
-  //
-  // Both effects are DERIVED away rather than reordered. CLAUDE.md bans
-  // a synchronous setState in an effect body, and the ban is the point
-  // here: the "stale" value is not state to be corrected, it is a
-  // selection that no longer applies, so it collapses to "" at the point
-  // of use and the operator picks again. Same pattern the department /
-  // work-type fields below already use (`effectiveDepartmentId`).
-  const selectableCustomers = customers;
-
-  const filteredBuildings = useMemo(() => {
-    if (!form.customer) return buildings;
-    const c = customers.find((x) => String(x.id) === form.customer);
-    if (!c) return buildings;
-    return buildings.filter((b) => customerMatchesBuilding(c, b.id));
-  }, [buildings, customers, form.customer]);
-
-  // A building chosen before the customer changed may not belong to the
-  // new customer. It collapses to "" — the select falls back to its
-  // placeholder and `previewable` / submit already require a building,
-  // so nothing downstream can consume the stale id.
-  const effectiveBuilding = filteredBuildings.some(
-    (b) => String(b.id) === form.building,
-  )
-    ? form.building
-    : "";
-
-  // Sprint 128 — the label lists to OFFER right now, guarded inline (so TS
-  // narrows `labelLists` and a list fetched for a previously selected
-  // customer is never shown against the current one).
-  const currentDepartments =
-    labelLists && String(labelLists.customerId) === form.customer
-      ? labelLists.departments
-      : [];
-  const currentWorkTypes =
-    labelLists && String(labelLists.customerId) === form.customer
-      ? labelLists.workTypes
-      : [];
-  // Neutralise a stale selection (from a previously chosen customer) without
-  // a setState-in-effect: an id not in the current customer's active list
-  // collapses to "" for both the dropdown value and the payload.
-  // Sprint 186 — both are REQUIRED now, so an id that does not belong to
-  // the current customer falls back to that customer's FIRST label
-  // rather than to "". Every customer is seeded one of each when it is
-  // created, so the fallback always exists; "" would render a blank
-  // select on a field that cannot be left blank.
-  const effectiveDepartmentId = currentDepartments.some(
-    (d) => String(d.id) === departmentId,
-  )
-    ? departmentId
-    : currentDepartments.length > 0
-      ? String(currentDepartments[0].id)
-      : "";
-  const effectiveWorkTypeId = currentWorkTypes.some(
-    (w) => String(w.id) === workTypeId,
-  )
-    ? workTypeId
-    : currentWorkTypes.length > 0
-      ? String(currentWorkTypes[0].id)
-      : "";
-
-  // The cart is "previewable" once a building + customer are chosen and
-  // every line carries a service, a positive quantity, and a date —
-  // exactly what the preview serializer requires.
-  const previewable = useMemo(() => {
-    if (!effectiveBuilding || !form.customer) return false;
-    if (cartLines.length === 0) return false;
-    return cartLines.every((line) => {
-      // A line is previewable when it is a catalog service (a chosen
-      // numeric serviceId), an ordered custom price, OR a custom line
-      // with non-empty text. An empty line, or a custom line with blank
-      // text, is not.
-      if (line.serviceId === CUSTOM_SERVICE_VALUE) {
-        if (!line.customDescription.trim()) return false;
-      } else if (!line.serviceId) {
-        return false;
-      }
-      const q = Number(line.quantity);
-      if (!Number.isFinite(q) || q <= 0) return false;
-      return Boolean(line.requestedDate);
-    });
-  }, [effectiveBuilding, form.customer, cartLines]);
-
-  // Stable signature of ONLY the pricing-relevant fields (note text is
-  // excluded so editing a note never re-fetches). `null` when the cart
-  // is not previewable. The effect re-fetches exactly when this value
-  // changes; the payload is reconstructed by parsing it, so the effect
-  // reads no other reactive cart state.
-  const previewKey = useMemo(() => {
-    if (!previewable) return null;
-    return JSON.stringify({
-      b: Number(effectiveBuilding),
-      c: Number(form.customer),
-      l: cartLines.map((line) => {
-        const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
-        const customPriceId = parseCustomPriceId(line.serviceId);
-        return {
-          s: isCustom || customPriceId !== null ? null : Number(line.serviceId),
-          c: isCustom ? line.customDescription.trim() : null,
-          // Sprint 137 item 6 — a custom-price line's identity is the
-          // price row id; it belongs in the signature so changing the
-          // ordered price re-fetches the preview.
-          p: customPriceId,
-          q: line.quantity,
-          d: line.requestedDate,
-        };
-      }),
-    });
-  }, [previewable, effectiveBuilding, form.customer, cartLines]);
-
-  // Debounced live preview. All state writes happen inside the timer's
-  // async callback (deferred), never synchronously in the effect body.
-  useEffect(() => {
-    if (!previewKey) return;
-    const parsed = JSON.parse(previewKey) as {
-      b: number;
-      c: number;
-      l: {
-        s: number | null;
-        c: string | null;
-        p: number | null;
-        q: string;
-        d: string;
-      }[];
-    };
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      void (async () => {
-        try {
-          const data = await getExtraWorkPreview({
-            building: parsed.b,
-            customer: parsed.c,
-            request_intent: selectedIntent ?? undefined,
-            // Catalog lines send `service`; free-text lines send
-            // `custom_description`; Sprint 137 item 6 custom-price
-            // lines send `custom_price`. Exactly one of the three per
-            // line — the preview serializer enforces the same rule.
-            line_items: parsed.l.map((line) => {
-              if (line.p !== null) {
-                return {
-                  custom_price: line.p,
-                  quantity: line.q,
-                  requested_date: line.d,
-                };
-              }
-              return line.c !== null
-                ? {
-                    custom_description: line.c,
-                    quantity: line.q,
-                    requested_date: line.d,
-                  }
-                : {
-                    service: line.s ?? undefined,
-                    quantity: line.q,
-                    requested_date: line.d,
-                  };
-            }),
-          });
-          if (cancelled) return;
-          setPreview({ key: previewKey, data });
-          // Reconcile the selection against what the backend allows for
-          // the (possibly changed) cart, in priority order:
-          //   1. keep the current pick if it is still allowed;
-          //   2. else the backend `default_intent` IF it is itself
-          //      allowed;
-          //   3. else the FIRST allowed intent — this is the PR #71
-          //      Codex P2 fix: when the derived default is forbidden
-          //      (e.g. provider + a non-agreed line ⇒ default_intent
-          //      = REQUEST_QUOTE but allowed_intents = [AUTO_START_
-          //      AFTER_PRICING]) we must still select an allowed
-          //      option rather than leaving the radio unchecked and
-          //      submitting with the backend's forbidden default;
-          //   4. else null, only when the backend allows nothing.
-          // Guarantees `selectedIntent` is always a member of
-          // allowed_intents whenever the backend allows ≥1, so the
-          // radio renders checked. Triggers at most ONE extra debounced
-          // re-fetch (the new selection is re-validated) — bounded.
-          setSelectedIntent((current) => {
-            // M3 — quote page: the selection is PINNED to
-            // REQUEST_QUOTE whenever the latest preview allows it;
-            // when it does not (e.g. every line has an agreed price),
-            // the selection is null and submit is blocked with an
-            // inline notice. NEVER silently fall back to another
-            // intent on the quote page.
-            if (isQuoteMode) {
-              return data.allowed_intents.includes("REQUEST_QUOTE")
-                ? "REQUEST_QUOTE"
-                : null;
-            }
-            // M3 — standard page: reconcile against the FILTERED set
-            // (REQUEST_QUOTE removed) so the selection can never be
-            // REQUEST_QUOTE here. Same priority order as before
-            // (current pick → backend default → first offerable →
-            // null when nothing is offerable).
-            const offerable: ExtraWorkRequestIntent[] =
-              data.allowed_intents.filter(
-                (intent) => intent !== "REQUEST_QUOTE",
-              );
-            if (current && offerable.includes(current)) {
-              return current;
-            }
-            if (offerable.includes(data.default_intent)) {
-              return data.default_intent;
-            }
-            return offerable[0] ?? null;
-          });
-        } catch (err) {
-          if (cancelled) return;
-          setPreview({ key: previewKey, error: getApiError(err) });
-        }
-      })();
-    }, PREVIEW_DEBOUNCE_MS);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [previewKey, selectedIntent, isQuoteMode]);
-
-  // Fetch the selected customer's agreed contract prices. All state
-  // writes are inside the async resolution (deferred), never in the
-  // effect body, so this adds no set-state-in-effect violation. A 4xx
-  // (e.g. a role without price-read access) degrades to an empty list.
+  // The chosen customer's prices, custom prices, folders and labels.
+  // Load-only effects (no setState in the effect body); a 403 on the
+  // provider-only lists degrades to an empty list.
   useEffect(() => {
     const customerId = form.customer ? Number(form.customer) : null;
     if (!customerId) return;
@@ -743,63 +273,30 @@ export function CreateExtraWorkPage({
       .catch(() => {
         if (!cancelled) setCustomerPrices({ customerId, rows: [] });
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [form.customer]);
-
-  // Sprint 137 item 6 — load the customer's orderable custom prices.
-  // Same shape as the contract-price effect above (writes deferred into
-  // the promise resolution, never in the effect body). A 403 for a
-  // customer-side actor degrades to an empty list rather than an error.
-  useEffect(() => {
-    const customerId = form.customer ? Number(form.customer) : null;
-    if (!customerId) return;
-    let cancelled = false;
-    listCustomerCustomPrices(customerId)
-      .then((rows) => {
-        if (!cancelled) setCustomCustomPrices({ customerId, rows });
-      })
-      .catch(() => {
-        if (!cancelled) setCustomCustomPrices({ customerId, rows: [] });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [form.customer]);
-
-  // Sprint 143 §4 — the chosen customer's ACTIVE folders. Load-only, no
-  // setState in the effect body; a stale set is neutralised by the
-  // customer-id tag when it is read. A 403 (customer-side actor)
-  // degrades to an empty list: the company categories still stand, so
-  // the picker is never left with nothing.
-  useEffect(() => {
-    const customerId = form.customer ? Number(form.customer) : null;
-    if (!customerId) return;
-    let cancelled = false;
-    listCustomerPriceFolders(customerId, { is_active: true })
-      .then((rows) => {
-        if (!cancelled) setCustomerFolders({ customerId, rows });
-      })
-      .catch(() => {
-        if (!cancelled) setCustomerFolders({ customerId, rows: [] });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [form.customer]);
-
-  // Sprint 128 — (re)load the per-customer Department / Work Type picker
-  // lists when the customer changes (only active labels). This effect is
-  // LOAD-ONLY (no synchronous setState — CLAUDE.md §3): a stale selection is
-  // neutralised by the `effectiveDepartmentId` / `effectiveWorkTypeId`
-  // derivations below (they collapse to "" unless the id belongs to the
-  // currently-loaded customer), so a department from a previously selected
-  // customer can never reach the dropdown value OR the payload.
-  useEffect(() => {
-    const customerId = form.customer ? Number(form.customer) : null;
-    if (!customerId) return;
-    let cancelled = false;
+    // P-15 (P-14's S4 finding) — the custom-pricing and folder lists
+    // are SA/CA-only server-side; asking as anyone else logged a 403 to
+    // the console on every customer pick. The answer is known, so the
+    // question is not asked; the catch stays as the belt.
+    if (isProviderAdmin(me?.role)) {
+      listCustomerCustomPrices(customerId)
+        .then((rows) => {
+          if (!cancelled) setCustomCustomPrices({ customerId, rows });
+        })
+        .catch(() => {
+          if (!cancelled) setCustomCustomPrices({ customerId, rows: [] });
+        });
+      listCustomerPriceFolders(customerId, { is_active: true })
+        .then((rows) => {
+          if (!cancelled) setCustomerFolders({ customerId, rows });
+        })
+        .catch(() => {
+          if (!cancelled) setCustomerFolders({ customerId, rows: [] });
+        });
+    }
+    // No else-branch write: the consumers guard on `customerId !==
+    // form.customer`, so a stale answer for another customer is
+    // already ignored — and a synchronous setState in an effect body
+    // is the pattern CLAUDE.md bans.
     Promise.all([
       listLabels(customerId, "department", { is_active: true }),
       listLabels(customerId, "work_type", { is_active: true }),
@@ -815,73 +312,64 @@ export function CreateExtraWorkPage({
     return () => {
       cancelled = true;
     };
-  }, [form.customer]);
+  }, [form.customer, me?.role]);
 
-  // Render-time derived preview view-state. A `preview` is only honoured
-  // when its `key` matches the CURRENT cart, so a stale response is
-  // never shown (or acted on) against a changed cart.
-  const previewData =
-    previewable && preview !== null && preview.key === previewKey && "data" in preview
-      ? preview.data
-      : null;
-  const previewErrorMsg =
-    previewable &&
-    preview !== null &&
-    preview.key === previewKey &&
-    "error" in preview
-      ? preview.error
-      : null;
-  const previewLoading =
-    previewable && (preview === null || preview.key !== previewKey);
-
-  // Stable backend code -> localized text, falling back to the backend
-  // detail string for any code we don't have copy for yet.
-  const intentErrorText = (err: { code: string; detail: string }): string => {
-    const key = INTENT_ERROR_KEY[err.code as ExtraWorkIntentErrorCode];
-    return key ? t(key) : err.detail;
-  };
-
-  // DISPLAY-ONLY cart total over the agreed-price lines (see
-  // computeAgreedTotals). Recomputed each render; trivially cheap.
-  const previewTotals = previewData
-    ? computeAgreedTotals(previewData.lines)
-    : null;
-
-  // M3 — mode-derived intent view-state.
-  // Standard page: the picker renders the FILTERED set (REQUEST_QUOTE
-  // removed); when the backend would ONLY allow REQUEST_QUOTE, nothing
-  // is offerable here and the mirrored notice points at the quote page.
-  // Quote page: no picker; when the latest preview does not allow
-  // REQUEST_QUOTE the submit is disabled with an inline notice.
-  const offeredIntents = previewData
-    ? previewData.allowed_intents.filter(
-        (intent) => intent !== "REQUEST_QUOTE",
-      )
-    : [];
-  const quoteAllowed =
-    previewData !== null &&
-    previewData.allowed_intents.includes("REQUEST_QUOTE");
-  const quoteUnavailable = isQuoteMode && previewData !== null && !quoteAllowed;
-  const standardOnlyQuote =
-    !isQuoteMode &&
-    previewData !== null &&
-    previewData.allowed_intents.length > 0 &&
-    offeredIntents.length === 0;
-
-  // Agreed-prices panel: catalog lookup (for category/unit labels the
-  // pricing endpoint doesn't carry) + the current customer's currently-
-  // valid agreed rows. We filter to active + in-window client-side so
-  // the list matches what a customer is shown regardless of viewer role
-  // (the backend already narrows for CUSTOMER_USER; providers get all
-  // rows, so we narrow here too for a consistent "current prices" view).
-  const serviceById = useMemo(
-    () => new Map(services.map((svc) => [svc.id, svc])),
-    [services],
+  // ----- derived: who -----------------------------------------------
+  const chosenCustomer = useMemo(
+    () => customers.find((c) => String(c.id) === form.customer) ?? null,
+    [customers, form.customer],
   );
-  const pricesLoading =
-    !!form.customer &&
-    (customerPrices === null ||
-      customerPrices.customerId !== Number(form.customer));
+  const filteredBuildings = useMemo(() => {
+    if (!chosenCustomer) return buildings;
+    return buildings.filter((b) => customerMatchesBuilding(chosenCustomer, b.id));
+  }, [buildings, chosenCustomer]);
+  // A building chosen before the customer changed may not belong to the
+  // new customer; it collapses to "" at the point of use. When the
+  // customer has exactly one building it is the answer without a click.
+  const effectiveBuilding = filteredBuildings.some(
+    (b) => String(b.id) === form.building,
+  )
+    ? form.building
+    : chosenCustomer && filteredBuildings.length === 1
+      ? String(filteredBuildings[0].id)
+      : "";
+  const chosenBuilding = useMemo(
+    () => buildings.find((b) => String(b.id) === effectiveBuilding) ?? null,
+    [buildings, effectiveBuilding],
+  );
+
+  const resolvedBilledTo: ExtraWorkBilledTo =
+    chosenCustomer?.invoice_billing_target === "BUILDING"
+      ? "BUILDING"
+      : "CUSTOMER";
+  const selectedBilledTo: ExtraWorkBilledTo = billedTo ?? resolvedBilledTo;
+  /** Matching the customer's own setting stores NULL (follow the
+   *  customer); only a divergence is written down. */
+  const billedToPayload: ExtraWorkBilledTo | null =
+    selectedBilledTo === resolvedBilledTo ? null : selectedBilledTo;
+
+  const currentDepartments =
+    labelLists && String(labelLists.customerId) === form.customer
+      ? labelLists.departments
+      : [];
+  const currentWorkTypes =
+    labelLists && String(labelLists.customerId) === form.customer
+      ? labelLists.workTypes
+      : [];
+  // P-12 E3 — ask, don't force: nothing is preselected. A fact left
+  // unchosen is OMITTED from the payload and the server stores the
+  // seeded "Algemeen" pair (`ExtraWorkRequestCreateSerializer.
+  // validate`), so the screen says what will happen instead of
+  // pre-answering the question.
+  const effectiveDepartment =
+    currentDepartments.find((d) => String(d.id) === departmentId) ?? null;
+  const effectiveWorkType =
+    currentWorkTypes.find((w) => String(w.id) === workTypeId) ?? null;
+
+  // ----- derived: what ------------------------------------------------
+  /** The date the cart is priced on: the wish date, else today — the
+   *  same day `ExtraWorkPreviewSerializer.validate` resolves prices on. */
+  const cartDate = form.preferred_date || todayISO();
   const agreedPrices = useMemo(() => {
     if (
       customerPrices === null ||
@@ -890,20 +378,30 @@ export function CreateExtraWorkPage({
     ) {
       return [] as CustomerServicePrice[];
     }
-    const today = todayISO();
-    return customerPrices.rows
-      .filter(
-        (p) =>
-          p.is_active &&
-          p.valid_from <= today &&
-          (p.valid_to === null || p.valid_to >= today),
-      )
-      .sort((a, b) => a.service_name.localeCompare(b.service_name));
-  }, [customerPrices, form.customer]);
-  // Sprint 137 item 6 — the custom prices that are orderable RIGHT NOW:
-  // active and inside their validity window, exactly the rule the
-  // backend re-enforces in `_validate_custom_price_orderable`. Offering
-  // an archived or expired row would only produce a 400 on submit.
+    // One current row per service: the latest `valid_from` on or before
+    // the cart date, ties by highest id — `pricing.resolve_price`'s rule.
+    const byService = new Map<number, CustomerServicePrice>();
+    for (const price of customerPrices.rows) {
+      if (
+        !price.is_active ||
+        price.valid_from > cartDate ||
+        (price.valid_to !== null && price.valid_to < cartDate)
+      ) {
+        continue;
+      }
+      const current = byService.get(price.service);
+      if (
+        !current ||
+        price.valid_from > current.valid_from ||
+        (price.valid_from === current.valid_from && price.id > current.id)
+      ) {
+        byService.set(price.service, price);
+      }
+    }
+    return [...byService.values()].sort((a, b) =>
+      a.service_name.localeCompare(b.service_name),
+    );
+  }, [customerPrices, form.customer, cartDate]);
   const orderableCustomPrices = useMemo(() => {
     if (
       customCustomPrices === null ||
@@ -912,274 +410,155 @@ export function CreateExtraWorkPage({
     ) {
       return [] as CustomerCustomPrice[];
     }
-    const today = todayISO();
     return customCustomPrices.rows
       .filter(
         (p) =>
           p.is_active &&
-          p.valid_from <= today &&
-          (p.valid_to === null || p.valid_to >= today),
+          p.valid_from <= cartDate &&
+          (p.valid_to === null || p.valid_to >= cartDate),
       )
       .sort((a, b) => a.custom_name.localeCompare(b.custom_name));
-  }, [customCustomPrices, form.customer]);
-
-  // The unit a custom price is quoted in — its operator-supplied label
-  // for OTHER, the translated unit type otherwise. Mirrors
-  // CustomerPricingPage.resolveUnitLabel.
-  const customPriceUnitLabel = (price: CustomerCustomPrice): string => {
-    if (price.unit_type === "OTHER" && price.custom_unit_label) {
-      return price.custom_unit_label;
-    }
-    return t(UNIT_TYPE_I18N_KEY[price.unit_type]);
-  };
-
-  // Owner request: surface each service's AGREED/contract price inline in
-  // the cart's service-select option label. Built from the SAME currently-
-  // valid agreed rows the browse panel shows (active + in-window for the
-  // selected customer). Empty when no customer is selected or prices are
-  // still loading, so the select falls back to plain service names.
-  const agreedPriceByServiceId = useMemo(
-    () => new Map(agreedPrices.map((p) => [p.service, p])),
-    [agreedPrices],
-  );
-
-  // Compose the " — €29,00 / m²" suffix for a service that has an agreed
-  // price, reusing the existing money + unit-type formatting. Returns "" so
-  // services without an agreed price show the plain name.
-  const agreedPriceSuffix = (serviceId: number): string => {
-    const price = agreedPriceByServiceId.get(serviceId);
-    if (!price) return "";
-    const svc = serviceById.get(serviceId);
-    const unitLabel = svc ? t(UNIT_TYPE_I18N_KEY[svc.unit_type]) : "";
-    const money = formatMoney(price.unit_price);
-    return unitLabel ? ` — ${money} / ${unitLabel}` : ` — ${money}`;
-  };
-
-  // Sprint 145 — the Category control offers ONE thing: the categories
-  // that belong to the SELECTED CUSTOMER. Nothing before a customer is
-  // chosen (the select is disabled with a note saying so).
-  //
-  // It used to also offer the provider's own catalog groupings in a
-  // "your company's categories" group. That was wrong twice over: the
-  // owner never asked for it, and it put the provider's whole catalog
-  // in front of a CUSTOMER_USER — Amanda saw categories that have
-  // nothing to do with her customer.
-  //
-  // Nothing becomes unreachable: "All categories" is still the default
-  // and still shows the entire orderable catalog, so a service with no
-  // agreed price for this customer can still be ordered — which is what
-  // routes the request into the proposal flow (`resolve_price` has no
-  // fallback to a company default).
-  //
-  // ARCHIVED categories are excluded: the form offers only what can be
-  // ordered now.
-
-  // Guarded inline so TS narrows and a folder set fetched for a
-  // previously chosen customer is never shown against the current one.
+  }, [customCustomPrices, form.customer, cartDate]);
   const currentFolders =
     customerFolders && String(customerFolders.customerId) === form.customer
       ? customerFolders.rows.filter((f) => f.is_active)
       : [];
 
-  // Which service ids each folder holds a price row for. Contract rows
-  // only — a `CustomerCustomPrice` has no `service` FK by construction,
-  // so it cannot narrow a catalog picker.
-  const serviceIdsByFolder = useMemo(() => {
-    const map = new Map<number, Set<number>>();
-    const rows =
-      customerPrices && String(customerPrices.customerId) === form.customer
-        ? customerPrices.rows
-        : [];
-    for (const row of rows) {
-      if (row.folder === null) continue;
-      const bucket = map.get(row.folder);
-      if (bucket) bucket.add(row.service);
-      else map.set(row.folder, new Set([row.service]));
+  const cartWithOther = useMemo(
+    () => [...cart, ...otherLinesToCart(others)],
+    [cart, others],
+  );
+  /** A custom-price line whose row is no longer orderable on the cart's
+   *  date: kept and blocked at submit rather than silently dropped. */
+  const staleCustomPriceLines = cartWithOther.filter(
+    (line) =>
+      line.kind === "custom_price" &&
+      !orderableCustomPrices.some((p) => p.id === line.id),
+  );
+
+  const previewable =
+    !!effectiveBuilding && !!form.customer && cartWithOther.length > 0;
+  const previewKey = useMemo(() => {
+    if (!previewable) return null;
+    return JSON.stringify({
+      b: Number(effectiveBuilding),
+      c: Number(form.customer),
+      pd: form.preferred_date || null,
+      l: cartLineItemsPayload(cartWithOther),
+    });
+  }, [previewable, effectiveBuilding, form.customer, form.preferred_date, cartWithOther]);
+
+  // Debounced live preview. State writes happen inside the timer's
+  // async callback, never synchronously in the effect body.
+  useEffect(() => {
+    if (!previewKey) return;
+    const parsed = JSON.parse(previewKey) as {
+      b: number;
+      c: number;
+      pd: string | null;
+      l: ReturnType<typeof cartLineItemsPayload>;
+    };
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const data = await getExtraWorkPreview({
+            building: parsed.b,
+            customer: parsed.c,
+            request_intent: selectedIntent ?? undefined,
+            preferred_date: parsed.pd ?? undefined,
+            line_items: parsed.l,
+          });
+          if (cancelled) return;
+          setPreview({ key: previewKey, data });
+          // Keep the pick when still allowed; else the server's default
+          // when allowed; else the first allowed; else null.
+          setSelectedIntent((current) => {
+            if (current && data.allowed_intents.includes(current)) {
+              return current;
+            }
+            if (data.allowed_intents.includes(data.default_intent)) {
+              return data.default_intent;
+            }
+            return data.allowed_intents[0] ?? null;
+          });
+        } catch (err) {
+          if (cancelled) return;
+          setPreview({ key: previewKey, error: getApiError(err) });
+        }
+      })();
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [previewKey, selectedIntent]);
+
+  const previewData =
+    previewable && preview !== null && preview.key === previewKey && "data" in preview
+      ? preview.data
+      : null;
+  const previewFailed =
+    previewable &&
+    preview !== null &&
+    preview.key === previewKey &&
+    "error" in preview;
+  const previewLoading =
+    previewable && (preview === null || preview.key !== previewKey);
+
+  /** The cart as the server prices it: a line the preview says needs
+   *  provider pricing (an agreed price that is not valid on the cart's
+   *  date) loses its money and reads "prijs volgt". The preview is the
+   *  authority; nothing here argues with it. `cartLineItemsPayload`
+   *  sends every line in cart order, so position i answers line i. */
+  const confirmLines = useMemo((): MeerwerkCartLine[] => {
+    if (!previewData) return cartWithOther;
+    return cartWithOther.map((line, index) => {
+      const row = previewData.lines[index];
+      if (row && row.price_source === "NEEDS_PROVIDER_PRICING") {
+        return { ...line, unitPrice: null, vatPct: null };
+      }
+      return line;
+    });
+  }, [cartWithOther, previewData]);
+
+  const totals = useMemo(() => {
+    let subtotal = 0;
+    let vat = 0;
+    let priced = 0;
+    let unpriced = 0;
+    for (const line of confirmLines) {
+      const amounts = lineAmounts(line);
+      if (amounts) {
+        subtotal += amounts.subtotal;
+        vat += amounts.vat;
+        priced += 1;
+      } else {
+        unpriced += 1;
+      }
     }
-    return map;
-  }, [customerPrices, form.customer]);
+    const cents = (n: number) => Math.round(n * 100) / 100;
+    return {
+      subtotal: cents(subtotal),
+      total: cents(cents(subtotal) + cents(vat)),
+      priced,
+      unpriced,
+    };
+  }, [confirmLines]);
 
-  const serviceSearchTerm = serviceSearch.trim().toLowerCase();
-
-  // Search results span the ENTIRE catalog — the category filter is
-  // deliberately ignored while searching. Every option label already
-  // carries its category name, so a match from outside the current
-  // filter is self-describing.
-  // Sprint 147 — what a CUSTOMER may pick from.
-  //
-  // Owner's rule: a customer sees ONLY the services a price has been
-  // agreed with them for, and those are the ones they can put in the
-  // cart. The rest of the provider's catalog is not theirs to browse.
-  //
-  // This does not close the door on asking for something new — the
-  // free-text custom line is still open to them, and a custom line is
-  // what routes the request into the pricing-proposal flow. So the
-  // proposal path survives; it is just reached by writing what you want
-  // rather than by shopping in someone else's catalog.
-  //
-  // Applied upstream of BOTH the category filter and the search, so a
-  // customer cannot reach past it by typing a name.
-  const catalogForActor = useMemo(() => {
-    // A service with no agreed price for THIS customer is not orderable:
-    // it has no price to order at. The provider used to see the whole
-    // catalog here, so a customer with no price list at all still showed
-    // a full dropdown of things that could not be ordered -- the owner
-    // hit exactly that on City Office Rotterdam.
-    //
-    // NO exception, not even in quote mode, and the owner was explicit
-    // about why: a customer must never be shown something that was not
-    // entered for them. Either there is an agreement with a price, or
-    // the line is written as Custom -- which is exactly what the Custom
-    // option at the bottom of this picker is for, and what carries an
-    // unpriced request into the proposal flow.
-    //
-    // The SAME rule applies to the provider and the super admin. Two
-    // different catalogs for two audiences is how the two of them end up
-    // discussing different lists on one phone call.
-    return services.filter((svc) => agreedPriceByServiceId.has(svc.id));
-  }, [services, agreedPriceByServiceId]);
-
-  const searchMatches = useMemo(() => {
-    if (!serviceSearchTerm) return null;
-    return catalogForActor.filter((svc) =>
-      `${svc.category_name} ${svc.name}`
-        .toLowerCase()
-        .includes(serviceSearchTerm),
-    );
-  }, [catalogForActor, serviceSearchTerm]);
-
-  const categoryFilteredServices = useMemo(() => {
-    if (!categoryFilter) return catalogForActor;
-    if (categoryFilter.startsWith("cat:")) {
-      const id = Number(categoryFilter.slice(4));
-      return catalogForActor.filter((svc) => svc.category === id);
-    }
-    if (categoryFilter.startsWith("fol:")) {
-      const id = Number(categoryFilter.slice(4));
-      const ids = serviceIdsByFolder.get(id);
-      if (!ids) return [];
-      return catalogForActor.filter((svc) => ids.has(svc.id));
-    }
-    return catalogForActor;
-  }, [catalogForActor, categoryFilter, serviceIdsByFolder]);
-
-  // What the per-line pickers offer right now: search wins over the
-  // category filter when one is typed.
-  const offeredServices = searchMatches ?? categoryFilteredServices;
-  const narrowingActive = Boolean(categoryFilter) || Boolean(serviceSearchTerm);
-  const hiddenServiceCount = catalogForActor.length - offeredServices.length;
-
-  // Sprint 145 — the agreed-prices browse panel obeys the SAME category
-  // choice as the service pickers. Picking a category and still being
-  // shown every agreed price underneath it is the "the screen
-  // contradicts itself" defect this series keeps removing.
-  //
-  // Defined here, below `serviceIdsByFolder`, because it reads it: a
-  // `const` is in the temporal dead zone until its own initialiser
-  // runs, so this cannot live further up the component.
-  //
-  // Search still wins over the category filter, exactly as it does for
-  // the service pickers, so a price the operator types the name of is
-  // never hidden by a filter they forgot was on.
-  const filteredAgreedPrices = useMemo(() => {
-    const q = priceSearch.trim().toLowerCase();
-    if (q) {
-      return agreedPrices.filter((p) => {
-        const svc = serviceById.get(p.service);
-        const label = svc
-          ? `${svc.category_name} ${svc.name}`
-          : p.service_name;
-        return label.toLowerCase().includes(q);
-      });
-    }
-    if (!categoryFilter) return agreedPrices;
-    if (categoryFilter.startsWith("fol:")) {
-      const ids = serviceIdsByFolder.get(Number(categoryFilter.slice(4)));
-      if (!ids) return [];
-      return agreedPrices.filter((p) => ids.has(p.service));
-    }
-    if (categoryFilter.startsWith("cat:")) {
-      const id = Number(categoryFilter.slice(4));
-      return agreedPrices.filter(
-        (p) => serviceById.get(p.service)?.category === id,
-      );
-    }
-    return agreedPrices;
-  }, [
-    agreedPrices,
-    priceSearch,
-    serviceById,
-    categoryFilter,
-    serviceIdsByFolder,
-  ]);
-
-  function clearServiceNarrowing() {
-    setCategoryFilter("");
-    setServiceSearch("");
-  }
-
-  /**
-   * True when a cart line orders a custom price that is NOT on the
-   * currently-selected customer's orderable list — the customer was
-   * switched (or the row archived) after the line was added. The line
-   * is kept, labelled and blocked at submit rather than silently reset:
-   * quietly emptying a line the user added is the failure mode this
-   * sprint keeps finding.
-   */
-  function staleCustomPriceLine(line: CartLineState): boolean {
-    const customPriceId = parseCustomPriceId(line.serviceId);
-    if (customPriceId === null) return false;
-    return !orderableCustomPrices.some((p) => p.id === customPriceId);
-  }
-
-  /**
-   * The option list for ONE cart line. The line's currently-selected
-   * service is ALWAYS included even when the active filter/search
-   * excludes it — otherwise narrowing the catalog would blank out a
-   * `<select>` that already had a value, silently dropping a line the
-   * user had already added to the cart.
-   */
-  function optionsForLine(line: CartLineState): Service[] {
-    if (!line.serviceId || line.serviceId === CUSTOM_SERVICE_VALUE) {
-      return offeredServices;
-    }
-    const selectedId = Number(line.serviceId);
-    if (offeredServices.some((svc) => svc.id === selectedId)) {
-      return offeredServices;
-    }
-    const selected = services.find((svc) => svc.id === selectedId);
-    return selected ? [selected, ...offeredServices] : offeredServices;
-  }
-
-  /**
-   * Picking a service from OUTSIDE the active category filter clears
-   * that filter (per the "selecting a match outside the current
-   * category clears the filter" rule) — leaving it on would show the
-   * operator a cart line whose service is not in the list they are
-   * looking at.
-   */
-  function onLineServiceChange(tempId: string, value: string) {
-    updateCartLine(tempId, "serviceId", value);
-    // A custom price has no catalog category, so it can neither match
-    // nor contradict the active filter — leave the filter alone.
-    if (parseCustomPriceId(value) !== null) return;
-    if (!categoryFilter || value === CUSTOM_SERVICE_VALUE || !value) return;
-    const picked = services.find((svc) => svc.id === Number(value));
-    if (!picked) return;
-    // Sprint 143 §4 — the same guard, taught the two key shapes. A
-    // service picked from OUTSIDE the active filter clears that filter,
-    // so the list the operator is looking at never contradicts the line
-    // they just built.
-    const stillMatches = categoryFilter.startsWith("cat:")
-      ? picked.category === Number(categoryFilter.slice(4))
-      : categoryFilter.startsWith("fol:")
-        ? (serviceIdsByFolder.get(Number(categoryFilter.slice(4))) ?? new Set()).has(picked.id)
-        : true;
-    if (!stillMatches) {
-      setCategoryFilter("");
-    }
-  }
-
+  const offeredIntents = previewData?.allowed_intents ?? [];
+  const outcomeKind: MeerwerkOutcomeKind | null = previewData
+    ? selectedIntent
+      ? INTENT_OUTCOME[selectedIntent]
+      : previewData.cart.all_agreed
+        ? "instant"
+        : "quote"
+    : null;
+  const intentErrorText = (err: { code: string; detail: string }): string => {
+    const key = INTENT_ERROR_KEY[err.code as ExtraWorkIntentErrorCode];
+    return key ? t(key) : err.detail;
+  };
+  // ----- handlers --------------------------------------------------
   function update<K extends keyof ParentFormState>(
     name: K,
     value: ParentFormState[K],
@@ -1187,192 +566,66 @@ export function CreateExtraWorkPage({
     setForm((current) => ({ ...current, [name]: value }));
   }
 
-  function addCartLine() {
-    setCartLines((current) => [...current, emptyCartLine()]);
+  function toggleLine(line: MeerwerkCartLine) {
+    setCart((prev) =>
+      prev.some((row) => row.key === line.key)
+        ? prev.filter((row) => row.key !== line.key)
+        : [...prev, line],
+    );
   }
-
-  // Add a service picked from the agreed-prices dropdown into the cart:
-  // fill the first empty line if there is one, otherwise append a new
-  // line. No-op when the service is already in the cart (the cart
-  // rejects duplicate services on submit).
-  function addServiceFromContract(serviceId: number) {
-    setCartLines((current) => {
-      if (current.some((l) => Number(l.serviceId) === serviceId)) {
-        return current;
-      }
-      const emptyIdx = current.findIndex((l) => !l.serviceId);
-      if (emptyIdx >= 0) {
-        return current.map((l, i) =>
-          i === emptyIdx ? { ...l, serviceId: String(serviceId) } : l,
-        );
-      }
-      return [...current, { ...emptyCartLine(), serviceId: String(serviceId) }];
-    });
-  }
-
-  // Sprint 137 item 6 — mirror of addServiceFromContract for a custom
-  // price: fill the first empty line, else append. No-op when the price
-  // is already in the cart (submit rejects duplicates).
-  function addCustomPriceToCart(customPriceId: number) {
-    const value = customPriceValue(customPriceId);
-    setCartLines((current) => {
-      if (current.some((l) => l.serviceId === value)) {
-        return current;
-      }
-      const emptyIdx = current.findIndex((l) => !l.serviceId);
-      if (emptyIdx >= 0) {
-        return current.map((l, i) =>
-          i === emptyIdx ? { ...l, serviceId: value } : l,
-        );
-      }
-      return [...current, { ...emptyCartLine(), serviceId: value }];
-    });
-  }
-
-  function removeCartLine(tempId: string) {
-    setCartLines((current) => current.filter((l) => l.tempId !== tempId));
-  }
-
-  function updateCartLine<K extends keyof CartLineState>(
-    tempId: string,
-    field: K,
-    value: CartLineState[K],
-  ) {
-    setCartLines((current) =>
-      current.map((line) =>
-        line.tempId === tempId ? { ...line, [field]: value } : line,
+  function setQuantity(key: string, quantity: number) {
+    setCart((prev) =>
+      prev.map((row) =>
+        row.key === key ? { ...row, quantity: Math.max(1, quantity) } : row,
       ),
     );
+  }
+  /** P-9 C1 — Add: the box's text becomes a line; the box clears. */
+  function addOther() {
+    const text = otherDraft.trim();
+    if (!text) return;
+    setOthers((prev) => [...prev, otherLineFromText(text, prev.length + 1)]);
+    setOtherDraft("");
+    setUnaddedAsk(false);
+  }
+  function removeOther(key: string) {
+    setOthers((prev) => prev.filter((row) => row.key !== key));
+  }
+  /** The x on a confirm-list row: an added line leaves `others`, a
+   *  picked price leaves the cart (the picker's tick follows). */
+  function removeConfirmLine(line: MeerwerkCartLine) {
+    if (line.kind === "other") removeOther(line.key);
+    else setCart((prev) => prev.filter((row) => row.key !== line.key));
   }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError("");
-    if (!form.title.trim()) {
-      setError(t("create.error_title_required"));
-      return;
-    }
-    if (!form.description.trim()) {
-      setError(t("create.error_description_required"));
+    // P-9 C1 — something typed in the "iets anders" box but never
+    // added is never sent silently: ask, and let the reader press
+    // submit again after choosing.
+    if (otherDraft.trim() !== "") {
+      setUnaddedAsk(true);
       return;
     }
     if (!effectiveBuilding || !form.customer) {
       setError(t("create.error_building_customer_required"));
       return;
     }
-    // Cart validation.
-    if (cartLines.length === 0) {
+    if (cartWithOther.length === 0) {
       setError(t("create.error_empty_cart"));
       return;
     }
-    const seenServiceIds = new Set<number>();
-    // Sprint 137 item 6 — custom-price lines dedupe on their own id
-    // space; a price row is no more orderable twice than a service is.
-    const seenCustomPriceIds = new Set<number>();
-    for (const line of cartLines) {
-      const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
-      const customPriceId = parseCustomPriceId(line.serviceId);
-      if (customPriceId !== null) {
-        // A price row stranded by a customer switch would be rejected
-        // by the backend's tenant guard anyway — fail here with a
-        // message that says what to do instead.
-        if (staleCustomPriceLine(line)) {
-          setError(t("create.error_stale_custom_price"));
-          return;
-        }
-        if (seenCustomPriceIds.has(customPriceId)) {
-          setError(t("create.error_duplicate_custom_price"));
-          return;
-        }
-        seenCustomPriceIds.add(customPriceId);
-        const qtyNum = Number(line.quantity);
-        if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
-          setError(t("create.error_line_quantity_invalid"));
-          return;
-        }
-        if (!line.requestedDate) {
-          setError(t("create.error_line_requested_date_required"));
-          return;
-        }
-        continue;
-      }
-      if (isCustom) {
-        // Custom line: require non-empty free-text. Custom lines are
-        // never deduped against catalog services and skip the
-        // inactive-service check (they have no service FK).
-        if (!line.customDescription.trim()) {
-          setError(t("create.error_line_custom_required"));
-          return;
-        }
-      } else {
-        if (!line.serviceId) {
-          setError(t("create.error_line_service_required"));
-          return;
-        }
-        const svcId = Number(line.serviceId);
-        if (seenServiceIds.has(svcId)) {
-          setError(t("create.error_duplicate_service"));
-          return;
-        }
-        seenServiceIds.add(svcId);
-      }
-      const qtyNum = Number(line.quantity);
-      if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
-        setError(t("create.error_line_quantity_invalid"));
-        return;
-      }
-      if (!line.requestedDate) {
-        setError(t("create.error_line_requested_date_required"));
-        return;
-      }
-      if (!isCustom) {
-        const svc = services.find((s) => s.id === Number(line.serviceId));
-        if (svc && !svc.is_active) {
-          setError(t("create.error_inactive_service"));
-          return;
-        }
-      }
-    }
-
-    // M3 — quote page: submitting REQUIRES a fresh preview that allows
-    // REQUEST_QUOTE and the pinned selection. Without it (preview
-    // mid-flight, preview error, or an all-agreed-price cart) we block
-    // rather than let the backend derive a NON-quote intent from an
-    // omitted request_intent — the quote page must never create
-    // anything but a quote request.
-    if (
-      isQuoteMode &&
-      (!previewData || !quoteAllowed || selectedIntent !== "REQUEST_QUOTE")
-    ) {
-      setError(t("quote.error_not_ready"));
+    if (staleCustomPriceLines.length > 0) {
+      setError(t("create.error_stale_custom_price"));
       return;
     }
-    // M3 — standard page: REQUEST_QUOTE is filtered out of both the
-    // options and the reconcile, so this is unreachable by
-    // construction; belt-and-suspenders so the generic flow can never
-    // submit a quote intent through any state race.
-    if (!isQuoteMode && selectedIntent === "REQUEST_QUOTE") {
-      setError(t("create.intent.error.none_selected"));
+    if (entryMode === "MULTIPLE" && slots.length === 0) {
+      setError(t("series.slot_none"));
       return;
     }
-
-    // PR #71 Codex P2 fix — when a fresh preview exists, REQUIRE a
-    // selected intent the backend currently allows. The reconcile keeps
-    // `selectedIntent` inside allowed_intents, so this only trips if the
-    // backend allowed nothing for this cart/actor; block with a friendly
-    // message rather than creating the request with the backend's
-    // (possibly forbidden) derived default.
-    if (
-      previewData &&
-      (!selectedIntent || !previewData.allowed_intents.includes(selectedIntent))
-    ) {
-      setError(t("create.intent.error.none_selected"));
-      return;
-    }
-
-    // If the live preview already knows the chosen intent is invalid for
-    // this cart, surface the precise (backend-coded) reason rather than
-    // letting the create call fail with an un-localized field error.
+    // A fresh preview must allow the chosen intent; when the server
+    // already knows why it does not, say that reason.
     if (
       previewData &&
       previewData.requested_intent === selectedIntent &&
@@ -1382,11 +635,13 @@ export function CreateExtraWorkPage({
       setError(intentErrorText(previewData.requested_intent_error));
       return;
     }
-
-    // Never send a `request_intent` that isn't in the LATEST preview's
-    // allowed_intents. When a fresh preview confirms the selection, send
-    // it; when no fresh preview exists (preview unavailable / a refetch
-    // is mid-flight), omit it and let the backend derive a safe default.
+    if (
+      previewData &&
+      (!selectedIntent || !previewData.allowed_intents.includes(selectedIntent))
+    ) {
+      setError(t("create.intent.error.none_selected"));
+      return;
+    }
     const intentToSend =
       previewData &&
       selectedIntent &&
@@ -1396,78 +651,42 @@ export function CreateExtraWorkPage({
 
     setSubmitting(true);
     try {
-      const created = await createExtraWork({
+      // ONE payload, both modes: a series member is created from
+      // exactly this object, with only the title and the slot's date
+      // differing per member (composed server-side).
+      const payload = {
         building: Number(effectiveBuilding),
         customer: Number(form.customer),
-        title: form.title.trim(),
-        description: form.description.trim(),
-        // Sprint 144 §1 — the single Category control writes ONE of
-        // these two (at most): a company catalog category, or this
-        // customer's price folder. `category` (the enum) is deliberately
-        // NOT sent — the server default (OTHER) applies, which is what
-        // "the form stopped asking" means.
-        ...(categoryFilter.startsWith("cat:")
-          ? { service_category: Number(categoryFilter.slice(4)) }
-          : {}),
-        ...(categoryFilter.startsWith("fol:")
-          ? { price_folder: Number(categoryFilter.slice(4)) }
-          : {}),
-        urgency: form.urgency,
+        title: form.title.trim() || derivedTitle(cartWithOther),
+        description:
+          form.description.trim() ||
+          derivedDescription(cartWithOther, t("common:meerwerk_flow.other_prefix")),
+        urgency: form.urgent ? ("URGENT" as const) : ("NORMAL" as const),
         preferred_date: form.preferred_date || null,
-        planned_end_date: form.planned_end_date || null,
+        // P-11 A3 — the hard date; the wire and the type never left.
         deadline: form.deadline || null,
-        // Sprint 128 — optional per-customer labels. `effective*` collapses a
-        // stale (foreign-customer) selection to "" so it can never reach here.
-        ...(effectiveDepartmentId
-          ? { department: Number(effectiveDepartmentId) }
-          : {}),
-        ...(effectiveWorkTypeId
-          ? { work_type: Number(effectiveWorkTypeId) }
-          : {}),
-        // Sprint 180 §3 — always sent (never omitted): the control has
-        // no unset state, so there is no case where "leave it to the
-        // server" and "the operator chose BUILDING" mean different
-        // things.
-        billed_to: billedTo,
-        // Send the validated intent (a member of the latest preview's
-        // allowed_intents). Omitted when no fresh preview exists: the
-        // backend then derives a safe default — identical to the
-        // pre-intent-layer graceful-degradation behaviour.
+        ...(effectiveDepartment ? { department: effectiveDepartment.id } : {}),
+        ...(effectiveWorkType ? { work_type: effectiveWorkType.id } : {}),
+        billed_to: billedToPayload,
         ...(intentToSend ? { request_intent: intentToSend } : {}),
-        // Catalog lines send `service`; free-text lines send
-        // `custom_description`; Sprint 137 item 6 custom-price lines
-        // send `custom_price`. Exactly one of the three per line,
-        // validated above and re-enforced by the backend.
-        line_items: cartLines.map((line) => {
-          const customPriceId = parseCustomPriceId(line.serviceId);
-          if (customPriceId !== null) {
-            return {
-              custom_price: customPriceId,
-              quantity: line.quantity,
-              requested_date: line.requestedDate,
-              customer_note: line.customerNote.trim() || undefined,
-            };
-          }
-          return line.serviceId === CUSTOM_SERVICE_VALUE
-            ? {
-                custom_description: line.customDescription.trim(),
-                quantity: line.quantity,
-                requested_date: line.requestedDate,
-                customer_note: line.customerNote.trim() || undefined,
-              }
-            : {
-                service: Number(line.serviceId),
-                quantity: line.quantity,
-                requested_date: line.requestedDate,
-                customer_note: line.customerNote.trim() || undefined,
-              };
-        }),
-      });
-      setResult(created);
+        line_items: cartLineItemsPayload(cartWithOther),
+      };
+      if (entryMode === "MULTIPLE") {
+        const batch = await batchCreateExtraWork(
+          payload,
+          slots,
+          batchKeyRef.current,
+        );
+        batchKeyRef.current = crypto.randomUUID();
+        setBatchResult({
+          group: batch.group,
+          created: batch.created,
+          days: slots.map((slot) => slot.date).sort(),
+        });
+      } else {
+        setResult(await createExtraWork(payload));
+      }
     } catch (err) {
-      // Intent rejections (the backend code is not on the wire) get a
-      // friendly localized message; everything else surfaces the DRF
-      // field/detail message verbatim as before.
       if (isIntentSubmitError(err)) {
         setError(t("create.intent.error.rejected_generic"));
       } else {
@@ -1481,95 +700,89 @@ export function CreateExtraWorkPage({
   const noOptions =
     !loadingOptions && (buildings.length === 0 || customers.length === 0);
 
-  // ----- Result panel (read-only confirmation) -----
+  // ----- W5-B: the series confirmation ------------------------------
+  if (batchResult) {
+    return (
+      <div data-testid="extra-work-batch-result">
+        <PageHeader
+          eyebrow={t("common:meerwerk_flow.eyebrow")}
+          title={t("series.created_title")}
+        />
+        <section className="card" style={{ padding: 20, maxWidth: 640 }}>
+          <p style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <CheckCircle2 size={18} strokeWidth={2} />
+            <strong data-testid="extra-work-batch-created-count">
+              {t("series.created_body", { count: batchResult.created })}
+            </strong>
+          </p>
+          <p className="muted">{batchResult.group.standard_title}</p>
+          {/* P-4 (Part A) — the days, named: one meerwerk per chosen day. */}
+          <div className="meerwerk-day-chips" data-testid="extra-work-batch-days">
+            {batchResult.days.map((day) => (
+              <span key={day} className="meerwerk-day-chip">
+                {formatDate(day)}
+              </span>
+            ))}
+          </div>
+          <div className="form-actions">
+            <Link
+              to="/extra-work"
+              className="btn btn-primary"
+              data-testid="extra-work-batch-to-list"
+            >
+              {t("series.created_open_list")}
+            </Link>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  // ----- the confirmation --------------------------------------------
   if (result) {
     const isInstant = result.routing_decision === "INSTANT";
-    // Per-line breakdown for the routing-explanation banner. Each
-    // count is sourced from the BACKEND's per-line `price_source` —
-    // never inferred from labels / category names / client math. Cart
-    // lines only ever return "CONTRACT" or "NEEDS_PROPOSAL"
-    // (backend/extra_work/serializers.py::ExtraWorkRequestItemSerializer
-    // .get_price_source); any other value would be a bug.
     const cartLineList = result.line_items ?? [];
-    const contractLineCount = cartLineList.filter(
-      (line) => line.price_source === "CONTRACT",
-    ).length;
-    const needsProposalLineCount = cartLineList.filter(
-      (line) => line.price_source === "NEEDS_PROPOSAL",
-    ).length;
     return (
       <div data-testid="extra-work-create-result">
-        <div className="page-header">
-          <div>
-            <Link to="/extra-work" className="link-back">
-              <ChevronLeft size={14} strokeWidth={2.5} />
-              {t("back_to_extra_work")}
+        <PageHeader
+          eyebrow={t("common:meerwerk_flow.eyebrow")}
+          title={t("result.heading")}
+          backLink={{ to: "/extra-work", label: t("back_to_extra_work") }}
+        />
+        <section className="card" style={{ padding: 20, marginBottom: 16 }}>
+          <p
+            style={{ display: "flex", alignItems: "center", gap: 8 }}
+            role="status"
+            data-testid={
+              isInstant
+                ? "extra-work-result-instant"
+                : "extra-work-result-proposal"
+            }
+          >
+            <CheckCircle2 size={18} strokeWidth={2} />
+            {isInstant
+              ? t("result.instant_processing")
+              : t(
+                  result.request_intent === "AUTO_START_AFTER_PRICING"
+                    ? "result.auto_start_pending"
+                    : "result.proposal_pending",
+                )}
+          </p>
+          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+            <Link
+              to={`/extra-work/${result.id}`}
+              className="btn btn-primary btn-sm"
+              data-testid="extra-work-result-view-link"
+            >
+              {t("result.view_request")}
             </Link>
-            <h2 className="page-title">{t("result.heading")}</h2>
+            <Link to="/extra-work" className="btn btn-ghost btn-sm">
+              {t("result.back_to_list")}
+            </Link>
           </div>
-        </div>
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="form-section">
-            <div
-              className={isInstant ? "alert-info" : "alert-info"}
-              role="status"
-              data-testid={
-                isInstant
-                  ? "extra-work-result-instant"
-                  : "extra-work-result-proposal"
-              }
-            >
-              {isInstant
-                ? t("result.instant_processing")
-                : t("result.proposal_pending")}
-              {cartLineList.length > 0 && (
-                <div
-                  className="muted small"
-                  style={{ marginTop: 6 }}
-                  data-testid="extra-work-result-routing-breakdown"
-                >
-                  {t("result.routing_breakdown", {
-                    contract: contractLineCount,
-                    needsProposal: needsProposalLineCount,
-                    total: cartLineList.length,
-                  })}
-                </div>
-              )}
-            </div>
-            <div
-              className="status-actions"
-              style={{ display: "flex", gap: 8, marginTop: 12 }}
-            >
-              <Link to="/extra-work" className="btn btn-secondary btn-sm">
-                {t("result.back_to_list")}
-              </Link>
-              <Link
-                to={`/extra-work/${result.id}`}
-                className="btn btn-primary btn-sm"
-                data-testid="extra-work-result-view-link"
-              >
-                {t("result.view_request")}
-              </Link>
-            </div>
-          </div>
-        </div>
-
-        {/* Cart-line preview. First consumer of InvoiceLineRow — uses
-            real persisted ExtraWorkRequestItem rows returned by the
-            create endpoint, with backend-driven `price_source` /
-            `contract_unit_price` / `contract_vat_pct`. NO frontend
-            inference; the Source column is whatever the backend says.
-
-            Totals row deliberately NOT rendered here: parent aggregates
-            (`subtotal_amount`, `vat_amount`, `total_amount`) DO exist on
-            the wire (backend/extra_work/serializers.py L461-463) but
-            they aggregate from `pricing_line_items`, not from cart
-            `line_items`. On a fresh post-submit cart they are
-            therefore "0.00" until provider pricing is built. Surfacing
-            zeros would mislead more than it informs; the EW-detail
-            consumer (later task) renders totals when pricing exists. */}
+        </section>
         {cartLineList.length > 0 && (
-          <div className="card">
+          <section className="card">
             <div className="form-section">
               <div className="form-section-title">
                 {t("result.cart_preview_title")}
@@ -1599,97 +812,65 @@ export function CreateExtraWorkPage({
                 </table>
               </div>
             </div>
-          </div>
+          </section>
         )}
       </div>
     );
   }
 
-  // ----- Form -----
+  // ----- the form ------------------------------------------------------
+  const factValue = (key: FactKey): string => {
+    if (key === "department") {
+      // P-12 E3 — a fact not chosen says what WILL happen: it
+      // becomes the seeded "Algemeen", changeable afterwards.
+      return effectiveDepartment
+        ? customerLabelName(effectiveDepartment.name, t)
+        : t("create.fact_becomes_general");
+    }
+    if (key === "work_type") {
+      return effectiveWorkType
+        ? customerLabelName(effectiveWorkType.name, t)
+        : t("create.fact_becomes_general");
+    }
+    return selectedBilledTo === "BUILDING"
+      ? t("create.fact_billed_building", {
+          building: chosenBuilding?.name ?? "",
+        })
+      : t("create.fact_billed_customer", {
+          customer: chosenCustomer?.name ?? "",
+        });
+  };
+  const factLabel: Record<FactKey, string> = {
+    department: t("create.field_department"),
+    work_type: t("create.field_work_type"),
+    billed_to: t("create.fact_billed_to"),
+  };
+
   return (
-    <div
-      data-testid={
-        isQuoteMode ? "extra-work-quote-page" : "extra-work-create-page"
-      }
-    >
-      <div className="page-header">
-        <div>
-          <Link to="/extra-work" className="link-back">
-            <ChevronLeft size={14} strokeWidth={2.5} />
-            {t("back_to_extra_work")}
-          </Link>
-          <h2 className="page-title">
-            {isQuoteMode ? t("quote.page_title") : t("create.page_title")}
-          </h2>
-          <p className="page-sub">
-            {isQuoteMode
-              ? t("quote.page_subtitle")
-              : t("create.page_subtitle")}
-          </p>
-        </div>
-      </div>
+    <div data-testid="extra-work-create-page">
+      <PageHeader
+        eyebrow={t("common:meerwerk_flow.eyebrow")}
+        title={t("create.page_title")}
+        subtitle={t("create.page_sub")}
+        backLink={{ to: "/extra-work", label: t("back_to_extra_work") }}
+      />
 
       {loadingOptions && (
         <div className="loading-bar">
           <div className="loading-bar-fill" />
         </div>
       )}
-
       {noOptions && !error && (
         <div className="alert-error" style={{ marginBottom: 16 }}>
           {t("create.error_no_access")}
         </div>
       )}
 
-      {/* Sprint 147 — "empty" means two different things. The endpoint
-          returns a CUSTOMER only the services a price has been agreed
-          with them for, so empty means "nothing agreed with you yet",
-          NOT "the provider has no catalog". Telling a customer an admin
-          must go and set the catalog up is false and unactionable. */}
-      {catalogWarningKind && (
-        <div
-          className="alert-warning"
-          style={{ marginBottom: 16 }}
-          role="status"
-          data-testid="create-ew-catalog-warning"
-        >
-          {t(
-            catalogWarningKind === "unavailable"
-              ? "create.warning_catalog_unavailable"
-              : isCustomerActor
-                ? "create.warning_no_agreed_services"
-                : "create.warning_catalog_empty",
-          )}
-        </div>
-      )}
-
-      {error && (
-        <div
-          className="alert-error"
-          style={{ marginBottom: 16 }}
-          role="alert"
-          data-testid="extra-work-create-error"
-        >
-          {error}
-        </div>
-      )}
-
-      {/* Full-width form — the previous `.create-layout` class wrapped
-          this form in a `1fr 300px` grid that reserved an empty right
-          column (there is no `.create-side` on this page), leaving
-          ~320px of grey space on the right of the form. The form is
-          now a plain block; the inner `.create-main` card still owns
-          the vertical flow of form-sections. */}
       <form onSubmit={handleSubmit}>
         <div className="card create-main">
-          <div className="form-section">
-            <div className="form-section-title">
-              {t("create.parent_section_title")}
-            </div>
-            {/* Owner request: Customer leads (left column), Building
-                follows (right column). The customer-drives-building
-                filtering, auto-select, and disabled/required logic are
-                unchanged — only the visual order is swapped. */}
+          {/* ----- Voor wie ----- */}
+          <div className="form-section" data-testid="extra-work-create-who">
+            <div className="form-section-title">{t("create.s_who")}</div>
             <div className="form-2col">
               <div className="field">
                 <label className="field-label" htmlFor="ew-customer">
@@ -1700,14 +881,23 @@ export function CreateExtraWorkPage({
                   data-testid="extra-work-create-customer"
                   className="field-select"
                   value={form.customer}
-                  onChange={(event) => update("customer", event.target.value)}
-                  disabled={selectableCustomers.length === 0}
+                  onChange={(event) => {
+                    // A cart belongs to a customer: their prices, their
+                    // folders. A new customer starts with an empty one.
+                    update("customer", event.target.value);
+                    setCart([]);
+                    setDepartmentId("");
+                    setWorkTypeId("");
+                    setBilledTo(null);
+                    setEditingFact(null);
+                  }}
+                  disabled={customers.length === 0}
                   required
                 >
                   <option value="" disabled>
                     {t("create.field_customer_placeholder")}
                   </option>
-                  {selectableCustomers.map((c) => (
+                  {customers.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
@@ -1738,239 +928,221 @@ export function CreateExtraWorkPage({
                 </select>
               </div>
             </div>
-            {/* Sprint 128 — optional per-customer labels. Empty first option
-                (they are optional); disabled with a hint when the chosen
-                customer has no labels of that kind (one real customer has
-                twelve departments and zero work types). */}
-            <div className="form-2col">
-              <div className="field">
-                <label className="field-label" htmlFor="ew-department">
-                  {t("create.field_department")} *
-                </label>
-                <select
-                  id="ew-department"
-                  data-testid="extra-work-create-department"
-                  className="field-select"
-                  value={effectiveDepartmentId}
-                  onChange={(event) => setDepartmentId(event.target.value)}
-                  disabled={currentDepartments.length === 0}
-                >
-                  {/* Sprint 186 — the field is required, so there is no
-                      empty CHOICE; but until a customer is picked there is
-                      nothing to choose from, and an empty dropdown reads
-                      as broken. A disabled placeholder says which step
-                      comes first instead. */}
-                  {currentDepartments.length === 0 && (
-                    <option value="">
-                      {t("create.field_label_pick_customer")}
-                    </option>
+
+            {/* The facts the choice above filled in — quiet values with
+                a pencil, not four open questions. */}
+            {chosenCustomer && chosenBuilding && (
+              <div data-testid="extra-work-create-facts">
+                <div className="ew-facts">
+                  {(["department", "work_type", "billed_to"] as FactKey[]).map(
+                    (key) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className="ew-fact"
+                        aria-expanded={editingFact === key}
+                        aria-label={`${factLabel[key]}: ${factValue(key)} — ${t("create.fact_edit")}`}
+                        onClick={() =>
+                          setEditingFact((current) =>
+                            current === key ? null : key,
+                          )
+                        }
+                        data-testid={`extra-work-create-fact-${key}`}
+                      >
+                        <span className="ew-fact-key">{factLabel[key]}:</span>
+                        <span>{factValue(key)}</span>
+                        <span className="ew-fact-pencil">
+                          <Pencil size={13} strokeWidth={2} aria-hidden />
+                        </span>
+                      </button>
+                    ),
                   )}
-                  {currentDepartments.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {customerLabelName(d.name, t)}
-                    </option>
-                  ))}
-                </select>
-                {form.customer && currentDepartments.length === 0 && (
-                  <span className="muted small">
-                    {t("create.field_department_empty")}
-                  </span>
+                </div>
+                {editingFact === "department" && (
+                  <div className="ew-fact-editor field">
+                    <label className="field-label" htmlFor="ew-department">
+                      {t("create.field_department")}
+                    </label>
+                    <select
+                      id="ew-department"
+                      data-testid="extra-work-create-department"
+                      className="field-select"
+                      value={effectiveDepartment ? String(effectiveDepartment.id) : ""}
+                      onChange={(event) => setDepartmentId(event.target.value)}
+                      disabled={currentDepartments.length === 0}
+                    >
+                      <option value="">{t("create.fact_unchosen_option")}</option>
+                      {currentDepartments.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {customerLabelName(d.name, t)}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="muted small" style={{ marginTop: 4 }}>
+                      {t("create.fact_or_general")}
+                    </div>
+                  </div>
+                )}
+                {editingFact === "work_type" && (
+                  <div className="ew-fact-editor field">
+                    <label className="field-label" htmlFor="ew-work-type">
+                      {t("create.field_work_type")}
+                    </label>
+                    <select
+                      id="ew-work-type"
+                      data-testid="extra-work-create-work-type"
+                      className="field-select"
+                      value={effectiveWorkType ? String(effectiveWorkType.id) : ""}
+                      onChange={(event) => setWorkTypeId(event.target.value)}
+                      disabled={currentWorkTypes.length === 0}
+                    >
+                      <option value="">{t("create.fact_unchosen_option")}</option>
+                      {currentWorkTypes.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {customerLabelName(w.name, t)}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="muted small" style={{ marginTop: 4 }}>
+                      {t("create.fact_or_general")}
+                    </div>
+                  </div>
+                )}
+                {editingFact === "billed_to" && (
+                  <fieldset
+                    className="ew-fact-editor field"
+                    style={{ border: 0, padding: 0, margin: "8px 0 0" }}
+                    data-testid="extra-work-create-billed-to"
+                  >
+                    <span className="field-label">
+                      {t("create.billed_to_question")}
+                    </span>
+                    <label className="ew-billed-to-option">
+                      <input
+                        type="radio"
+                        name="ew-billed-to"
+                        checked={selectedBilledTo === "BUILDING"}
+                        onChange={() => setBilledTo("BUILDING")}
+                        data-testid="extra-work-create-billed-to-building"
+                      />
+                      <span>
+                        <strong>
+                          {t("create.billed_to_building_named", {
+                            building: chosenBuilding.name,
+                          })}
+                        </strong>
+                        {resolvedBilledTo === "BUILDING" && (
+                          <span className="ew-billed-to-default">
+                            {t("create.billed_to_customer_setting")}
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                    <label className="ew-billed-to-option">
+                      <input
+                        type="radio"
+                        name="ew-billed-to"
+                        checked={selectedBilledTo === "CUSTOMER"}
+                        onChange={() => setBilledTo("CUSTOMER")}
+                        data-testid="extra-work-create-billed-to-customer"
+                      />
+                      <span>
+                        <strong>
+                          {t("create.billed_to_customer_named", {
+                            customer: chosenCustomer.name,
+                          })}
+                        </strong>
+                        {resolvedBilledTo === "CUSTOMER" && (
+                          <span className="ew-billed-to-default">
+                            {t("create.billed_to_customer_setting")}
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  </fieldset>
                 )}
               </div>
-              <div className="field">
-                <label className="field-label" htmlFor="ew-work-type">
-                  {t("create.field_work_type")} *
-                </label>
-                <select
-                  id="ew-work-type"
-                  data-testid="extra-work-create-work-type"
-                  className="field-select"
-                  value={effectiveWorkTypeId}
-                  onChange={(event) => setWorkTypeId(event.target.value)}
-                  disabled={currentWorkTypes.length === 0}
-                >
-                  {currentWorkTypes.length === 0 && (
-                    <option value="">
-                      {t("create.field_label_pick_customer")}
-                    </option>
-                  )}
-                  {currentWorkTypes.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {customerLabelName(w.name, t)}
-                    </option>
-                  ))}
-                </select>
-                {form.customer && currentWorkTypes.length === 0 && (
-                  <span className="muted small">
-                    {t("create.field_work_type_empty")}
-                  </span>
-                )}
-              </div>
-            </div>
-            {/* Sprint 180 §3 — who pays for this one.
-                Asked HERE, in the parent section next to the building
-                and the customer, because those are the two things it
-                chooses between: the answer is only meaningful once you
-                can see both names on screen.
-                This page IS both create surfaces — the customer-facing
-                one (a CUSTOMER_USER, customer and building fixed by
-                their own access) and the provider-facing one (the
-                pickers above) — so a single control serves both, and
-                both post the same `billed_to` to the same endpoint.
-                Two options and no empty first option, because there is
-                no "unset": the field is non-null server-side with
-                BUILDING as its default, which is the honest answer 99%
-                of the time rather than a placeholder. */}
-            <div className="form-2col">
-              <div className="field">
-                <label className="field-label" htmlFor="ew-billed-to">
-                  {t("create.field_billed_to")}
-                </label>
-                <select
-                  id="ew-billed-to"
-                  data-testid="extra-work-create-billed-to"
-                  className="field-select"
-                  value={billedTo}
-                  onChange={(event) =>
-                    setBilledTo(event.target.value as ExtraWorkBilledTo)
-                  }
-                >
-                  <option value="BUILDING">{t("billed_to.building")}</option>
-                  <option value="CUSTOMER">{t("billed_to.customer")}</option>
-                </select>
-                <span className="muted small">
-                  {t("create.field_billed_to_hint")}
-                </span>
-              </div>
-            </div>
+            )}
           </div>
 
-          <div className="form-section">
-            <div className="form-section-title">
-              {t("create.what_section_title")}
-            </div>
-            <div className="form-2col">
-              {/* Sprint 144 §1 — ONE "Category" on the page.
-                  This used to be `ExtraWorkRequest.category`, the fixed
-                  generic enum (Deep cleaning / Window cleaning / …),
-                  while the REAL picker — the company's catalog
-                  categories plus this customer's price folders — sat
-                  separately above the cart as a filter. Two controls
-                  called "Category", one of which had nothing to do with
-                  the operator's catalog.
-                  They are now the same control: choosing here both
-                  CLASSIFIES the request (`service_category` /
-                  `price_folder` on the model) and FILTERS the service
-                  lines below. The enum column is untouched and keeps its
-                  `default=OTHER` — the form simply stops asking, so old
-                  rows keep their value and new ones take the default.
-                  Fully migrating the enum away is `## NEXT` item 18. */}
-              <div className="field">
-                <label className="field-label" htmlFor="ew-catalog-category">
-                  {t("create.field_category")}
-                </label>
-                <select
-                  id="ew-catalog-category"
-                  className="field-select"
-                  data-testid="extra-work-create-catalog-category"
-                  value={categoryFilter}
-                  onChange={(event) => setCategoryFilter(event.target.value)}
-                  // Sprint 145 — a category belongs to a CUSTOMER, so
-                  // there is nothing to choose from before one is
-                  // picked. Disabled rather than showing the provider's
-                  // own catalog groupings: those are not the customer's
-                  // categories, and offering them here put a foreign
-                  // provider's headings in front of a customer user.
-                  disabled={!form.customer}
-                >
-                  {/* Sprint 186 §1 — "All categories" is filter wording
-                      on a field that files the request. There is no
-                      "General" ROW to select: `service_category` and
-                      `price_folder` are both nullable and nothing
-                      provisions a default one, so the empty value stays
-                      empty on the wire and only its LABEL changes. The
-                      word is the one this system already uses for the
-                      unclassified case — `customers/signals.py` seeds
-                      every customer an "Algemeen" department and work
-                      type — rather than a second name for one idea. */}
-                  <option value="">{t("create.field_category_none")}</option>
-                  {/* Sprint 145 — ONE flat list: the categories that
-                      belong to the selected customer. Archived ones are
-                      excluded upstream (`currentFolders`), so the form
-                      only ever offers what can be ordered now. */}
-                  {currentFolders.map((folder) => (
-                    <option key={`fol-${folder.id}`} value={`fol:${folder.id}`}>
-                      {folder.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="muted small" style={{ marginTop: 4 }}>
-                  {!form.customer
-                    ? t("create.field_category_pick_customer_first")
-                    : currentFolders.length === 0
-                      ? t("create.field_category_customer_has_none")
-                      : t("create.field_category_hint")}
+          {/* ----- Wat ----- */}
+          <div className="form-section" data-testid="extra-work-create-what">
+            <div className="form-section-title">{t("create.s_what")}</div>
+            {!form.customer ? (
+              <p className="muted small">{t("create.pick_customer_first")}</p>
+            ) : (
+              <>
+                <PricedServicePicker
+                  prices={agreedPrices}
+                  customPrices={orderableCustomPrices}
+                  folders={currentFolders}
+                  cart={cart}
+                  onToggle={toggleLine}
+                  onQuantity={setQuantity}
+                  showAmounts
+                  emptyLabel={t("create.no_agreed_prices")}
+                  testIdPrefix="extra-work-create"
+                />
+                <OtherLinesEditor
+                  others={others}
+                  draft={otherDraft}
+                  onDraftChange={(text) => {
+                    setOtherDraft(text);
+                    setUnaddedAsk(false);
+                  }}
+                  onAdd={addOther}
+                  onRemove={removeOther}
+                  helper={t("create.other_helper_provider")}
+                  testIdPrefix="extra-work-create"
+                />
+              </>
+            )}
+            <details className="form-fold" data-testid="extra-work-create-fold-title">
+              <summary className="form-fold-summary">
+                {t("create.fold_title")}
+                {form.title.trim() && (
+                  <span className="form-fold-summary-value">{form.title.trim()}</span>
+                )}
+              </summary>
+              <div className="form-fold-body">
+                <div className="field">
+                  <label className="field-label" htmlFor="ew-title">
+                    {t("create.field_title")}
+                  </label>
+                  <input
+                    id="ew-title"
+                    data-testid="extra-work-create-title"
+                    className="field-input"
+                    type="text"
+                    maxLength={255}
+                    placeholder={
+                      derivedTitle(cartWithOther) || t("create.field_title_placeholder")
+                    }
+                    value={form.title}
+                    onChange={(event) => update("title", event.target.value)}
+                  />
+                  <span className="muted small">{t("create.fold_title_hint")}</span>
+                </div>
+                <div className="field">
+                  <label className="field-label" htmlFor="ew-description">
+                    {t("create.field_description")}
+                  </label>
+                  <textarea
+                    id="ew-description"
+                    data-testid="extra-work-create-description"
+                    className="field-textarea"
+                    placeholder={t("create.field_description_placeholder")}
+                    value={form.description}
+                    onChange={(event) => update("description", event.target.value)}
+                  />
                 </div>
               </div>
-              <div className="field">
-                <label className="field-label" htmlFor="ew-urgency">
-                  {t("create.field_urgency")}
-                </label>
-                <select
-                  id="ew-urgency"
-                  className="field-select"
-                  value={form.urgency}
-                  onChange={(event) =>
-                    update("urgency", event.target.value as ExtraWorkUrgency)
-                  }
-                >
-                  {URGENCY_VALUES.map((value) => (
-                    <option key={value} value={value}>
-                      {t(URGENCY_I18N_KEY[value])}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+            </details>
+          </div>
 
-            <div className="field">
-              <label className="field-label" htmlFor="ew-title">
-                {t("create.field_title")}
-              </label>
-              <input
-                id="ew-title"
-                data-testid="extra-work-create-title"
-                className="field-input"
-                type="text"
-                maxLength={255}
-                placeholder={t("create.field_title_placeholder")}
-                value={form.title}
-                onChange={(event) => update("title", event.target.value)}
-                required
-              />
-            </div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="ew-description">
-                {t("create.field_description")}
-              </label>
-              <textarea
-                id="ew-description"
-                data-testid="extra-work-create-description"
-                className="field-textarea"
-                placeholder={t("create.field_description_helper")}
-                value={form.description}
-                onChange={(event) => update("description", event.target.value)}
-                required
-              />
-              <div
-                className="muted small"
-                style={{ marginTop: 6, lineHeight: 1.4 }}
-              >
-                {t("create.field_description_helper")}
-              </div>
-            </div>
-
+          {/* ----- Wanneer ----- */}
+          <div className="form-section" data-testid="extra-work-create-when">
+            <div className="form-section-title">{t("create.s_when")}</div>
             <div className="field">
               <label className="field-label" htmlFor="ew-preferred-date">
                 {t("create.field_preferred_date")}
@@ -1979,834 +1151,182 @@ export function CreateExtraWorkPage({
                 id="ew-preferred-date"
                 className="field-input"
                 type="date"
+                data-testid="extra-work-create-preferred-date"
                 value={form.preferred_date}
-                onChange={(event) =>
-                  update("preferred_date", event.target.value)
-                }
+                onChange={(event) => update("preferred_date", event.target.value)}
               />
+              <span className="muted small">{t("create.preferred_date_hint")}</span>
             </div>
 
-            {/* Sprint 174 §1 — the planned WINDOW's end and the
-                DEADLINE. Sprint 173 added both fields and no form ever
-                offered them, so every record was created with them
-                empty. */}
-            <div className="field">
-              <label className="field-label" htmlFor="ew-planned-end">
-                {t("detail.plannedEnd")}
-              </label>
-              <input
-                id="ew-planned-end"
-                className="field-input"
-                type="date"
-                value={form.planned_end_date}
-                onChange={(event) =>
-                  update("planned_end_date", event.target.value)
-                }
-              />
-              <p className="muted small" style={{ margin: "4px 0 0" }}>
-                {t("create.plannedEndHint")}
-              </p>
-            </div>
-
+            {/* P-11 A3 — the deadline, under the wish. The wish says
+                when the customer would like it; this says when it MUST
+                be done. Optional, and empty means no hard date. */}
             <div className="field">
               <label className="field-label" htmlFor="ew-deadline">
-                {t("detail.deadline")}
+                {t("create.field_deadline")}
               </label>
               <input
                 id="ew-deadline"
                 className="field-input"
                 type="date"
+                data-testid="extra-work-create-deadline"
                 value={form.deadline}
                 onChange={(event) => update("deadline", event.target.value)}
               />
-              <p className="muted small" style={{ margin: "4px 0 0" }}>
-                {t("create.deadlineHint")}
-              </p>
-            </div>
-          </div>
-
-          {/* ----- Cart ----- */}
-          <div className="form-section" data-testid="extra-work-create-cart">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 8,
-              }}
-            >
-              <div className="form-section-title" style={{ margin: 0 }}>
-                {t("create.cart_section_title")}
-              </div>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={addCartLine}
-                data-testid="extra-work-create-add-line"
-              >
-                <Plus size={14} strokeWidth={2.2} />
-                <span style={{ marginLeft: 6 }}>
-                  {t("create.add_line_button")}
-                </span>
-              </button>
-            </div>
-            <div className="muted small" style={{ marginBottom: 12 }}>
-              {t("create.cart_section_helper")}
+              <span className="muted small">{t("create.deadline_hint")}</span>
             </div>
 
-            {/* Sprint 5 — agreed contract prices shown UPFRONT so the
-                customer knows which services have a pre-agreed price (and
-                what it is) before adding any line. Sourced from
-                GET /customers/<id>/pricing/ (customer-readable; backend
-                returns only the customer's OWN currently-valid rows for
-                customer-side actors). Provider rows are narrowed to
-                active + in-window here for a consistent "current" view. */}
-            {form.customer && (
-              <details
-                className="ew-agreed-prices"
-                data-testid="extra-work-create-agreed-prices"
-                open
-              >
-                <summary className="ew-agreed-prices-summary">
-                  <span className="form-section-title" style={{ margin: 0 }}>
-                    {t("create.prices.section_title")}
+            {/* W5-B — a series: one real meerwerk per chosen day. P-10 B6:
+                out of the former "Planning" fold, beside the wish date —
+                the chosen days are the customer's wished days, one
+                request each, not a plan (the plan is made by a person on
+                the request page). */}
+            <div className="field ew-create-series">
+              <label className="ew-billed-to-option">
+                <input
+                  type="checkbox"
+                  checked={entryMode === "MULTIPLE"}
+                  onChange={(event) =>
+                    setEntryMode(event.target.checked ? "MULTIPLE" : "SINGLE")
+                  }
+                  data-testid="extra-work-entry-mode-multiple"
+                />
+                <span>
+                  <strong>{t("create.series_toggle")}</strong>
+                  <span className="muted small" style={{ display: "block" }}>
+                    {t("create.series_hint")}
                   </span>
-                  {!pricesLoading && agreedPrices.length > 0 && (
-                    <span className="muted small">({agreedPrices.length})</span>
-                  )}
-                </summary>
-                <div className="ew-agreed-prices-body">
-                  {pricesLoading ? (
-                    <div className="muted small">
-                      {t("create.prices.loading")}
-                    </div>
-                  ) : agreedPrices.length === 0 ? (
-                    <div
-                      className="muted small"
-                      data-testid="extra-work-create-agreed-prices-empty"
-                    >
-                      {t(
-                        isCustomerActor
-                          ? "create.prices.empty_customer"
-                          : "create.prices.empty",
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      <input
-                        type="text"
-                        className="field-input"
-                        data-testid="extra-work-create-agreed-prices-search"
-                        placeholder={t("create.prices.search_placeholder")}
-                        value={priceSearch}
-                        onChange={(event) => setPriceSearch(event.target.value)}
-                      />
-                      <div
-                        className="ew-agreed-prices-list"
-                        data-testid="extra-work-create-agreed-prices-list"
-                      >
-                        {filteredAgreedPrices.length === 0 ? (
-                          <div
-                            className="muted small"
-                            style={{ padding: "8px 10px" }}
-                          >
-                            {t("create.prices.no_match")}
-                          </div>
-                        ) : (
-                          filteredAgreedPrices.map((p) => {
-                            const svc = serviceById.get(p.service);
-                            const label = svc
-                              ? svc.category_name
-                                ? `${svc.category_name} — ${svc.name}`
-                                : svc.name
-                              : p.service_name;
-                            const unitLabel = svc
-                              ? t(UNIT_TYPE_I18N_KEY[svc.unit_type])
-                              : "";
-                            const inCart = cartLines.some(
-                              (l) => Number(l.serviceId) === p.service,
-                            );
-                            return (
-                              <button
-                                type="button"
-                                key={p.id}
-                                className="ew-agreed-price-item"
-                                data-testid="extra-work-create-agreed-price-item"
-                                data-in-cart={inCart ? "true" : "false"}
-                                disabled={inCart}
-                                onClick={() => addServiceFromContract(p.service)}
-                              >
-                                <span className="ew-agreed-price-item-label">
-                                  {label}
-                                  {unitLabel && (
-                                    <span className="muted small">
-                                      {" · "}
-                                      {unitLabel}
-                                    </span>
-                                  )}
-                                </span>
-                                <span className="ew-agreed-price-item-price">
-                                  {formatMoney(p.unit_price)}
-                                  <span className="muted small">
-                                    {" · "}
-                                    {formatNumber(p.vat_pct, {
-                                      maximumFractionDigits: 2,
-                                    })}
-                                    %
-                                  </span>
-                                  {inCart && (
-                                    <Check
-                                      size={14}
-                                      strokeWidth={2.5}
-                                      aria-hidden
-                                      style={{ marginLeft: 6 }}
-                                    />
-                                  )}
-                                </span>
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                    </>
-                  )}
-                  {/* Sprint 137 item 6 — the customer's custom price
-                      lines, in the SAME browse panel as the contract
-                      prices. This panel is where the owner looked for
-                      the work types he had priced; before item 6 they
-                      were not here (nor anywhere else in this form)
-                      because a CustomerCustomPrice has no service FK
-                      and so could never be ordered at all. */}
-                  {orderableCustomPrices.length > 0 && (
-                    <div style={{ marginTop: 14 }}>
-                      <div
-                        className="form-section-title"
-                        style={{ margin: "0 0 6px" }}
-                      >
-                        {t("create.prices.custom_section_title")}
-                      </div>
-                      <div
-                        className="ew-agreed-prices-list"
-                        data-testid="extra-work-create-custom-prices-list"
-                      >
-                        {orderableCustomPrices.map((price) => {
-                          const inCart = cartLines.some(
-                            (l) => parseCustomPriceId(l.serviceId) === price.id,
-                          );
-                          return (
-                            <button
-                              type="button"
-                              key={price.id}
-                              className="ew-agreed-price-item"
-                              data-testid="extra-work-create-custom-price-item"
-                              data-in-cart={inCart ? "true" : "false"}
-                              disabled={inCart}
-                              onClick={() => addCustomPriceToCart(price.id)}
-                            >
-                              <span className="ew-agreed-price-item-label">
-                                {price.custom_name}
-                                <span className="muted small">
-                                  {" · "}
-                                  {customPriceUnitLabel(price)}
-                                </span>
-                              </span>
-                              <span className="ew-agreed-price-item-price">
-                                {formatMoney(price.unit_price)}
-                                <span className="muted small">
-                                  {" · "}
-                                  {formatNumber(price.vat_pct, {
-                                    maximumFractionDigits: 2,
-                                  })}
-                                  %
-                                </span>
-                                {inCart && (
-                                  <Check
-                                    size={14}
-                                    strokeWidth={2.5}
-                                    aria-hidden
-                                    style={{ marginLeft: 6 }}
-                                  />
-                                )}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div className="muted small" style={{ marginTop: 6 }}>
-                        {t("create.prices.custom_helper")}
-                      </div>
+                </span>
+              </label>
+              {entryMode === "MULTIPLE" && (
+                <div style={{ marginTop: 8 }} data-testid="extra-work-series-block">
+                  {/* P-4 (Part A) — one plain sentence, the picker,
+                      the chosen days as chips. */}
+                  <p className="muted small" data-testid="extra-work-series-sentence">
+                    {t("create.series_sentence", { count: slots.length })}
+                  </p>
+                  <SlotPicker slots={slots} onChange={setSlots} />
+                  {slots.length > 0 && (
+                    <div className="meerwerk-day-chips" data-testid="extra-work-series-chips">
+                      {[...slots]
+                        .sort((a, b) => a.date.localeCompare(b.date))
+                        .map((slot) => (
+                          <span key={slot.date} className="meerwerk-day-chip">
+                            {formatDate(slot.date)}
+                            {slot.time ? ` · ${slot.time}` : ""}
+                          </span>
+                        ))}
                     </div>
                   )}
-                  <div className="muted small" style={{ marginTop: 8 }}>
-                    {t("create.prices.helper")}
-                  </div>
-                </div>
-              </details>
-            )}
-
-            {/* Sprint 137 item 5 — narrow the service pickers by REAL
-                catalog category, plus a catalog-wide search. Both are
-                opt-in: the default is "All categories" with no search,
-                which is byte-identical to the pre-137 picker. */}
-            {/* Sprint 144 §1 — the category half of this bar MOVED UP
-                into the single "Category" control under "What needs to
-                happen". Only the search box is left here, beside the
-                lines it searches. */}
-            {services.length > 0 && (
-              <div
-                className="form-2col"
-                data-testid="extra-work-create-catalog-filter"
-                style={{ marginBottom: 12 }}
-              >
-                <div className="field">
-                  <label className="field-label" htmlFor="ew-catalog-search">
-                    {t("create.catalog_filter.search_label")}
-                  </label>
-                  <input
-                    id="ew-catalog-search"
-                    className="field-input"
-                    type="search"
-                    data-testid="extra-work-create-catalog-search"
-                    placeholder={t("create.catalog_filter.search_placeholder")}
-                    value={serviceSearch}
-                    onChange={(event) => setServiceSearch(event.target.value)}
-                  />
-                  <div className="muted small" style={{ marginTop: 4 }}>
-                    {t("create.catalog_filter.search_hint")}
-                  </div>
-                </div>
-                {/* Sprint 147 — say plainly what this list is, and
-                    where to go for anything else, so an absent service
-                    reads as "not agreed with you" rather than as a
-                    broken search. */}
-                {isCustomerActor && (
-                  <div className="field">
-                    <div className="muted small">
-                      {t("create.catalog_filter.customer_scope_note")}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Never a bare empty list: name what is hiding the
-                results, give the count OUTSIDE the narrowing, and
-                offer one click back to the full catalog. */}
-            {narrowingActive && offeredServices.length === 0 && (
-              <div
-                className="alert-warning"
-                role="status"
-                style={{ marginBottom: 12 }}
-                data-testid="extra-work-create-catalog-filter-empty"
-              >
-                {serviceSearchTerm
-                  ? t("create.catalog_filter.no_search_match", {
-                      search: serviceSearch.trim(),
-                      total: services.length,
-                    })
-                  : t("create.catalog_filter.category_empty", {
-                      total: services.length,
-                    })}{" "}
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  data-testid="extra-work-create-catalog-filter-clear"
-                  onClick={clearServiceNarrowing}
-                >
-                  {t("create.catalog_filter.clear")}
-                </button>
-              </div>
-            )}
-
-            {/* Narrowing is active but still showing something: say how
-                many services are hidden so the picker is never silently
-                partial. */}
-            {narrowingActive &&
-              offeredServices.length > 0 &&
-              hiddenServiceCount > 0 && (
-                <div
-                  className="muted small"
-                  style={{ marginBottom: 12 }}
-                  data-testid="extra-work-create-catalog-filter-note"
-                >
-                  {t("create.catalog_filter.hidden_note", {
-                    shown: offeredServices.length,
-                    total: services.length,
-                  })}{" "}
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={clearServiceNarrowing}
-                  >
-                    {t("create.catalog_filter.clear")}
-                  </button>
                 </div>
               )}
-
-            {cartLines.length === 0 && (
-              <div
-                className="muted small"
-                data-testid="extra-work-create-cart-empty"
-              >
-                {t("create.cart_empty")}
-              </div>
-            )}
-
-            {cartLines.map((line, index) => (
-              <div
-                key={line.tempId}
-                data-testid="extra-work-create-cart-line"
-                className="ew-line-row ew-line-row-card"
-              >
-                <div
-                  className="field ew-line-field-grow"
-                  data-testid={`extra-work-create-cart-line-${index}`}
-                >
-                  <label
-                    className="field-label"
-                    htmlFor={`ew-line-service-${index}`}
-                  >
-                    {t("create.line_field_service")}
-                  </label>
-                  <select
-                    id={`ew-line-service-${index}`}
-                    data-testid={`extra-work-create-line-service-${index}`}
-                    className="field-select"
-                    value={line.serviceId}
-                    onChange={(event) =>
-                      onLineServiceChange(line.tempId, event.target.value)
-                    }
-                    required
-                  >
-                    <option value="" disabled>
-                      {t("create.line_field_service_placeholder")}
-                    </option>
-                    {optionsForLine(line).map((svc) => {
-                      const baseLabel = svc.category_name
-                        ? `${svc.category_name} — ${svc.name}`
-                        : svc.name;
-                      return (
-                        <option key={svc.id} value={svc.id}>
-                          {`${baseLabel}${agreedPriceSuffix(svc.id)}`}
-                        </option>
-                      );
-                    })}
-                    {/* Sprint 137 item 6 — the customer's own custom
-                        price lines, orderable at last. Grouped so they
-                        read as a distinct kind of thing rather than
-                        blending into the catalog, and never filtered by
-                        the catalog-category filter: a custom price has
-                        no category to filter by. */}
-                    {orderableCustomPrices.length > 0 && (
-                      <optgroup
-                        label={t("create.line_custom_price_group")}
-                      >
-                        {orderableCustomPrices.map((price) => (
-                          <option
-                            key={price.id}
-                            value={customPriceValue(price.id)}
-                          >
-                            {`${price.custom_name} — ${formatMoney(
-                              price.unit_price,
-                            )} / ${customPriceUnitLabel(price)}`}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {/* A custom price belongs to ONE customer. Switching
-                        customer mid-compose can therefore strand a line
-                        whose price row is not on the new customer's list
-                        — the backend rejects it (tenant guard), but the
-                        <select> would first go blank and hide WHY. Keep
-                        the value visible and labelled instead of
-                        silently emptying the line. */}
-                    {staleCustomPriceLine(line) && (
-                      <option value={line.serviceId}>
-                        {t("create.line_custom_price_unavailable")}
-                      </option>
-                    )}
-                    {/* Custom line: no agreed-price suffix — it has no
-                        catalog service to price against. Re-picking a
-                        catalog service from this still-visible dropdown
-                        switches back. */}
-                    <option value={CUSTOM_SERVICE_VALUE}>
-                      {t("create.line_custom_option")}
-                    </option>
-                  </select>
-                  {/* A custom-price line is priced from an agreed
-                      per-customer row, but it still has no catalog
-                      service, so the provider confirms it in the
-                      pricing step. Say so on the line rather than
-                      letting the source pill be the only clue. */}
-                  {parseCustomPriceId(line.serviceId) !== null &&
-                    (staleCustomPriceLine(line) ? (
-                      <div
-                        className="alert-warning"
-                        role="status"
-                        style={{ marginTop: 6 }}
-                        data-testid={`extra-work-create-line-custom-price-stale-${index}`}
-                      >
-                        {t("create.line_custom_price_stale")}
-                      </div>
-                    ) : (
-                      <div
-                        className="muted small"
-                        style={{ marginTop: 6 }}
-                        data-testid={`extra-work-create-line-custom-price-${index}`}
-                      >
-                        {t("create.line_custom_price_hint")}
-                      </div>
-                    ))}
-                  {line.serviceId === CUSTOM_SERVICE_VALUE && (
-                    <input
-                      data-testid={`extra-work-create-line-custom-${index}`}
-                      className="field-input"
-                      style={{ marginTop: 8 }}
-                      type="text"
-                      maxLength={255}
-                      placeholder={t("create.line_custom_placeholder")}
-                      value={line.customDescription}
-                      onChange={(event) =>
-                        updateCartLine(
-                          line.tempId,
-                          "customDescription",
-                          event.target.value,
-                        )
-                      }
-                      required
-                    />
-                  )}
-                </div>
-                <div className="field ew-line-field-compact">
-                  <label
-                    className="field-label"
-                    htmlFor={`ew-line-quantity-${index}`}
-                  >
-                    {t("create.line_field_quantity")}
-                  </label>
-                  <input
-                    id={`ew-line-quantity-${index}`}
-                    data-testid={`extra-work-create-line-quantity-${index}`}
-                    className="field-input"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={line.quantity}
-                    onChange={(event) =>
-                      updateCartLine(
-                        line.tempId,
-                        "quantity",
-                        event.target.value,
-                      )
-                    }
-                    required
-                  />
-                </div>
-                <div className="field ew-line-field-medium">
-                  <label
-                    className="field-label"
-                    htmlFor={`ew-line-date-${index}`}
-                  >
-                    {t("create.line_field_requested_date")}
-                  </label>
-                  <input
-                    id={`ew-line-date-${index}`}
-                    data-testid={`extra-work-create-line-date-${index}`}
-                    className="field-input"
-                    type="date"
-                    value={line.requestedDate}
-                    onChange={(event) =>
-                      updateCartLine(
-                        line.tempId,
-                        "requestedDate",
-                        event.target.value,
-                      )
-                    }
-                    required
-                  />
-                </div>
-                <div className="field ew-line-field-grow">
-                  <label
-                    className="field-label"
-                    htmlFor={`ew-line-note-${index}`}
-                  >
-                    {t("create.line_field_customer_note")}
-                  </label>
-                  <input
-                    id={`ew-line-note-${index}`}
-                    data-testid={`extra-work-create-line-note-${index}`}
-                    className="field-input"
-                    type="text"
-                    maxLength={500}
-                    placeholder={t(
-                      "create.line_field_customer_note_placeholder",
-                    )}
-                    value={line.customerNote}
-                    onChange={(event) =>
-                      updateCartLine(
-                        line.tempId,
-                        "customerNote",
-                        event.target.value,
-                      )
-                    }
-                  />
-                </div>
-                <div className="ew-line-row-actions">
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => removeCartLine(line.tempId)}
-                    data-testid={`extra-work-create-remove-line-${index}`}
-                  >
-                    <Trash2 size={14} strokeWidth={2.2} />
-                    <span style={{ marginLeft: 6 }}>
-                      {t("create.remove_line_button")}
-                    </span>
-                  </button>
-                </div>
-              </div>
-            ))}
+            </div>
           </div>
 
-          {/* ----- Pricing preview + intent (Sprint 5, SoT §5.1–5.4) ----- */}
-          {previewable && (
-            <>
-              <div
-                className="form-section"
-                data-testid="extra-work-create-preview"
-              >
-                <div className="form-section-title">
-                  {t("create.preview.section_title")}
-                </div>
-                <div className="muted small" style={{ marginBottom: 12 }}>
-                  {t("create.preview.helper")}
-                </div>
+          {/* ----- Urgentie ----- */}
+          <div className="form-section" data-testid="extra-work-create-urgency">
+            <div className="form-section-title">{t("create.s_urgency")}</div>
+            <label
+              className="field"
+              style={{
+                display: "flex",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={form.urgent}
+                onChange={(event) => update("urgent", event.target.checked)}
+                data-testid="extra-work-create-urgent"
+              />
+              <Siren size={14} strokeWidth={2} />
+              <span>{t("create.urgent_label")}</span>
+            </label>
+            {form.urgent && (
+              <p className="muted small" style={{ marginTop: -6 }}>
+                {t("create.urgent_helper")}
+              </p>
+            )}
+          </div>
 
-                {previewLoading && (
-                  <div
-                    className="muted small"
-                    role="status"
-                    data-testid="extra-work-create-preview-loading"
-                  >
-                    {t("create.preview.loading")}
+          {/* ----- What you are creating, and what happens next ----- */}
+          <div className="form-section" data-testid="extra-work-create-confirm">
+            <div className="form-section-title">{t("create.confirm_title")}</div>
+            {cartWithOther.length === 0 ? (
+              <p className="muted small" data-testid="extra-work-create-cart-empty">
+                {t("create.cart_empty")}
+              </p>
+            ) : (
+              <>
+                <CartSummaryList
+                  lines={confirmLines}
+                  showAmounts
+                  onRemove={removeConfirmLine}
+                  testIdPrefix="extra-work-create"
+                />
+                {staleCustomPriceLines.length > 0 && (
+                  <div className="alert-warning" role="status" style={{ marginTop: 8 }}>
+                    {t("create.line_custom_price_stale")}
                   </div>
                 )}
+                <div className="meerwerk-totals" data-testid="extra-work-create-totals">
+                  {totals.priced > 0 && (
+                    <span>
+                      {t("create.totals_line", {
+                        subtotal: formatMoney(totals.subtotal),
+                        total: formatMoney(totals.total),
+                      })}
+                    </span>
+                  )}
+                  {totals.unpriced > 0 && (
+                    <span className="muted">
+                      {t("create.price_follows_count", { count: totals.unpriced })}
+                    </span>
+                  )}
+                </div>
+                {chosenBuilding && (
+                  <p className="muted small">
+                    {t("common:meerwerk_flow.confirm_where_when", {
+                      building: chosenBuilding.name,
+                      date:
+                        form.preferred_date ||
+                        t("common:meerwerk_flow.no_date_wish"),
+                    })}
+                  </p>
+                )}
 
-                {previewErrorMsg && (
+                {previewLoading && (
+                  <div className="loading-bar" data-testid="extra-work-create-preview-loading">
+                    <div className="loading-bar-fill" />
+                  </div>
+                )}
+                {previewFailed && (
                   <div
                     className="alert-warning"
                     role="status"
                     data-testid="extra-work-create-preview-unavailable"
                   >
-                    {t("create.preview.unavailable")}
+                    {t("create.preview_unavailable")}
                   </div>
                 )}
-
-                {previewData && (
-                  <div className="table-wrap">
-                    <table
-                      className="data-table ew-pricing-table"
-                      data-testid="extra-work-create-preview-table"
-                    >
-                      <thead>
-                        <tr>
-                          <th>{t("create.preview.col_service")}</th>
-                          <th>{t("create.preview.col_source")}</th>
-                          <th>{t("create.preview.col_quantity")}</th>
-                          <th>{t("create.preview.col_unit_price")}</th>
-                          <th>{t("create.preview.col_vat_pct")}</th>
-                          <th>{t("create.preview.col_line_total")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {previewData.lines.map((line) => {
-                          // Sprint 137 item 6 — "priced" now covers an
-                          // agreed contract line AND a line ordered
-                          // from a custom price. Both numbers are
-                          // backend-provided; the source pill still
-                          // reflects the backend's `price_source`
-                          // verbatim (a custom price stays AD_HOC).
-                          const known = knownLinePrice(line);
-                          const unit = known ? known.unit : null;
-                          const pct = known ? known.vatPct : null;
-                          const qty = Number(line.quantity);
-                          const isAgreed = known !== null;
-                          const lineTotal =
-                            isAgreed && unit !== null && Number.isFinite(qty)
-                              ? qty * unit * (1 + (pct ?? 0) / 100)
-                              : null;
-                          const serviceLabel = line.service_category_name
-                            ? `${line.service_category_name} — ${line.service_name}`
-                            : line.service_name ||
-                              line.custom_description ||
-                              "—";
-                          return (
-                            <tr
-                              key={line.index}
-                              data-testid="extra-work-create-preview-row"
-                              data-price-source={line.price_source}
-                            >
-                              <td>{serviceLabel}</td>
-                              <td>
-                                <span
-                                  className={`invoice-line-row-source-tag invoice-line-row-source-${PREVIEW_SOURCE_TAG[line.price_source]}`}
-                                  data-testid="extra-work-create-preview-source"
-                                >
-                                  {t(PREVIEW_SOURCE_KEY[line.price_source])}
-                                </span>
-                              </td>
-                              <td>
-                                {formatNumber(line.quantity, {
-                                  maximumFractionDigits: 2,
-                                })}
-                              </td>
-                              <td>{isAgreed ? formatMoney(unit) : "—"}</td>
-                              <td>
-                                {isAgreed && pct !== null
-                                  ? `${formatNumber(pct, {
-                                      maximumFractionDigits: 2,
-                                    })}%`
-                                  : "—"}
-                              </td>
-                              <td>
-                                {isAgreed ? (
-                                  formatMoney(lineTotal)
-                                ) : (
-                                  <span className="muted small">
-                                    {t("create.preview.to_be_priced")}
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {previewData && previewTotals && (
-                  <div
-                    className="alert-info"
-                    style={{ marginTop: 12 }}
-                    data-testid="extra-work-create-preview-totals"
-                  >
-                    <div
-                      className="form-section-title"
-                      style={{ margin: 0 }}
-                    >
-                      {t("create.preview.totals_title")}
-                    </div>
-                    <div style={{ marginTop: 6 }}>
-                      {t("create.preview.totals_subtotal")}:{" "}
-                      {formatMoney(previewTotals.subtotal)} ·{" "}
-                      {t("create.preview.totals_vat")}:{" "}
-                      {formatMoney(previewTotals.vat)} ·{" "}
-                      {t("create.preview.totals_total")}:{" "}
-                      <strong>{formatMoney(previewTotals.total)}</strong>
-                    </div>
-                    {previewTotals.unpricedCount > 0 && (
-                      <div className="muted small" style={{ marginTop: 6 }}>
-                        {t("create.preview.totals_unpriced", {
-                          count: previewTotals.unpricedCount,
-                        })}
-                      </div>
-                    )}
-                    <div className="muted small" style={{ marginTop: 6 }}>
-                      {t(
-                        isCustomerActor
-                          ? "create.preview.totals_display_only_customer"
-                          : "create.preview.totals_display_only",
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* M3 — quote page: NO intent picker. A pinned-intent
-                  info row when the quote is available; the inline
-                  non-blocking notice (with a link to the standard
-                  flow) when every line already has an agreed price. */}
-              {isQuoteMode && previewData && (
-                <div
-                  className="form-section"
-                  data-testid="extra-work-quote-intent"
-                >
-                  {quoteAllowed ? (
-                    <div
-                      className="alert-info"
-                      role="status"
-                      data-testid="extra-work-quote-pinned"
-                    >
-                      <span
-                        className="field-label"
-                        style={{ display: "block", marginBottom: 2 }}
-                      >
-                        {t(INTENT_LABEL_KEY.REQUEST_QUOTE)}
-                      </span>
-                      <span className="muted small">
-                        {t(INTENT_DESC_KEY.REQUEST_QUOTE)}
-                      </span>
-                    </div>
-                  ) : (
-                    <div
-                      className="alert-info"
-                      role="status"
-                      data-testid="extra-work-quote-unavailable"
-                    >
-                      {t("quote.unavailable_notice")}{" "}
-                      <Link to="/extra-work/new">
-                        {t("quote.unavailable_link")}
-                      </Link>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* M3 — standard page: the picker renders the FILTERED
-                  intent set (REQUEST_QUOTE removed). When the backend
-                  would only allow a quote, nothing is offerable here
-                  and the mirrored notice links to the quote page. */}
-              {!isQuoteMode && standardOnlyQuote && (
-                <div
-                  className="form-section"
-                  data-testid="extra-work-standard-quote-only"
-                >
-                  <div className="alert-info" role="status">
-                    {t("create.quote_only_notice")}{" "}
-                    <Link to="/extra-work/request-quote">
-                      {t("create.quote_only_link")}
-                    </Link>
-                  </div>
-                </div>
-              )}
-              {!isQuoteMode && previewData && offeredIntents.length > 0 && (
-                <div
-                  className="form-section"
-                  data-testid="extra-work-create-intent"
-                >
-                  <div className="form-section-title">
-                    {t("create.intent.section_title")}
-                  </div>
-                  <div className="muted small" style={{ marginBottom: 12 }}>
-                    {t("create.intent.section_helper")}
-                  </div>
+                {previewData && offeredIntents.length > 1 && (
                   <div
                     role="radiogroup"
-                    aria-label={t("create.intent.section_title")}
+                    aria-label={t("create.intent.choose")}
+                    data-testid="extra-work-create-intent"
                   >
+                    <div className="field-label" style={{ marginTop: 10 }}>
+                      {t("create.intent.choose")}
+                    </div>
                     {offeredIntents.map((intent) => (
                       <label
                         key={intent}
-                        className="ew-intent-option"
+                        className={`meerwerk-intent-option${
+                          selectedIntent === intent ? " selected" : ""
+                        }`}
                         data-testid={`extra-work-create-intent-${intent}`}
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          alignItems: "flex-start",
-                          marginBottom: 10,
-                          cursor: "pointer",
-                        }}
                       >
                         <input
                           type="radio"
@@ -2817,34 +1337,58 @@ export function CreateExtraWorkPage({
                           style={{ marginTop: 3 }}
                         />
                         <span>
-                          <span
-                            className="field-label"
-                            style={{ display: "block", marginBottom: 2 }}
-                          >
-                            {t(INTENT_LABEL_KEY[intent])}
-                          </span>
-                          <span className="muted small">
-                            {t(INTENT_DESC_KEY[intent])}
-                          </span>
+                          {t(`common:${outcomeKey(INTENT_OUTCOME[intent], "provider")}`)}
                         </span>
                       </label>
                     ))}
                   </div>
-                  {previewData.requested_intent === selectedIntent &&
-                    previewData.requested_intent_allowed === false &&
-                    previewData.requested_intent_error && (
-                      <div
-                        className="alert-warning"
-                        style={{ marginTop: 8 }}
-                        role="status"
-                        data-testid="extra-work-create-intent-error"
-                      >
-                        {intentErrorText(previewData.requested_intent_error)}
-                      </div>
-                    )}
-                </div>
-              )}
-            </>
+                )}
+                {previewData && offeredIntents.length <= 1 && outcomeKind && (
+                  <MeerwerkOutcome
+                    audience="provider"
+                    kind={outcomeKind}
+                    testId="extra-work-create-outcome"
+                  />
+                )}
+                {previewData &&
+                  previewData.requested_intent === selectedIntent &&
+                  previewData.requested_intent_allowed === false &&
+                  previewData.requested_intent_error && (
+                    <div
+                      className="alert-warning"
+                      style={{ marginTop: 8 }}
+                      role="status"
+                      data-testid="extra-work-create-intent-error"
+                    >
+                      {intentErrorText(previewData.requested_intent_error)}
+                    </div>
+                  )}
+              </>
+            )}
+          </div>
+
+          {/* P-9 C1 — the box still holds text at submit: one amber
+              line with Add it / Ignore; the submit is pressed again. */}
+          {unaddedAsk && otherDraft.trim() !== "" && (
+            <UnaddedOtherLineNotice
+              text={otherDraft.trim()}
+              onAddIt={addOther}
+              onIgnore={() => {
+                setOtherDraft("");
+                setUnaddedAsk(false);
+              }}
+              testIdPrefix="extra-work-create"
+            />
+          )}
+          {error && (
+            <div
+              className="alert-error"
+              style={{ marginTop: 16 }}
+              role="alert"
+              data-testid="extra-work-create-error"
+            >
+              {error}
+            </div>
           )}
 
           <div
@@ -2862,18 +1406,14 @@ export function CreateExtraWorkPage({
                 submitting ||
                 loadingOptions ||
                 noOptions ||
-                // M3 — quote page with no quotable line / standard page
-                // with a quote-only cart: blocked here AND in
-                // handleSubmit (the notice explains the way out).
-                quoteUnavailable ||
-                standardOnlyQuote
+                // P-9 C1 — text in the box counts as something to ask
+                // about, so the press reaches the ask, not a dead button.
+                (cartWithOther.length === 0 && otherDraft.trim() === "") ||
+                !effectiveBuilding ||
+                !form.customer
               }
             >
-              {submitting
-                ? t("create.submitting")
-                : isQuoteMode
-                  ? t("quote.submit_button")
-                  : t("create.submit_button")}
+              {submitting ? t("create.submitting") : t("create.submit_button")}
             </button>
           </div>
         </div>

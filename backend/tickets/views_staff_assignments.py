@@ -35,10 +35,21 @@ Permission rules (preserved from Sprint 23B's approve flow):
         `osius.staff.request_assignment` resolver, which is the only
         existing gate that already encodes "may operate at this
         building".
-  - Multi-slot per staff: each POST creates a NEW slot row (`201`).
-    The same staff member may hold several dated slots on one ticket
-    (e.g. a 09:00-11:00 slot AND a 15:00-17:00 slot), so a re-POST is
-    no longer deduplicated by user — it adds another slot.
+  - W26.3 — ONE PERSON, ONE SLOT PER LEVEL, superseding W26's
+    "one slot per ticket". A person holds at most ONE base slot
+    (`sub_task=NULL`) per ticket, and at most one slot per DISTINCT
+    part; the same person on two different parts is the normal case.
+    A part slot additionally requires a base slot — parts divide the
+    people already on the job — and its absence is refused 400
+    `staff_not_on_job`. Every user-driven create goes through the one
+    chokepoint below (`reject_if_slot_not_allowed`).
+    The DB constraint stays dropped — legacy tickets carrying duplicate
+    rows keep loading, rendering, completing and deleting unchanged —
+    and EDITING a slot stays free: a second window for the same person
+    is a PATCH on their existing row, not another row.
+    Part slots carry no schedule of their own: time lives on the base
+    slot, and the assignment card renders ONE row per person with their
+    parts as chips beneath it, never a row per slot.
   - Audit logs are emitted by the existing
     `audit/signals.py::_on_membership_post_save` /
     `_on_membership_post_delete` handlers, which already track
@@ -64,6 +75,12 @@ from accounts.scoping import scope_tickets_for
 from buildings.models import BuildingStaffVisibility
 from notifications.services import send_slot_unable_to_complete_email
 
+from .completion_requirements import (
+    ERR_COMPLETION_EVIDENCE,
+    message_for,
+    missing_evidence,
+    requirements_for_ticket,
+)
 from .models import (
     StaffAssignmentSlotStatus,
     SubTask,
@@ -208,39 +225,55 @@ class _SlotWriteSerializer(serializers.ModelSerializer):
                     code="slot_unable_reason_required",
                 )
         if new_status == StaffAssignmentSlotStatus.COMPLETED:
-            # Sprint 12 — completing a slot requires evidence: a non-empty
-            # completion_note OR at least one non-hidden linked PHOTO (image
-            # only — a PDF does not count). The photo is linked via the
-            # two-step flow: upload an attachment with staff_assignment_id,
-            # then PATCH slot_status=COMPLETED. Mirrors the ticket-level
-            # STAFF completion-evidence rule (state_machine.py) but on the
-            # per-staff dated-slot surface, which does NOT drive the ticket
-            # state machine.
+            # Sprint 12 — completing a slot requires evidence. W3-G made
+            # WHICH evidence configurable per job: the rule now comes from
+            # `completion_requirements`, which reads W2-D's two flags off
+            # the ticket's extra work and falls back to Sprint 12's
+            # note-OR-photo for a ticket that came from no extra work.
+            #
+            # The rule moved; the EVIDENCE POOL did not. It is still what is
+            # linked to THIS SLOT, not what is anywhere on the ticket,
+            # because a slot is one worker's one visit and another worker's
+            # photo is not proof that this visit happened. And this gate
+            # still does NOT drive the ticket state machine — the
+            # ticket-level rule in `state_machine.py` reads the same
+            # requirements against the ticket's own attachments.
             note = attrs.get(
                 "completion_note",
                 getattr(self.instance, "completion_note", "") or "",
             )
             has_note = bool((note or "").strip())
-            # A linked photo must be a GENUINE image: both an image MIME type
-            # AND an image extension (is_photo_attachment). A MIME-only check
-            # would let historical bad data (proof.pdf stored as image/jpeg)
-            # satisfy the gate, so verify each non-hidden linked attachment in
-            # Python rather than with a mime_type__in queryset filter.
-            has_photo = bool(
-                self.instance is not None
-                and any(
-                    is_photo_attachment(att)
-                    for att in self.instance.attachments.filter(is_hidden=False)
-                )
+            linked = (
+                list(self.instance.attachments.filter(is_hidden=False))
+                if self.instance is not None
+                else []
             )
-            if not (has_note or has_photo):
+            # `file_upload_required` is satisfied by ANY non-hidden linked
+            # attachment — the field says file and W2-D documented file.
+            has_file = bool(linked)
+            # The legacy branch keeps its stricter reading: a GENUINE image,
+            # both an image MIME type AND an image extension
+            # (is_photo_attachment). A MIME-only check would let historical
+            # bad data (proof.pdf stored as image/jpeg) satisfy a gate
+            # nobody consciously configured, which is why each attachment is
+            # verified in Python rather than with a mime_type__in filter.
+            has_photo = any(is_photo_attachment(att) for att in linked)
+            ticket = self.context.get("ticket") or getattr(
+                self.instance, "ticket", None
+            )
+            requirements = requirements_for_ticket(ticket)
+            missing = missing_evidence(
+                requirements,
+                has_note=has_note,
+                # The legacy arm asks "note or PHOTO"; the configured arm
+                # asks "is there a file". One call, two readings, decided
+                # here rather than inside the shared rule.
+                has_file=has_photo if requirements.either_required else has_file,
+            )
+            if missing:
                 raise serializers.ValidationError(
-                    {
-                        "completion_note": (
-                            "Completing a slot requires a note or a photo."
-                        )
-                    },
-                    code="completion_evidence_required",
+                    {"completion_note": message_for(missing)},
+                    code=ERR_COMPLETION_EVIDENCE,
                 )
         start = attrs.get(
             "scheduled_start_at",
@@ -319,11 +352,17 @@ def _resolve_ticket(request, ticket_id: int) -> Ticket:
     return ticket
 
 
-def _gate_actor(request, ticket: Ticket):
+def _gate_actor(request, ticket: Ticket, *, reading: bool = False):
     """
     Sprint 23A permission gate. The actor must be on the service-
     provider side AND hold `osius.ticket.assign_staff` for the
     ticket's building. STAFF and CUSTOMER_USER never pass.
+
+    P-15 (P-14's S4 finding) — `reading=True` shapes the refusal for a
+    GET: a worker reading their own ticket's roster was told "Staff
+    cannot assign other staff to tickets." about an act that did not
+    happen. The refusal now describes the read that was refused and
+    points at the surface that carries their own answer.
     """
     if not is_staff_role(request.user):
         return Response(
@@ -337,7 +376,14 @@ def _gate_actor(request, ticket: Ticket):
         # also blocks STAFF, but checking here gives a cleaner error
         # message than a generic 403.
         return Response(
-            {"detail": "Staff cannot assign other staff to tickets."},
+            {
+                "detail": (
+                    "The crew roster is a management surface; your own "
+                    "days on this job are on My schedule."
+                    if reading
+                    else "Staff cannot assign other staff to tickets."
+                )
+            },
             status=status.HTTP_403_FORBIDDEN,
         )
     if not user_has_osius_permission(
@@ -350,6 +396,123 @@ def _gate_actor(request, ticket: Ticket):
             status=status.HTTP_403_FORBIDDEN,
         )
     return None
+
+
+ERR_STAFF_ALREADY_ASSIGNED = "staff_already_assigned"
+ERR_STAFF_NOT_ON_JOB = "staff_not_on_job"
+
+
+def staff_already_assigned(
+    ticket: Ticket, target: User, sub_task=None, exclude_pk=None
+) -> bool:
+    """ONE PERSON, ONE SLOT PER LEVEL — the predicate, in one place.
+
+    W26.3 replaces W26's too-broad "any slot on the ticket" test. The
+    owner's model is that a person is on a JOB once, and the parts of
+    that job then divide the people already on it:
+
+      * JOB level (`sub_task=None`) — at most ONE base slot per person
+        per ticket. A base slot is the person's presence on the job and
+        the only place their schedule lives.
+      * PART level (`sub_task=<id>`) — at most one slot per person per
+        DISTINCT part. The same person on two different parts is the
+        normal case and is ALLOWED; the same person on the same part
+        twice is not.
+
+    So the question is asked at ONE level at a time: True iff `target`
+    already holds a slot on `ticket` filed under exactly `sub_task`.
+
+    The `(ticket, user)` uniqueness on `TicketStaffAssignment` was
+    deliberately dropped at the DB layer (see `models.py`) and stays
+    dropped: legacy tickets already hold duplicate rows and they must
+    keep loading, rendering, completing and deleting exactly as they do
+    today. The rule is restored at the VALIDATION layer instead, so it
+    governs what is CREATED from now on and rewrites nothing that
+    exists.
+    """
+    rows = TicketStaffAssignment.objects.filter(
+        ticket=ticket, user=target, sub_task=sub_task
+    )
+    # `exclude_pk` is the slot being MOVED: a slot is never its own
+    # duplicate, so a PATCH that re-files a row must not match itself.
+    if exclude_pk is not None:
+        rows = rows.exclude(pk=exclude_pk)
+    return rows.exists()
+
+
+def staff_holds_base_slot(
+    ticket: Ticket, target: User, exclude_pk=None
+) -> bool:
+    """True iff `target` is on the JOB — holds a slot with sub_task=NULL.
+
+    W26.3 (c) — ORDER. Parts divide people who are ALREADY on the job,
+    so a base slot is the precondition for every part slot. This is also
+    what the part picker lists, which is why it is its own named
+    predicate rather than an inline filter: "offerable" and "acceptable"
+    are then the same question asked once.
+    """
+    rows = TicketStaffAssignment.objects.filter(
+        ticket=ticket, user=target, sub_task__isnull=True
+    )
+    # Moving a person's ONLY base slot into a part would otherwise
+    # satisfy (c) using the very row it is about to consume.
+    if exclude_pk is not None:
+        rows = rows.exclude(pk=exclude_pk)
+    return rows.exists()
+
+
+def reject_if_slot_not_allowed(
+    ticket: Ticket, target: User, sub_task=None, exclude_pk=None
+):
+    """The chokepoint every user-driven slot CREATE goes through.
+
+    Returns a 400 `Response` carrying a stable `code`, or None when the
+    create may proceed. Two distinct refusals, because they are two
+    distinct operator mistakes and a single code could not tell them
+    apart:
+
+      * `staff_not_on_job` — a PART slot for someone who holds no base
+        slot here. Checked FIRST: when both are wrong, "this person is
+        not on this job at all" is the fact that explains the other one,
+        and putting them on the job is the step that fixes it.
+      * `staff_already_assigned` — a duplicate at the level asked for
+        (a second base slot, or the same person on the same part twice).
+
+    Changing someone's TIME is a PATCH on their own base row and never
+    comes here. A PATCH that re-files a slot under a different part
+    (`sub_task`) DOES, because it is a move between levels and can land
+    in exactly the states (a)-(c) forbid; it passes its own `pk` as
+    `exclude_pk` so the row is not compared against itself.
+    """
+    if sub_task is not None and not staff_holds_base_slot(
+        ticket, target, exclude_pk=exclude_pk
+    ):
+        return Response(
+            {
+                "detail": (
+                    "This person is not on this job yet. Assign them to "
+                    "the ticket first, then divide the parts between the "
+                    "people on it."
+                ),
+                "code": ERR_STAFF_NOT_ON_JOB,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not staff_already_assigned(
+        ticket, target, sub_task, exclude_pk=exclude_pk
+    ):
+        return None
+    if sub_task is not None:
+        detail = "This person is already on this part of the job."
+    else:
+        detail = (
+            "This person is already on this ticket. Edit their slot "
+            "to change when they work."
+        )
+    return Response(
+        {"detail": detail, "code": ERR_STAFF_ALREADY_ASSIGNED},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
 
 
 def _validate_target_staff(target: User, ticket: Ticket):
@@ -388,9 +551,9 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticatedAndActive]
     serializer_class = _TicketStaffAssignmentSerializer
 
-    def _resolve(self):
+    def _resolve(self, *, reading: bool = False):
         ticket = _resolve_ticket(self.request, self.kwargs["ticket_id"])
-        gate = _gate_actor(self.request, ticket)
+        gate = _gate_actor(self.request, ticket, reading=reading)
         if gate is not None:
             return gate, None
         return None, ticket
@@ -404,7 +567,7 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
         )
 
     def list(self, request, *args, **kwargs):
-        early, _ = self._resolve()
+        early, _ = self._resolve(reading=True)
         if early is not None:
             return early
         return super().list(request, *args, **kwargs)
@@ -445,17 +608,35 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
         )
         slot_ser.is_valid(raise_exception=True)
 
-        # Multi-slot per staff — every POST creates a NEW slot row, so the
-        # same staff member can be added again as another dated slot
-        # (Ahmet 09:00-11:00 AND Ahmet 15:00-17:00). There is no longer a
-        # (ticket, user) uniqueness constraint to dedupe against, so this
-        # always returns 201. A flat (no-schedule) add stays valid.
+        # W26.3 — ONE PERSON, ONE SLOT PER LEVEL. The chokepoint, not a
+        # second copy of the rule: `reject_if_slot_not_allowed` is the
+        # single place that decides it, shared with the transition
+        # modal's bulk add and the parts modal's per-part assign. It is
+        # asked at the level this write targets, so the SAME call covers
+        # a duplicate base slot, a part slot for someone not on the job,
+        # and the same person on the same part twice. This runs AFTER
+        # the write serializer validates so a malformed body still 400s
+        # on its own shape first, and so `sub_task` is a resolved
+        # SubTask on this ticket rather than whatever the client sent.
+        refusal = reject_if_slot_not_allowed(
+            ticket, target, slot_ser.validated_data.get("sub_task")
+        )
+        if refusal is not None:
+            return refusal
+
         assignment = TicketStaffAssignment.objects.create(
             ticket=ticket,
             user=target,
             assigned_by=request.user,
             **slot_ser.validated_data,
         )
+        # W-HOURS5 Task 2 — a BASE slot on a spawned ticket puts the
+        # person on the PLAN's crew as well; the People tab and the plan
+        # modal are two doors to one crew. See `tickets.crew_sync`.
+        if assignment.sub_task_id is None:
+            from .crew_sync import worker_added
+
+            worker_added(ticket, target, actor=request.user)
         return Response(
             self.get_serializer(assignment).data,
             status=status.HTTP_201_CREATED,
@@ -481,8 +662,11 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
         cannot reschedule themselves, edit the manager's note, or touch
         another staff member's slot — a STAFF actor PATCHing a slot they
         do not own falls through to the manager gate and gets 403.
-    DELETE stays manager/admin-only. Deleting one slot never touches a
-    sibling slot on the same ticket (separate rows).
+    DELETE stays manager/admin-only. Deleting a PART slot never touches
+    a sibling slot. Deleting a BASE slot (`sub_task=NULL`) takes the
+    person off the job and so cascades to their part slots on this
+    ticket — see the W26.3 note in `delete` for why the alternative is
+    an unrenderable state rather than a preserved one.
     """
 
     permission_classes = [IsAuthenticatedAndActive]
@@ -523,6 +707,31 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
             context={"ticket": ticket},
         )
         ser.is_valid(raise_exception=True)
+
+        # W26.3 — a PATCH may RE-FILE a slot (`sub_task` is a
+        # manager-writable field), and a move between levels reaches the
+        # same states a create does: re-filing a base slot into a part
+        # leaves its owner on a part of a job they are no longer on;
+        # re-filing a part slot to NULL, or onto a part they already
+        # hold, mints the duplicates (a)/(b) refuse. Under W26 this
+        # could not bite — one person held one slot, so there was
+        # nothing to collide with — which is why the field was left
+        # unguarded. It bites now, so the move goes through the SAME
+        # chokepoint, passing its own pk so the row is not its own
+        # duplicate. Only when the value actually CHANGES: a PATCH that
+        # merely echoes the current `sub_task` is not a move.
+        if "sub_task" in ser.validated_data:
+            new_sub_task = ser.validated_data["sub_task"]
+            new_id = getattr(new_sub_task, "pk", None)
+            if new_id != assignment.sub_task_id:
+                refusal = reject_if_slot_not_allowed(
+                    ticket,
+                    assignment.user,
+                    new_sub_task,
+                    exclude_pk=assignment.pk,
+                )
+                if refusal is not None:
+                    return refusal
 
         # Completion side-effects (assignment-level only — the ticket
         # state machine is NOT touched; the manager double-check flow
@@ -576,16 +785,103 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
         gate = _gate_actor(request, ticket)
         if gate is not None:
             return gate
-        # Multi-slot per staff — delete ONLY the addressed slot (by id,
-        # scoped to the ticket). Sibling slots for the same staff survive.
-        deleted, _ = TicketStaffAssignment.objects.filter(
+        slot = TicketStaffAssignment.objects.filter(
             ticket=ticket, pk=assignment_id
-        ).delete()
-        if deleted == 0:
+        ).first()
+        if slot is None:
             return Response(
                 {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
             )
+
+        # W26.3 — REMOVING A BASE SLOT TAKES THE PERSON OFF THE JOB, so
+        # it takes their parts with it.
+        #
+        # Before this sprint delete removed only the addressed row, which
+        # under the new model leaves the incoherent state the whole rule
+        # exists to prevent: the person is off the job while still filed
+        # under two of its parts, holding part slots that (c) says can
+        # only exist alongside a base slot, and that the assignment card
+        # can no longer render at all — it draws one row per PERSON off
+        # their base slot, so those rows become invisible work that still
+        # counts toward each part's staffing.
+        #
+        # So a BASE delete cascades to that user's part slots on this
+        # ticket. The client confirms first and NAMES the parts, because
+        # this removes more than the row that was clicked. Deleting a
+        # PART slot still removes only itself — the person stays on the
+        # job, they are just no longer on that part.
+        if slot.sub_task_id is None:
+            TicketStaffAssignment.objects.filter(
+                ticket=ticket,
+                user_id=slot.user_id,
+                sub_task__isnull=False,
+            ).delete()
+        slot.delete()
+        # W-HOURS5 Task 2 — off the ticket's base crew means off the
+        # plan's crew too, once no ticket of the extra work names them:
+        # the WORKER assignment goes and their today-and-future plan is
+        # cleared; PAST planned hours stay as history (the ruling). See
+        # `tickets.crew_sync`.
+        if slot.sub_task_id is None:
+            from .crew_sync import worker_removed
+
+            worker_removed(ticket, slot.user_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SlotCompletionRequirementsView(generics.GenericAPIView):
+    """
+    GET /api/tickets/<id>/staff-assignments/<assignment_id>/completion-requirements/
+
+    W3-G — what this slot must carry before it may be reported done, so
+    the worker is told BEFORE they fill the form in rather than after
+    they press the button. Shape:
+
+        {"note_required": bool, "file_required": bool,
+         "either_required": bool, "source": "extra_work" | "default"}
+
+    Why an endpoint rather than two more fields on the slot row: the
+    completion dialog takes `Pick<MySlot, "id" | "ticket_id">` on
+    purpose (Sprint 179A), so the Work Plan — whose entries are a merged
+    shape, not `MySlot` rows — can reuse it without either side
+    inventing a conversion. Widening that prop to carry the flags would
+    put the requirement back in two shapes; the two ids the dialog
+    already holds are enough to ask.
+
+    THE BROWSER IS NOT THE GATE. This endpoint exists so the dialog can
+    say what is needed and keep its own button honest. The serializer
+    above still refuses, from the same
+    `completion_requirements.requirements_for_ticket` call, so a client
+    that skips this read, caches it, or is simply wrong changes nothing
+    about what gets written.
+
+    Permission is the PATCH gate, unchanged and in the same order: the
+    STAFF member who owns the slot, or an actor who passes
+    `_gate_actor`. A STAFF user asking about somebody else's slot falls
+    through to the manager gate and gets 403, exactly as they do when
+    they try to write it.
+    """
+
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def get(self, request, ticket_id, assignment_id):
+        ticket = _resolve_ticket(request, ticket_id)
+        assignment = TicketStaffAssignment.objects.filter(
+            ticket=ticket, pk=assignment_id
+        ).first()
+        if assignment is None:
+            return Response(
+                {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+        is_self_staff = (
+            request.user.role == UserRole.STAFF
+            and request.user.id == assignment.user_id
+        )
+        if not is_self_staff:
+            gate = _gate_actor(request, ticket)
+            if gate is not None:
+                return gate
+        return Response(requirements_for_ticket(ticket).as_dict())
 
 
 class StaffAssignmentSlotAgendaView(generics.ListAPIView):
@@ -668,6 +964,23 @@ def assignable_staff_view(request, ticket: Ticket):
         .filter(
             staff_profile__is_active=True,
             building_visibility__building_id=ticket.building_id,
+        )
+        # W26.3 — ONE PERSON, ONE BASE SLOT, said by the picker's own
+        # source. This picker is the JOB-level door, so what makes
+        # someone unofferable is holding a BASE slot here, not holding
+        # any slot at all: `reject_if_slot_not_allowed` would refuse
+        # exactly that write, so "offerable" and "acceptable" cannot
+        # disagree. Changing their time is done by editing their slot.
+        #
+        # Both conditions sit in ONE `exclude()` on purpose. Across a
+        # multi-valued relation that means "exclude users having a
+        # single slot row that is both on this ticket AND a base slot";
+        # split into two `exclude()` calls it would instead drop anyone
+        # holding a base slot on ANY ticket, which is every dispatched
+        # staff member in the system.
+        .exclude(
+            ticket_staff_assignments__ticket=ticket,
+            ticket_staff_assignments__sub_task__isnull=True,
         )
         .select_related("staff_profile")
         .order_by("email")

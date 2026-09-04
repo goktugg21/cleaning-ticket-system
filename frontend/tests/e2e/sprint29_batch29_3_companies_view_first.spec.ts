@@ -55,9 +55,11 @@ test.describe("Sprint 29 Batch 29.3 — Companies view-first", () => {
       page.locator('[data-testid="company-detail-page"]'),
     ).toBeVisible({ timeout: 10_000 });
 
-    // Both read-only cards.
+    // Both read-only surfaces. P-16 repin: the About card became the
+    // P-12 fact block (`company-detail-facts` — fact block first, per
+    // §D.24); the admins card kept its id as a fold.
     await expect(
-      page.locator('[data-testid="company-detail-about-card"]'),
+      page.locator('[data-testid="company-detail-facts"]'),
     ).toBeVisible();
     await expect(
       page.locator('[data-testid="company-detail-admins-card"]'),

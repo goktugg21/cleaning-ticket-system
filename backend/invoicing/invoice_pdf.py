@@ -286,7 +286,7 @@ def _render(invoice: Invoice) -> tuple[bytes, int]:
         company=company,
         brand_accent=brand_accent,
         company_name=company_name,
-        doc_title=doc_title + " extra werk",
+        doc_title=doc_title + " meerwerk",
         number_text=number_text,
         status_text=status_text,
     )

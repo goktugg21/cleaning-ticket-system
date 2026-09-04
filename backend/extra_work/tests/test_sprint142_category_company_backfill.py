@@ -229,6 +229,11 @@ class CategoryCompanyBackfillTests(TransactionTestCase):
 
     def test_no_companies_at_all_aborts(self):
         cat = self._orphan_category("Orphan With No Company")
+        # P-16 repin — W13 seeds PROTECTed TicketCategory rows per
+        # company (post_save); they must go before the companies can.
+        from tickets.models import TicketCategory
+
+        TicketCategory.objects.all().delete()
         Company.objects.all().delete()
         with self.assertRaises(RuntimeError) as ctx:
             self._backfill_fn()(django_apps, None)

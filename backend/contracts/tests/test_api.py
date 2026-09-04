@@ -356,10 +356,43 @@ class RevisionEndpointTests(ContractsFixture):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.json()["lines"], [])
 
+    def _bill_the_contract(self, contract):
+        """W11 — a revision in force closes once the contract has BILLED
+        something, not merely because its date arrived. These two tests
+        are about what a billed agreement protects, so they have to bill
+        one. (Before W11 the date alone locked, which also locked the
+        first revision of every contract created that day and made the
+        Projects tab impossible to use at all.)"""
+        from django.utils import timezone
+
+        from invoicing.models import Invoice
+
+        from contracts.models import ContractInvoice
+
+        day = timezone.localdate()
+        revision = contract.revisions.order_by("effective_from", "id").first()
+        invoice = Invoice.objects.create(
+            company=contract.company,
+            customer=contract.customer,
+            status=Invoice.Status.DRAFT,
+            period_year=day.year,
+            period_month=day.month,
+            created_by=self.ca_a,
+        )
+        ContractInvoice.objects.create(
+            contract=contract,
+            invoice=invoice,
+            revision=revision,
+            period_start=day.replace(day=1),
+            period_end=day,
+            invoice_date=day,
+        )
+
     def test_a_revision_in_force_cannot_be_edited(self):
         """The whole reason a revision is worth having: if history
         could be edited, last month's invoice total would silently
         change when this month's price did."""
+        self._bill_the_contract(self.contract_a)
         revision = self.contract_a.revisions.get()
         response = self.api(self.ca_a).patch(
             revision_detail_url(revision.id),
@@ -370,6 +403,7 @@ class RevisionEndpointTests(ContractsFixture):
         self.assertEqual(response.data["revision"][0].code, "revision_locked")
 
     def test_lines_of_a_revision_in_force_cannot_be_added_or_edited(self):
+        self._bill_the_contract(self.contract_a)
         revision = self.contract_a.revisions.get()
         line = revision.lines.get()
         add = self.api(self.ca_a).post(

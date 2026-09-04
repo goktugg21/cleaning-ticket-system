@@ -17,7 +17,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
@@ -41,6 +41,7 @@ import type {
   RecurringJobWritePayload,
   SelectablePricingMode,
 } from "../../api/plannedWork.types";
+import { listContracts } from "../../api/contracts";
 import { listLabels } from "../../api/customerLabels";
 import type {
   Building,
@@ -50,17 +51,37 @@ import type {
   ServiceCategory,
 } from "../../api/types";
 import { useToast } from "../../components/ToastProvider";
+import {
+  announceDone,
+  safeSessionStorage,
+} from "../../components/guide/doneBannerStore";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { customerLabelName } from "../../lib/customerLabelName";
+// This page wears seven `pw-*` classes (`pw-form-group*`, `pw-window*`)
+// and, until now, imported the stylesheet that defines them NOWHERE. It
+// looked right only because Vite emits one CSS bundle for the app, so
+// the detail page's import happened to cover this page too. That is a
+// coincidence of the current chunking, not a dependency: the day this
+// route gets its own CSS chunk, the form loses its group borders and
+// its window rows. Declared explicitly. Vite dedupes the second import.
+import "../../styles/planned-work.css";
 
 const FREQUENCIES: RecurringJobFrequency[] = ["WEEKLY", "BIWEEKLY", "MONTHLY"];
-const PRICING_MODES: SelectablePricingMode[] = ["CONTRACT_INCLUDED", "FIXED"];
+// W-PW1 — a recurring job is billed as a MEMBERSHIP through its contract
+// line, so the form no longer asks how a job or a window is priced. The
+// write serializer still REQUIRES `pricing_mode`, so a newly created job
+// takes this value and nothing in the UI can change it. On edit the three
+// pricing keys are omitted from the PATCH entirely, which leaves whatever
+// the job already stores exactly as it is.
+const MEMBERSHIP_PRICING_MODE: SelectablePricingMode = "CONTRACT_INCLUDED";
 const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const;
+/** FE-5 — the contract-line select's explicit "none" (see
+ *  `effectiveContractLineId`). */
+const NO_CONTRACT_LINE = "none";
 
 // Per-window pricing dropdown: "" means "inherit the job's pricing" (the
 // occurrence falls back to the job default); the two explicit modes
 // override it for that window only.
-type WindowPricingChoice = "" | SelectablePricingMode;
 
 interface WindowDraft {
   // Present for a window that already exists on the job (edit in place so
@@ -68,13 +89,10 @@ interface WindowDraft {
   id?: number;
   label: string;
   startTime: string; // HH:MM
-  pricingMode: WindowPricingChoice;
-  fixedPrice: string;
-  vatPct: string;
 }
 
 function emptyWindow(): WindowDraft {
-  return { label: "", startTime: "", pricingMode: "", fixedPrice: "", vatPct: "21" };
+  return { label: "", startTime: "" };
 }
 
 function customerMatchesBuilding(customer: Customer, buildingId: number): boolean {
@@ -88,6 +106,40 @@ function customerMatchesBuilding(customer: Customer, buildingId: number): boolea
 // `offeredCategories` below does not hand a new reference to its
 // consumers on every render.
 const EMPTY_CATEGORIES: ServiceCategory[] = [];
+
+// W24 — the contract-line link, declared LOCALLY rather than on
+// `api/plannedWork.types.ts`.
+//
+// The backend already carries the field on both sides of the wire
+// (`RecurringJobSerializer.contract_line` + `contract_line_name` for
+// the read, `RecurringJobWriteSerializer.contract_line` for the write,
+// both landed in 18433e5). The canonical home for these two lines is
+// `RecurringJob` / `RecurringJobWritePayload` in
+// `api/plannedWork.types.ts` — that file belongs to another wave this
+// round, so the shape is narrowed here instead of being widened there.
+// NOT a permanent arrangement: fold both into plannedWork.types.ts and
+// delete these two aliases when that file is free.
+type ContractLineLinkRead = { contract_line: number | null };
+type ContractLineLinkWrite = { contract_line?: number | null };
+
+/** One offerable line: the line itself plus the contract it sits on,
+ *  because a line name ("Dagelijkse schoonmaak") repeats across a
+ *  customer's contracts and only the contract number separates them. */
+interface ContractLineOption {
+  id: number;
+  lineName: string;
+  contractNo: string;
+}
+
+/** The customer's offerable contract lines, tagged with the customer
+ *  they were fetched FOR. Same shape (and same reason) as
+ *  `customerFolders` below: an empty list that arrived is not the same
+ *  fact as a list that has not arrived, and the save path must be able
+ *  to tell them apart. */
+interface ContractLineLists {
+  customerId: number;
+  rows: ContractLineOption[];
+}
 
 export function RecurringJobFormPage() {
   const { id } = useParams();
@@ -121,10 +173,9 @@ export function RecurringJobFormPage() {
   // Recurring day-model: a weekday SET (WEEKLY/BIWEEKLY) + 1..N windows.
   const [weekdays, setWeekdays] = useState<number[]>([]);
   const [windows, setWindows] = useState<WindowDraft[]>([emptyWindow()]);
-  const [pricingMode, setPricingMode] =
-    useState<SelectablePricingMode>("CONTRACT_INCLUDED");
-  const [fixedPrice, setFixedPrice] = useState("");
-  const [vatPct, setVatPct] = useState("21");
+  /** FE-5 — the visits editor opens on request. The default single
+   *  visit with no time needs no attention, so it reads as one fact. */
+  const [windowsOpen, setWindowsOpen] = useState(false);
   const [defaultStaffIds, setDefaultStaffIds] = useState<number[]>([]);
   const [defaultManagerIds, setDefaultManagerIds] = useState<number[]>([]);
 
@@ -158,6 +209,10 @@ export function RecurringJobFormPage() {
     customerId: number;
     rows: CustomerPriceFolder[];
   } | null>(null);
+  // W24 — the customer's contract lines, same customer-tagged shape.
+  const [contractLines, setContractLines] =
+    useState<ContractLineLists | null>(null);
+  const [contractLineId, setContractLineId] = useState("");
 
   // Fallback labels so a building/customer outside the fetched page still
   // renders a sensible option in edit mode.
@@ -169,6 +224,23 @@ export function RecurringJobFormPage() {
   const [fallbackCustomer, setFallbackCustomer] = useState<{
     id: number;
     name: string;
+  } | null>(null);
+  // W24 — the job's STORED contract line, kept even when the fetched
+  // options do not contain it. A line that has since been superseded by
+  // a newer contract revision is not on the active revision any more,
+  // so it is not in the option list — and without this the select would
+  // render blank and read as "no link", which is a lie about what is
+  // stored. Same job as `fallbackBuilding` / `fallbackCustomer` above.
+  // Tagged with the customer it belongs to, so switching the job's
+  // customer drops it: a line is a line of ONE customer's contract, and
+  // offering the old one against the new customer would be a
+  // cross-customer option (the backend rejects it as
+  // `contract_line_customer_mismatch` — the picker must not offer it in
+  // the first place).
+  const [fallbackContractLine, setFallbackContractLine] = useState<{
+    id: number;
+    name: string;
+    customerId: number;
   } | null>(null);
 
   const [loading, setLoading] = useState(!isCreate);
@@ -222,27 +294,30 @@ export function RecurringJobFormPage() {
                   id: w.id,
                   label: w.label,
                   startTime: w.start_time?.slice(0, 5) ?? "",
-                  pricingMode:
-                    w.pricing_mode === "FIXED"
-                      ? "FIXED"
-                      : w.pricing_mode === "CONTRACT_INCLUDED"
-                        ? "CONTRACT_INCLUDED"
-                        : "",
-                  fixedPrice: w.fixed_price ?? "",
-                  vatPct: w.vat_pct ?? "21",
                 }))
               : [emptyWindow()],
           );
-          // HOURLY is not selectable; coerce any legacy value to CONTRACT_INCLUDED.
-          setPricingMode(
-            job.pricing_mode === "FIXED" ? "FIXED" : "CONTRACT_INCLUDED",
-          );
-          setFixedPrice(job.fixed_price ?? "");
-          setVatPct(job.vat_pct ?? "21");
           setDefaultStaffIds(job.default_staff_ids);
           setDefaultManagerIds(job.default_manager_ids);
           setFallbackBuilding({ id: job.building, name: job.building_name });
           setFallbackCustomer({ id: job.customer, name: job.customer_name });
+          // W24 — hydrate the contract-line link. The read cast is the
+          // local-type arrangement documented at `ContractLineLinkRead`.
+          const storedLine = (job as unknown as ContractLineLinkRead)
+            .contract_line;
+          setContractLineId(storedLine ? String(storedLine) : "");
+          const storedLineName = (
+            job as unknown as { contract_line_name: string | null }
+          ).contract_line_name;
+          setFallbackContractLine(
+            storedLine
+              ? {
+                  id: storedLine,
+                  name: storedLineName ?? String(storedLine),
+                  customerId: job.customer,
+                }
+              : null,
+          );
         }
       } catch (err) {
         if (!cancelled) setGeneralError(getApiError(err));
@@ -389,6 +464,64 @@ export function RecurringJobFormPage() {
     };
   }, [customer]);
 
+  // W24 — ...and the customer's contract lines, for the optional
+  // "Contract line" picker.
+  //
+  // NO new endpoint. `GET /api/contracts/?customer=<id>` already
+  // carries what the picker needs: the contract number on the header
+  // and the ACTIVE revision's lines in `projects`. Its reader tier
+  // (`IsContractReader` — SA / CA / BM) is exactly the tier that can
+  // reach this form (`planned_work.permissions.IsProviderManager`), and
+  // it already excludes `kind=EXTRA_WORK`, so a register's projected
+  // lines can never be offered as something to plan.
+  //
+  // Paged EXHAUSTIVELY client-side (the Sprint 120 pattern) rather than
+  // by loosening the list's `pagination_class` — Sprint 134/135's
+  // lesson, that a shared list's pagination is a contract with the
+  // callers that DO have prev/next UI, and this picker has none.
+  useEffect(() => {
+    if (customer === "") return;
+    const customerId = Number(customer);
+    let cancelled = false;
+    async function loadLines(): Promise<ContractLineOption[]> {
+      const rows: ContractLineOption[] = [];
+      let page = 1;
+      for (let i = 0; i < 100; i++) {
+        const response = await listContracts({
+          customer: customerId,
+          page,
+          page_size: 200,
+        });
+        for (const contract of response.results) {
+          for (const line of contract.projects) {
+            rows.push({
+              id: line.id,
+              lineName: line.name,
+              contractNo: contract.contract_no,
+            });
+          }
+        }
+        if (!response.next) break;
+        page += 1;
+      }
+      return rows;
+    }
+    loadLines()
+      .then((rows) => {
+        if (!cancelled) setContractLines({ customerId, rows });
+      })
+      .catch(() => {
+        // Stays UNLOADED on failure, never an empty loaded list — the
+        // Sprint 187C rule. An empty loaded list would tell the save
+        // path "this customer genuinely has no contract lines", and a
+        // job's stored link would be written away on the next save.
+        if (!cancelled) setContractLines(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customer]);
+
   // Guarded inline so TS narrows AND a list fetched for a previous
   // customer is never shown against the current one.
   const currentDepartments =
@@ -403,6 +536,28 @@ export function RecurringJobFormPage() {
     customerFolders && customerFolders.customerId === Number(customer)
       ? customerFolders.rows
       : [];
+  // W24 — the same guard for the contract lines, plus the stored line
+  // appended when the active revision no longer carries it (see
+  // `fallbackContractLine`). Appended, not substituted: the operator
+  // can still pick a live line, and the stored one stays visible until
+  // they do.
+  const fetchedContractLines =
+    contractLines && contractLines.customerId === Number(customer)
+      ? contractLines.rows
+      : [];
+  const currentContractLines: ContractLineOption[] =
+    fallbackContractLine !== null &&
+    fallbackContractLine.customerId === Number(customer) &&
+    !fetchedContractLines.some((line) => line.id === fallbackContractLine.id)
+      ? [
+          ...fetchedContractLines,
+          {
+            id: fallbackContractLine.id,
+            lineName: fallbackContractLine.name,
+            contractNo: "",
+          },
+        ]
+      : fetchedContractLines;
 
   // DERIVED, not resynced: an id that does not belong to the current
   // customer's list collapses to "" for both the dropdown value and the
@@ -456,6 +611,34 @@ export function RecurringJobFormPage() {
       }
     : {};
 
+  // W24 — the contract line gets the same three-part discipline the
+  // classifiers above already have: DERIVED (never resynced), collapsed
+  // to "" when the id does not belong to the current customer's lines,
+  // and OMITTED from the payload until the list it is checked against
+  // has actually loaded for this customer.
+  // FE-5 — "default from contract": on CREATE, a customer with exactly
+  // one contract line gets it filled in until the operator says
+  // otherwise. `NO_CONTRACT_LINE` is the explicit "none"; "" is
+  // "untouched", which is what lets the default apply.
+  const effectiveContractLineId =
+    contractLineId === NO_CONTRACT_LINE
+      ? ""
+      : currentContractLines.some((line) => String(line.id) === contractLineId)
+        ? contractLineId
+        : isCreate && contractLineId === "" && currentContractLines.length === 1
+          ? String(currentContractLines[0].id)
+          : "";
+  const contractLinesLoaded =
+    contractLines !== null && contractLines.customerId === Number(customer);
+  const contractLinePayload: ContractLineLinkWrite =
+    id === undefined || contractLinesLoaded
+      ? {
+          contract_line: effectiveContractLineId
+            ? Number(effectiveContractLineId)
+            : null,
+        }
+      : {};
+
   function toggleId(list: number[], value: number): number[] {
     return list.includes(value)
       ? list.filter((x) => x !== value)
@@ -485,20 +668,12 @@ export function RecurringJobFormPage() {
     if (customer === "") errs.customer = t("form.error_customer_required");
     if (!title.trim()) errs.title = t("form.error_title_required");
     if (!startDate) errs.start_date = t("form.error_start_date_required");
-    if (pricingMode === "FIXED" && !fixedPrice.trim()) {
-      errs.fixed_price = t("form.error_fixed_price_required");
-    }
     if (showWeekdays && weekdays.length === 0) {
       errs.weekdays = t("form.error_weekdays_required");
     }
     if (windows.length === 0) {
       errs.windows = t("form.error_windows_required");
     }
-    windows.forEach((w, idx) => {
-      if (w.pricingMode === "FIXED" && !w.fixedPrice.trim()) {
-        errs[`window_${idx}`] = t("form.error_window_fixed_price_required");
-      }
-    });
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   }
@@ -527,7 +702,8 @@ export function RecurringJobFormPage() {
     );
   }
 
-  function buildPayload(): RecurringJobWritePayload {
+  function buildPayload(): Partial<RecurringJobWritePayload> &
+    ContractLineLinkWrite {
     const windowsPayload: RecurringJobWindowInput[] = windows.map((w, idx) => {
       const input: RecurringJobWindowInput = {
         label: w.label.trim(),
@@ -535,20 +711,18 @@ export function RecurringJobFormPage() {
         ordering: idx,
       };
       if (w.id != null) input.id = w.id;
-      if (w.pricingMode === "FIXED") {
-        input.pricing_mode = "FIXED";
-        input.fixed_price = w.fixedPrice.trim();
-        input.vat_pct = w.vatPct || "21";
-      } else if (w.pricingMode === "CONTRACT_INCLUDED") {
-        input.pricing_mode = "CONTRACT_INCLUDED";
-      } else {
-        // Inherit the job's pricing for this window.
-        input.pricing_mode = null;
-      }
+      // W-PW1 — no per-window pricing key is sent at all. An existing
+      // window keeps whatever it stores; a new one inherits the job.
       return input;
     });
 
-    const payload: RecurringJobWritePayload = {
+    // W24 — the write shape is the generated payload PLUS the
+    // contract-line key, intersected locally (see `ContractLineLinkWrite`).
+    // `createRecurringJob` / `updateRecurringJob` take the base type, and
+    // a variable of an intersection type is assignable to it, so nothing
+    // in the API layer has to change to carry the key.
+    const payload: Partial<RecurringJobWritePayload> &
+      ContractLineLinkWrite = {
       building: Number(building),
       customer: Number(customer),
       title: title.trim(),
@@ -560,9 +734,11 @@ export function RecurringJobFormPage() {
       // it). Windows supersede the legacy single time-window inputs.
       weekdays: showWeekdays ? weekdays : [],
       windows: windowsPayload,
-      pricing_mode: pricingMode,
-      vat_pct: vatPct || "21",
-      fixed_price: pricingMode === "FIXED" ? fixedPrice.trim() : null,
+      // W-PW1 — CREATE must carry one (the write serializer requires it);
+      // EDIT omits all three so a PATCH never rewrites what is stored.
+      ...(isCreate
+        ? { pricing_mode: MEMBERSHIP_PRICING_MODE }
+        : {}),
       // Sprint 144 §2 — all optional. `effective*` has already collapsed
       // any selection that belongs to a different customer, so a stale
       // one can never reach the wire. Explicit `null` (not omitted) so
@@ -570,6 +746,7 @@ export function RecurringJobFormPage() {
       department: effectiveDepartmentId ? Number(effectiveDepartmentId) : null,
       work_type: effectiveWorkTypeId ? Number(effectiveWorkTypeId) : null,
       ...categoryPayload,
+      ...contractLinePayload,
     };
     // Only touch crew when eligible crew loaded for this building, so a
     // transient fetch error on edit does not wipe the job's existing crew
@@ -597,13 +774,26 @@ export function RecurringJobFormPage() {
     try {
       const payload = buildPayload();
       if (isCreate) {
-        await createRecurringJob(payload);
-        push({
-          variant: "success",
-          title: t("form.created_toast_title"),
-          description: t("form.created_toast_desc"),
+        // On CREATE every required key is present by construction (the
+        // fields validate() guards, plus `pricing_mode` from the branch in
+        // buildPayload); the cast is what tells TypeScript that the
+        // create-only branch has been taken.
+        const created = await createRecurringJob(
+          payload as RecurringJobWritePayload,
+        );
+        // P-12 E2 (§D.24 rule 4) — land ON the new rule with the Done
+        // banner: what exists now, what does NOT (no visits yet), and
+        // the one next step. The banner survives the navigation via
+        // its session store.
+        announceDone(safeSessionStorage(), `recurring-${created.id}`, {
+          title: t("form.created_banner_title", { title: created.title }),
+          body: t(
+            departmentId === ""
+              ? "form.created_banner_body_default_labels"
+              : "form.created_banner_body",
+          ),
         });
-        navigate("/planned-work");
+        navigate(`/planned-work/${created.id}`);
         return;
       }
       if (id === undefined) return;
@@ -653,6 +843,39 @@ export function RecurringJobFormPage() {
     return opts;
   }, [filteredCustomers, fallbackCustomer, customer]);
 
+  const detailsSummary = [
+    effectiveDepartmentId &&
+      customerLabelName(
+        currentDepartments.find((d) => String(d.id) === effectiveDepartmentId)
+          ?.name ?? "",
+        t,
+      ),
+    effectiveWorkTypeId &&
+      customerLabelName(
+        currentWorkTypes.find((w) => String(w.id) === effectiveWorkTypeId)
+          ?.name ?? "",
+        t,
+      ),
+    effectiveCategoryChoice.startsWith("fol:")
+      ? currentFolders.find((f) => `fol:${f.id}` === effectiveCategoryChoice)
+          ?.name
+      : effectiveCategoryChoice.startsWith("cat:")
+        ? offeredCategories.find(
+            (c) => `cat:${c.id}` === effectiveCategoryChoice,
+          )?.name
+        : "",
+    description.trim() && t("form.fold_details_has_notes"),
+  ].filter(Boolean) as string[];
+
+  /* The visits editor shows when somebody asked for it, or when there is
+     something in it a reader must see: a second visit, a label, a time. */
+  const windowsEditorVisible =
+    windowsOpen ||
+    windows.length > 1 ||
+    windows.some((w) => w.label.trim() || w.startTime);
+
+  const crewCount = defaultStaffIds.length + defaultManagerIds.length;
+
   return (
     <div data-testid="recurring-job-form-page">
       <Link to={backHref} className="link-back">
@@ -663,13 +886,14 @@ export function RecurringJobFormPage() {
       <div className="page-header">
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("common:ops")}
+            {t("list.page_title")}
           </div>
           <h2 className="page-title">
             {isCreate
               ? t("form.create_title")
               : t("form.edit_title", { title: loadedJobTitle })}
           </h2>
+          <p className="page-sub">{t("form.page_sub")}</p>
         </div>
       </div>
 
@@ -685,20 +909,13 @@ export function RecurringJobFormPage() {
         </div>
       ) : (
         <form className="card" onSubmit={handleSubmit}>
-          {/* Basics */}
-          <div className="form-section">
-            <div className="form-section-title">
-              {t("form.section_basics_title")}
-            </div>
-            <div className="form-section-helper">
-              {t("form.section_basics_desc")}
-            </div>
-            {/* Sprint 6 — CUSTOMER left / BUILDING right (layout-only swap;
-                all bindings/handlers unchanged). */}
+          {/* ----- Wat ----- */}
+          <div className="form-section" data-testid="rj-section-what">
+            <div className="form-section-title">{t("form.s_what")}</div>
             <div className="form-2col">
               <div className="field">
                 <label className="field-label" htmlFor="rj-customer">
-                  {t("form.field_customer")} *
+                  {t("form.field_customer")}
                 </label>
                 <select
                   id="rj-customer"
@@ -732,102 +949,9 @@ export function RecurringJobFormPage() {
                 )}
               </div>
 
-              {/* Sprint 144 §2 — Department / Work type / Category, all
-                  bound to the SELECTED CUSTOMER and all optional. Each is
-                  disabled with a reason when the customer has none of
-                  that kind, the way the Extra Work form already does it —
-                  an empty enabled dropdown tells the operator nothing. */}
-              <div className="field">
-                <label className="field-label" htmlFor="rj-department">
-                  {t("form.field_department")}
-                </label>
-                <select
-                  id="rj-department"
-                  className="field-select"
-                  data-testid="recurring-job-department"
-                  value={effectiveDepartmentId}
-                  onChange={(event) => setDepartmentId(event.target.value)}
-                  disabled={customer === "" || currentDepartments.length === 0}
-                >
-                  <option value="">{t("form.field_label_none")}</option>
-                  {currentDepartments.map((d) => (
-                    <option key={d.id} value={String(d.id)}>
-                      {customerLabelName(d.name, t)}
-                    </option>
-                  ))}
-                </select>
-                {customer !== "" && currentDepartments.length === 0 && (
-                  <div className="muted small" style={{ marginTop: 4 }}>
-                    {t("form.field_department_none")}
-                  </div>
-                )}
-              </div>
-
-              <div className="field">
-                <label className="field-label" htmlFor="rj-work-type">
-                  {t("form.field_work_type")}
-                </label>
-                <select
-                  id="rj-work-type"
-                  className="field-select"
-                  data-testid="recurring-job-work-type"
-                  value={effectiveWorkTypeId}
-                  onChange={(event) => setWorkTypeId(event.target.value)}
-                  disabled={customer === "" || currentWorkTypes.length === 0}
-                >
-                  <option value="">{t("form.field_label_none")}</option>
-                  {currentWorkTypes.map((w) => (
-                    <option key={w.id} value={String(w.id)}>
-                      {customerLabelName(w.name, t)}
-                    </option>
-                  ))}
-                </select>
-                {customer !== "" && currentWorkTypes.length === 0 && (
-                  <div className="muted small" style={{ marginTop: 4 }}>
-                    {t("form.field_work_type_none")}
-                  </div>
-                )}
-              </div>
-
-              <div className="field">
-                <label className="field-label" htmlFor="rj-category">
-                  {t("form.field_category")}
-                </label>
-                <select
-                  id="rj-category"
-                  className="field-select"
-                  data-testid="recurring-job-category"
-                  value={effectiveCategoryChoice}
-                  onChange={(event) => setCategoryChoice(event.target.value)}
-                >
-                  <option value="">{t("form.field_label_none")}</option>
-                  {/* Same two groups as the Extra Work form: the
-                      company's categories, plus this customer's folders
-                      once a customer is chosen. ACTIVE only on both
-                      sides. */}
-                  {offeredCategories.length > 0 && (
-                    <optgroup label={t("form.field_category_group_company")}>
-                      {offeredCategories.map((c) => (
-                        <option key={`cat-${c.id}`} value={`cat:${c.id}`}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {currentFolders.length > 0 && (
-                    <optgroup label={t("form.field_category_group_folders")}>
-                      {currentFolders.map((f) => (
-                        <option key={`fol-${f.id}`} value={`fol:${f.id}`}>
-                          {f.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
-              </div>
               <div className="field">
                 <label className="field-label" htmlFor="rj-building">
-                  {t("form.field_building")} *
+                  {t("form.field_building")}
                 </label>
                 <select
                   id="rj-building"
@@ -854,7 +978,7 @@ export function RecurringJobFormPage() {
             </div>
             <div className="field">
               <label className="field-label" htmlFor="rj-title">
-                {t("form.field_title")} *
+                {t("form.field_title")}
               </label>
               <input
                 id="rj-title"
@@ -872,32 +996,137 @@ export function RecurringJobFormPage() {
                 </div>
               )}
             </div>
-            <div className="field">
-              <label className="field-label" htmlFor="rj-description">
-                {t("form.field_description")}
-              </label>
-              <textarea
-                id="rj-description"
-                className="field-textarea"
-                placeholder={t("form.field_description_placeholder")}
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-              />
-            </div>
+
+            {/* Notes and the customer's own labels fold: optional, and
+                the summary line carries what is set so an editor sees it
+                without opening. */}
+            <details className="form-fold" data-testid="rj-group-labels">
+              <summary className="form-fold-summary">
+                {t("form.fold_details")}
+                <span className="form-fold-summary-value">
+                  {detailsSummary.length > 0
+                    ? detailsSummary.join(" · ")
+                    : t("form.fold_details_empty")}
+                </span>
+              </summary>
+              <div className="form-fold-body">
+                <div className="field">
+                  <label className="field-label" htmlFor="rj-description">
+                    {t("form.field_description")}
+                  </label>
+                  <textarea
+                    id="rj-description"
+                    className="field-textarea"
+                    placeholder={t("form.field_description_placeholder")}
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                  />
+                </div>
+                <div className="form-2col">
+                  <div className="field">
+                    <label className="field-label" htmlFor="rj-department">
+                      {t("form.field_department")}
+                    </label>
+                    <select
+                      id="rj-department"
+                      className="field-select"
+                      data-testid="recurring-job-department"
+                      value={effectiveDepartmentId}
+                      onChange={(event) => setDepartmentId(event.target.value)}
+                      disabled={customer === "" || currentDepartments.length === 0}
+                    >
+                      <option value="">{t("form.field_label_unchosen")}</option>
+                      {currentDepartments.map((d) => (
+                        <option key={d.id} value={String(d.id)}>
+                          {customerLabelName(d.name, t)}
+                        </option>
+                      ))}
+                    </select>
+                    {customer !== "" && currentDepartments.length === 0 ? (
+                      <div className="muted small" style={{ marginTop: 4 }}>
+                        {t("form.field_department_none")}
+                      </div>
+                    ) : (
+                      <div className="muted small" style={{ marginTop: 4 }}>
+                        {t("form.field_label_or_general")}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="field">
+                    <label className="field-label" htmlFor="rj-work-type">
+                      {t("form.field_work_type")}
+                    </label>
+                    <select
+                      id="rj-work-type"
+                      className="field-select"
+                      data-testid="recurring-job-work-type"
+                      value={effectiveWorkTypeId}
+                      onChange={(event) => setWorkTypeId(event.target.value)}
+                      disabled={customer === "" || currentWorkTypes.length === 0}
+                    >
+                      <option value="">{t("form.field_label_unchosen")}</option>
+                      {currentWorkTypes.map((w) => (
+                        <option key={w.id} value={String(w.id)}>
+                          {customerLabelName(w.name, t)}
+                        </option>
+                      ))}
+                    </select>
+                    {customer !== "" && currentWorkTypes.length === 0 ? (
+                      <div className="muted small" style={{ marginTop: 4 }}>
+                        {t("form.field_work_type_none")}
+                      </div>
+                    ) : (
+                      <div className="muted small" style={{ marginTop: 4 }}>
+                        {t("form.field_label_or_general")}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="field">
+                    <label className="field-label" htmlFor="rj-category">
+                      {t("form.field_category")}
+                    </label>
+                    <select
+                      id="rj-category"
+                      className="field-select"
+                      data-testid="recurring-job-category"
+                      value={effectiveCategoryChoice}
+                      onChange={(event) => setCategoryChoice(event.target.value)}
+                    >
+                      <option value="">{t("form.field_label_none")}</option>
+                      {offeredCategories.length > 0 && (
+                        <optgroup label={t("form.field_category_group_company")}>
+                          {offeredCategories.map((c) => (
+                            <option key={`cat-${c.id}`} value={`cat:${c.id}`}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {currentFolders.length > 0 && (
+                        <optgroup label={t("form.field_category_group_folders")}>
+                          {currentFolders.map((f) => (
+                            <option key={`fol-${f.id}`} value={`fol:${f.id}`}>
+                              {f.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
 
-          {/* Schedule */}
-          <div className="form-section">
-            <div className="form-section-title">
-              {t("form.section_schedule_title")}
-            </div>
-            <div className="form-section-helper">
-              {t("form.section_schedule_desc")}
-            </div>
+          {/* ----- Wanneer ----- */}
+          <div className="form-section" data-testid="rj-section-when">
+            <div className="form-section-title">{t("form.s_when")}</div>
             <div className="form-2col">
               <div className="field">
                 <label className="field-label" htmlFor="rj-frequency">
-                  {t("form.field_frequency")} *
+                  {t("form.field_frequency")}
                 </label>
                 <select
                   id="rj-frequency"
@@ -916,7 +1145,7 @@ export function RecurringJobFormPage() {
               </div>
               <div className="field">
                 <label className="field-label" htmlFor="rj-start">
-                  {t("form.field_start_date")} *
+                  {t("form.field_start_date")}
                 </label>
                 <input
                   id="rj-start"
@@ -926,6 +1155,9 @@ export function RecurringJobFormPage() {
                   onChange={(event) => setStartDate(event.target.value)}
                   required
                 />
+                {frequency === "MONTHLY" && (
+                  <span className="muted small">{t("form.monthly_hint")}</span>
+                )}
                 {fieldErrors.start_date && (
                   <div className="alert-error login-error" role="alert">
                     {fieldErrors.start_date}
@@ -933,39 +1165,12 @@ export function RecurringJobFormPage() {
                 )}
               </div>
             </div>
-            <div className="field">
-              <label className="field-label" htmlFor="rj-end">
-                {t("form.field_end_date")}
-              </label>
-              <input
-                id="rj-end"
-                className="field-input"
-                type="date"
-                value={endDate}
-                onChange={(event) => setEndDate(event.target.value)}
-              />
-              <div className="form-section-helper">
-                {t("form.field_end_date_hint")}
-              </div>
-              {fieldErrors.end_date && (
-                <div className="alert-error login-error" role="alert">
-                  {fieldErrors.end_date}
-                </div>
-              )}
-            </div>
 
             {/* Weekday set — WEEKLY / BIWEEKLY only. MONTHLY anchors on the
                 start-date's day-of-month, so the picker is hidden. */}
             {showWeekdays && (
               <div className="field">
-                <label className="field-label">
-                  {t("form.field_weekdays")} *
-                </label>
-                <div className="form-section-helper">
-                  {frequency === "BIWEEKLY"
-                    ? t("form.field_weekdays_hint_biweekly")
-                    : t("form.field_weekdays_hint")}
-                </div>
+                <span className="field-label">{t("form.field_weekdays")}</span>
                 <div
                   className="weekday-picker"
                   style={{ display: "flex", flexWrap: "wrap", gap: 8 }}
@@ -987,6 +1192,11 @@ export function RecurringJobFormPage() {
                     </button>
                   ))}
                 </div>
+                {frequency === "BIWEEKLY" && (
+                  <span className="muted small">
+                    {t("form.field_weekdays_hint_biweekly")}
+                  </span>
+                )}
                 {fieldErrors.weekdays && (
                   <div className="alert-error login-error" role="alert">
                     {fieldErrors.weekdays}
@@ -995,309 +1205,239 @@ export function RecurringJobFormPage() {
               </div>
             )}
 
-            {/* Time windows — one occurrence is materialized per (date x
-                window). Defaults to one window so a simple job stays simple. */}
             <div className="field">
-              <label className="field-label">{t("form.field_windows")} *</label>
-              <div className="form-section-helper">
-                {t("form.field_windows_hint")}
+              <label className="field-label" htmlFor="rj-end">
+                {t("form.field_end_date")}
+              </label>
+              <input
+                id="rj-end"
+                className="field-input"
+                type="date"
+                value={endDate}
+                onChange={(event) => setEndDate(event.target.value)}
+              />
+              <span className="muted small">{t("form.field_end_date_hint")}</span>
+              {fieldErrors.end_date && (
+                <div className="alert-error login-error" role="alert">
+                  {fieldErrors.end_date}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ----- Bezoeken per dag -----
+              One visit per time per chosen day; each visit becomes a
+              ticket on its day. Said once, in one sentence. The default
+              single visit with no time is a fact, not a decision; the
+              editor opens when somebody wants a time or a second visit.
+              NOTE — no per-window pricing exists to fold: W-PW1 removed
+              it (a recurring job is billed through its contract line). */}
+          <div className="form-section" data-testid="rj-group-windows">
+            <div className="form-section-title">{t("form.s_visits")}</div>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              {t("form.visits_sentence")}
+            </p>
+            {!windowsEditorVisible ? (
+              <div className="ew-facts" style={{ marginTop: 4 }}>
+                <button
+                  type="button"
+                  className="ew-fact"
+                  onClick={() => setWindowsOpen(true)}
+                  aria-expanded={false}
+                  data-testid="rj-windows-open"
+                >
+                  <span>
+                    {t("form.visits_fact", { count: windows.length })}
+                    {" · "}
+                    {t("form.visits_no_time")}
+                  </span>
+                  <span className="ew-fact-pencil">
+                    <Pencil size={13} strokeWidth={2} aria-hidden />
+                  </span>
+                </button>
               </div>
-              <div
-                className="windows-editor"
-                style={{ display: "flex", flexDirection: "column", gap: 10 }}
-                data-testid="rj-windows-editor"
-              >
-                {windows.map((win, idx) => (
-                  <div
-                    key={idx}
-                    className="window-row"
-                    data-testid="rj-window-row"
-                    style={{
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      padding: 12,
-                    }}
-                  >
-                    <div className="form-2col">
-                      <div className="field" style={{ marginBottom: 8 }}>
-                        <label className="field-label">
-                          {t("form.window_label")}
-                        </label>
-                        <input
-                          className="field-input"
-                          type="text"
-                          maxLength={64}
-                          placeholder={t("form.window_label_placeholder")}
-                          value={win.label}
-                          onChange={(event) =>
-                            updateWindow(idx, { label: event.target.value })
-                          }
-                        />
+            ) : (
+              <div className="field">
+                <div className="pw-windows-editor" data-testid="rj-windows-editor">
+                  {windows.map((win, idx) => (
+                    <div
+                      key={idx}
+                      className="pw-window-row"
+                      data-testid="rj-window-row"
+                    >
+                      <div className="form-2col">
+                        <div className="field pw-window-field">
+                          <label className="field-label">
+                            {t("form.window_label")}
+                          </label>
+                          <input
+                            className="field-input"
+                            type="text"
+                            maxLength={64}
+                            placeholder={t("form.window_label_placeholder")}
+                            value={win.label}
+                            onChange={(event) =>
+                              updateWindow(idx, { label: event.target.value })
+                            }
+                          />
+                        </div>
+                        <div className="field pw-window-field">
+                          <label className="field-label">
+                            {t("form.window_start_time")}
+                          </label>
+                          <input
+                            className="field-input"
+                            type="time"
+                            value={win.startTime}
+                            onChange={(event) =>
+                              updateWindow(idx, { startTime: event.target.value })
+                            }
+                          />
+                        </div>
                       </div>
-                      <div className="field" style={{ marginBottom: 8 }}>
-                        <label className="field-label">
-                          {t("form.window_start_time")}
-                        </label>
-                        <input
-                          className="field-input"
-                          type="time"
-                          value={win.startTime}
-                          onChange={(event) =>
-                            updateWindow(idx, { startTime: event.target.value })
-                          }
-                        />
-                      </div>
+                      {windows.length > 1 && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => removeWindow(idx)}
+                          data-testid="rj-window-remove"
+                        >
+                          {t("form.window_remove")}
+                        </button>
+                      )}
                     </div>
-                    <div className="field" style={{ marginBottom: 8 }}>
+                  ))}
+                </div>
+                {fieldErrors.windows && (
+                  <div className="alert-error login-error" role="alert">
+                    {fieldErrors.windows}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm pw-window-add"
+                  onClick={addWindow}
+                  data-testid="rj-window-add"
+                >
+                  {t("form.window_add")}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* ----- Prijs -----
+              W-PW1 — a recurring job is billed as a membership through
+              its contract line; there is no pricing mode to choose. The
+              line is the price question, defaulted from the contract
+              when the customer has exactly one line. */}
+          <div className="form-section" data-testid="rj-section-price">
+            <div className="form-section-title">{t("form.s_price")}</div>
+            {customer === "" ? (
+              <p className="muted small">{t("form.price_pick_customer")}</p>
+            ) : currentContractLines.length === 0 ? (
+              <p className="muted small" data-testid="rj-price-no-contract">
+                {t("form.price_no_contract")}
+              </p>
+            ) : (
+              <div className="field">
+                <label className="field-label" htmlFor="rj-contract-line">
+                  {t("form.field_contract_line")}
+                </label>
+                <select
+                  id="rj-contract-line"
+                  className="field-select"
+                  data-testid="recurring-job-contract-line"
+                  value={effectiveContractLineId || NO_CONTRACT_LINE}
+                  onChange={(event) => setContractLineId(event.target.value)}
+                >
+                  <option value={NO_CONTRACT_LINE}>{t("form.price_none")}</option>
+                  {currentContractLines.map((line) => (
+                    <option key={line.id} value={String(line.id)}>
+                      {line.contractNo
+                        ? `${line.lineName} — ${line.contractNo}`
+                        : line.lineName}
+                    </option>
+                  ))}
+                </select>
+                <span className="muted small">
+                  {t("form.field_contract_line_hint")}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* ----- Ploeg ----- optional, collapsed. */}
+          <div className="form-section">
+            <details className="form-fold" data-testid="rj-group-crew">
+              <summary className="form-fold-summary">
+                {t("form.s_crew")}
+                <span className="form-fold-summary-value">
+                  {crewCount > 0
+                    ? t("form.crew_summary", { count: crewCount })
+                    : t("form.crew_summary_none")}
+                </span>
+              </summary>
+              <div className="form-fold-body">
+                {building === "" ? (
+                  <p className="muted small">
+                    {t("form.crew_select_building_first")}
+                  </p>
+                ) : crewLoading ? (
+                  <p className="muted small">{t("form.crew_loading")}</p>
+                ) : crewError ? (
+                  <p className="muted small">{t("form.crew_load_failed")}</p>
+                ) : (
+                  <div className="form-2col">
+                    <div className="field">
                       <label className="field-label">
-                        {t("form.window_pricing_mode")}
+                        {t("form.field_default_staff")}
                       </label>
-                      <select
-                        className="field-select"
-                        value={win.pricingMode}
-                        onChange={(event) =>
-                          updateWindow(idx, {
-                            pricingMode: event.target
-                              .value as WindowPricingChoice,
-                          })
+                      <div className="form-section-helper">
+                        {t("form.field_default_staff_hint")}
+                      </div>
+                      <CrewPicker
+                        candidates={eligibleStaff}
+                        selected={defaultStaffIds}
+                        onToggle={(uid) =>
+                          setDefaultStaffIds((prev) => toggleId(prev, uid))
                         }
-                      >
-                        <option value="">{t("form.window_pricing_inherit")}</option>
-                        {PRICING_MODES.map((m) => (
-                          <option key={m} value={m}>
-                            {t(`pricing_mode.${m}`)}
-                          </option>
-                        ))}
-                      </select>
-                      {win.pricingMode === "" && (
-                        <div className="form-section-helper">
-                          {t("form.window_pricing_inherit_hint")}
+                        onSetAll={setDefaultStaffIds}
+                        emptyLabel={t("form.no_staff_options")}
+                        testId="rj-staff-picker"
+                      />
+                      {fieldErrors.default_staff_ids && (
+                        <div className="alert-error login-error" role="alert">
+                          {fieldErrors.default_staff_ids}
                         </div>
                       )}
                     </div>
-                    {win.pricingMode === "FIXED" && (
-                      <div className="form-2col">
-                        <div className="field" style={{ marginBottom: 8 }}>
-                          <label className="field-label">
-                            {t("form.field_fixed_price")}
-                          </label>
-                          <input
-                            className="field-input"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            value={win.fixedPrice}
-                            onChange={(event) =>
-                              updateWindow(idx, {
-                                fixedPrice: event.target.value,
-                              })
-                            }
-                          />
-                          {fieldErrors[`window_${idx}`] && (
-                            <div
-                              className="alert-error login-error"
-                              role="alert"
-                            >
-                              {fieldErrors[`window_${idx}`]}
-                            </div>
-                          )}
-                        </div>
-                        <div className="field" style={{ marginBottom: 8 }}>
-                          <label className="field-label">
-                            {t("form.field_vat_pct")}
-                          </label>
-                          <input
-                            className="field-input"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            value={win.vatPct}
-                            onChange={(event) =>
-                              updateWindow(idx, { vatPct: event.target.value })
-                            }
-                          />
-                        </div>
+                    <div className="field">
+                      <label className="field-label">
+                        {t("form.field_default_managers")}
+                      </label>
+                      <div className="form-section-helper">
+                        {t("form.field_default_managers_hint")}
                       </div>
-                    )}
-                    {windows.length > 1 && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => removeWindow(idx)}
-                        data-testid="rj-window-remove"
-                      >
-                        {t("form.window_remove")}
-                      </button>
-                    )}
+                      <CrewPicker
+                        candidates={eligibleManagers}
+                        selected={defaultManagerIds}
+                        onToggle={(uid) =>
+                          setDefaultManagerIds((prev) => toggleId(prev, uid))
+                        }
+                        onSetAll={setDefaultManagerIds}
+                        emptyLabel={t("form.no_manager_options")}
+                        testId="rj-manager-picker"
+                      />
+                      {fieldErrors.default_manager_ids && (
+                        <div className="alert-error login-error" role="alert">
+                          {fieldErrors.default_manager_ids}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                ))}
+                )}
               </div>
-              {fieldErrors.windows && (
-                <div className="alert-error login-error" role="alert">
-                  {fieldErrors.windows}
-                </div>
-              )}
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={addWindow}
-                data-testid="rj-window-add"
-                style={{ marginTop: 10 }}
-              >
-                {t("form.window_add")}
-              </button>
-            </div>
-          </div>
-
-          {/* Pricing */}
-          <div className="form-section">
-            <div className="form-section-title">
-              {t("form.section_pricing_title")}
-            </div>
-            <div className="form-section-helper">
-              {t("form.section_pricing_desc")}
-            </div>
-            <div className="field">
-              <label className="field-label" htmlFor="rj-pricing-mode">
-                {t("form.field_pricing_mode")} *
-              </label>
-              <select
-                id="rj-pricing-mode"
-                className="field-select"
-                value={pricingMode}
-                onChange={(event) =>
-                  setPricingMode(event.target.value as SelectablePricingMode)
-                }
-              >
-                {PRICING_MODES.map((m) => (
-                  <option key={m} value={m}>
-                    {t(`pricing_mode.${m}`)}
-                  </option>
-                ))}
-              </select>
-              {fieldErrors.pricing_mode && (
-                <div className="alert-error login-error" role="alert">
-                  {fieldErrors.pricing_mode}
-                </div>
-              )}
-            </div>
-            {pricingMode === "FIXED" && (
-              <div className="form-2col">
-                <div className="field">
-                  <label className="field-label" htmlFor="rj-fixed-price">
-                    {t("form.field_fixed_price")} *
-                  </label>
-                  <input
-                    id="rj-fixed-price"
-                    className="field-input"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    inputMode="decimal"
-                    value={fixedPrice}
-                    onChange={(event) => setFixedPrice(event.target.value)}
-                  />
-                  <div className="form-section-helper">
-                    {t("form.field_fixed_price_hint")}
-                  </div>
-                  {fieldErrors.fixed_price && (
-                    <div className="alert-error login-error" role="alert">
-                      {fieldErrors.fixed_price}
-                    </div>
-                  )}
-                </div>
-                <div className="field">
-                  <label className="field-label" htmlFor="rj-vat">
-                    {t("form.field_vat_pct")}
-                  </label>
-                  <input
-                    id="rj-vat"
-                    className="field-input"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    inputMode="decimal"
-                    value={vatPct}
-                    onChange={(event) => setVatPct(event.target.value)}
-                  />
-                  {fieldErrors.vat_pct && (
-                    <div className="alert-error login-error" role="alert">
-                      {fieldErrors.vat_pct}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Default crew */}
-          <div className="form-section">
-            <div className="form-section-title">
-              {t("form.section_crew_title")}
-            </div>
-            <div className="form-section-helper">
-              {t("form.section_crew_desc")}
-            </div>
-            {building === "" ? (
-              <p className="muted small">
-                {t("form.crew_select_building_first")}
-              </p>
-            ) : crewLoading ? (
-              <p className="muted small">{t("form.crew_loading")}</p>
-            ) : crewError ? (
-              <p className="muted small">{t("form.crew_load_failed")}</p>
-            ) : (
-              <div className="form-2col">
-                <div className="field">
-                  <label className="field-label">
-                    {t("form.field_default_staff")}
-                  </label>
-                  <div className="form-section-helper">
-                    {t("form.field_default_staff_hint")}
-                  </div>
-                  <CrewPicker
-                    candidates={eligibleStaff}
-                    selected={defaultStaffIds}
-                    onToggle={(uid) =>
-                      setDefaultStaffIds((prev) => toggleId(prev, uid))
-                    }
-                    onSetAll={setDefaultStaffIds}
-                    emptyLabel={t("form.no_staff_options")}
-                    testId="rj-staff-picker"
-                  />
-                  {fieldErrors.default_staff_ids && (
-                    <div className="alert-error login-error" role="alert">
-                      {fieldErrors.default_staff_ids}
-                    </div>
-                  )}
-                </div>
-                <div className="field">
-                  <label className="field-label">
-                    {t("form.field_default_managers")}
-                  </label>
-                  <div className="form-section-helper">
-                    {t("form.field_default_managers_hint")}
-                  </div>
-                  <CrewPicker
-                    candidates={eligibleManagers}
-                    selected={defaultManagerIds}
-                    onToggle={(uid) =>
-                      setDefaultManagerIds((prev) => toggleId(prev, uid))
-                    }
-                    onSetAll={setDefaultManagerIds}
-                    emptyLabel={t("form.no_manager_options")}
-                    testId="rj-manager-picker"
-                  />
-                  {fieldErrors.default_manager_ids && (
-                    <div className="alert-error login-error" role="alert">
-                      {fieldErrors.default_manager_ids}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+            </details>
           </div>
 
           <div className="form-actions">

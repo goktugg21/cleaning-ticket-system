@@ -210,6 +210,12 @@ class ManagedUnitBackfillTests(TestCase):
         # `ServiceCategory.company` is PROTECT, so a leftover category
         # would make the Company delete raise instead of clearing the DB.
         ServiceCategory.objects.all().delete()
+        # P-16 repin — W13 gave every Company a seeded set of
+        # TicketCategory rows (post_save signal), PROTECT like the
+        # service categories above; same rule, one more table.
+        from tickets.models import TicketCategory
+
+        TicketCategory.objects.all().delete()
         Company.objects.all().delete()
         backfill_managed_units(live_apps, None)  # must not raise
         self.assertEqual(ManagedUnit.objects.count(), 0)

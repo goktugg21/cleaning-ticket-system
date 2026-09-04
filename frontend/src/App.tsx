@@ -7,22 +7,32 @@ import {
 } from "react-router-dom";
 import { Suspense, lazy } from "react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { ToastProvider } from "./components/ToastProvider";
 import { AdminRoute } from "./components/AdminRoute";
 import { CustomerReadRoute } from "./components/CustomerReadRoute";
 import { ExtraWorkRoute } from "./components/ExtraWorkRoute";
+import { EXTRA_WORK_TABS } from "./lib/extraWorkTabs";
 import { PlannedWorkRoute } from "./components/PlannedWorkRoute";
 import { BillingRoute } from "./components/BillingRoute";
 import { CustomerRoute } from "./components/CustomerRoute";
 import { ReportsRoute } from "./components/ReportsRoute";
 import { StaffRequestReviewRoute } from "./components/StaffRequestReviewRoute";
 import { TimesheetsRoute } from "./components/TimesheetsRoute";
+import { SlaWarningsRoute } from "./components/SlaWarningsRoute";
 import { SuperAdminRoute } from "./components/SuperAdminRoute";
 import { AppShell } from "./layout/AppShell";
+import { HistoryRecorder } from "./hooks/useRecordHistory";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 import { CreateExtraWorkPage } from "./pages/CreateExtraWorkPage";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
+import { MeldingCreatePage } from "./pages/customer/MeldingCreatePage";
+import { MeerwerkFlowPage } from "./pages/customer/MeerwerkFlowPage";
+import { MeerwerkTrackerPage } from "./pages/customer/MeerwerkTrackerPage";
+import { MeerwerkDetailPage } from "./pages/customer/MeerwerkDetailPage";
+import { StartPage } from "./pages/customer/StartPage";
+import { NewWorkPage } from "./pages/NewWorkPage";
 import { AgendaPage } from "./pages/AgendaPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { MyHoursPage } from "./pages/MyHoursPage";
@@ -41,6 +51,7 @@ import { NotificationsPage } from "./pages/NotificationsPage";
 import { InboxPage } from "./pages/InboxPage";
 import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
 import { AuditLogsAdminPage } from "./pages/admin/AuditLogsAdminPage";
 import { BuildingDetailPage } from "./pages/admin/BuildingDetailPage";
@@ -54,7 +65,6 @@ import { CompanyDetailPage } from "./pages/admin/CompanyDetailPage";
 import { CompanyFormPage } from "./pages/admin/CompanyFormPage";
 import { CustomerContactsPage } from "./pages/admin/CustomerContactsPage";
 import { CustomerFormPage } from "./pages/admin/CustomerFormPage";
-import { EmployeesAdminPage } from "./pages/admin/EmployeesAdminPage";
 import { CustomerPricingPage } from "./pages/admin/CustomerPricingPage";
 import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 // Sprint 28 Batch 13 — view-first refactor of the customer detail
@@ -75,46 +85,46 @@ import { CustomerReportsPage } from "./pages/admin/customer/CustomerReportsPage"
 import { CustomerDocumentsPage } from "./pages/admin/customer/CustomerDocumentsPage";
 import { CustomerLabelsPage } from "./pages/admin/customer/CustomerLabelsPage";
 import { CustomerTicketsPage } from "./pages/admin/customer/CustomerTicketsPage";
-import { CustomerChargeableWorkPage } from "./pages/admin/customer/CustomerChargeableWorkPage";
 import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
 import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPage";
 import { CustomerUsersPage } from "./pages/admin/customer/CustomerUsersPage";
-import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
 import { HoursAdminPage } from "./pages/admin/HoursAdminPage";
+// Sprint W4-Q §2 — per-company thresholds for the three time-driven
+// SLA warnings. SA / CA only, on its own guard (see SlaWarningsRoute).
+import { SlaWarningsAdminPage } from "./pages/admin/SlaWarningsAdminPage";
 // Sprint 160 — contracts. Eagerly imported like the other admin
 // pages; the module is small and the route is behind its own guard.
 import { ContractsAdminPage } from "./pages/admin/contracts/ContractsAdminPage";
 import { ContractDetailPage } from "./pages/admin/contracts/ContractDetailPage";
 import { ContractsRoute } from "./components/ContractsRoute";
-import { CatalogsAdminPage } from "./pages/admin/CatalogsAdminPage";
-import { ServicesAdminPage } from "./pages/admin/ServicesAdminPage";
+import { PeopleAdminPage } from "./pages/admin/PeopleAdminPage";
+import { ServicesCatalogsPage } from "./pages/admin/ServicesCatalogsPage";
 import { StaffAssignmentRequestsAdminPage } from "./pages/admin/StaffAssignmentRequestsAdminPage";
 import { UserDetailPage } from "./pages/admin/UserDetailPage";
 import { UserFormPage } from "./pages/admin/UserFormPage";
-import { UsersAdminPage } from "./pages/admin/UsersAdminPage";
 
 // ReportsPage is lazy-loaded. recharts 2.x does not tree-shake cleanly
 // from its main entry, so route-level splitting is the lever available
 // for keeping it out of the initial bundle.
 //
-// Sprint 152.2 — two claims this comment used to make are no longer
-// true, and are corrected rather than left to mislead:
+// Sprint 152.2 recorded TWO corrections here. One of them has since
+// expired and is removed rather than left to mislead in its turn:
+// `HoursCharts` (the Uren Overview tab) was named as a second recharts
+// consumer, and it no longer exists — every `recharts` import in the
+// tree is now under `pages/reports/charts/`, reached only through
+// ReportsPage. "ReportsPage is the only consumer" is true again.
 //
-//   1. "ReportsPage is the only consumer of recharts" — `HoursCharts`
-//      (the Uren Overview tab) is a second one, and it is reached
-//      through the eagerly-imported `HoursAdminPage`.
-//   2. "the charting library lands in a separate chunk" — it does not,
-//      and did not before this sprint either. The build emits no
-//      recharts chunk: `ReportsPage-*.js` is ~22 kB, far too small to
-//      contain it, and `index-*.js` was already ~2,178 kB before the
-//      Uren charts were added (they cost +21 kB, i.e. their own code).
-//      recharts is in the entry bundle whatever this lazy import does.
+// The other correction still stands, and was re-measured at W-PW1:
+// the charting library does NOT land in a separate chunk. The build
+// emits no recharts chunk — `ReportsPage-*.js` is ~51 kB, far too
+// small to contain it, while `index-*.js` is ~2,754 kB. recharts is in
+// the entry bundle whatever this lazy import does.
 //
 // Splitting it out for real would mean a deliberate `manualChunks`
-// change measured against both consumers — its own piece of work, not a
-// side effect of adding a second chart page. The lazy import stays
-// because it still splits ReportsPage's OWN code.
+// change measured against the real consumer set — its own piece of
+// work. The lazy import stays because it still splits ReportsPage's
+// OWN code.
 const ReportsPage = lazy(() =>
   import("./pages/reports/ReportsPage").then((m) => ({ default: m.ReportsPage })),
 );
@@ -133,11 +143,12 @@ const InvoiceDetailPage = lazy(() =>
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
+  const { t } = useTranslation("common");
 
   if (loading) {
     return (
       <main className="auth-page">
-        <p className="muted">Loading…</p>
+        <p className="muted">{t("loading")}</p>
       </main>
     );
   }
@@ -191,11 +202,81 @@ function CustomerScopedRedirect({
   );
 }
 
+/**
+ * FE-1 — the customer-scoped "Chargeable work" tab is retired the same
+ * way (§D.2: the standalone name dies). Same param-preserving shape as
+ * `CustomerScopedRedirect`, different search string: the ticket list's
+ * own work filter carries the narrowing.
+ */
+function CustomerChargeableRedirect() {
+  const { id } = useParams();
+  return (
+    <Navigate
+      to={`/admin/customers/${id}/tickets?work=chargeable&status=ALL&period=all_time`}
+      replace
+    />
+  );
+}
+
+/**
+ * FE-1 (Addendum D §D.3.2) — Werkplanning is the STAFF landing page.
+ * The dashboard route itself stays; only where a staff member LANDS
+ * changes. Everyone else keeps the dashboard.
+ */
+function HomeRoute() {
+  const { me } = useAuth();
+  if (me?.role === "STAFF") {
+    return <Navigate to="/agenda" replace />;
+  }
+  // FE-2 (§D.3.1) — a customer lands on START: their open items, not
+  // an operations console.
+  if (me?.role === "CUSTOMER_USER") {
+    return <StartPage />;
+  }
+  return <DashboardPage />;
+}
+
+/**
+ * FE-2 (§D.5) — the customer surface swaps in its own three flows on
+ * the SAME routes; provider pages are untouched (FE-3/FE-5 own them).
+ * Role picks the component, never the route: deep links, notification
+ * hrefs and old bookmarks keep working for both audiences.
+ */
+function ByCustomer({
+  customer,
+  other,
+}: {
+  customer: ReactNode;
+  other: ReactNode;
+}) {
+  const { me } = useAuth();
+  return <>{me?.role === "CUSTOMER_USER" ? customer : other}</>;
+}
+
+/**
+ * FE-1 (§D.3.2) — for STAFF the bell feed lives as a tab inside
+ * Berichten; the standalone notifications page redirects there so the
+ * topbar bell's "see all" and old deep links keep working. Every other
+ * role keeps the standalone page.
+ */
+function NotificationsRoute() {
+  const { me } = useAuth();
+  if (me?.role === "STAFF") {
+    return <Navigate to="/inbox?tab=notifications" replace />;
+  }
+  return <NotificationsPage />;
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <ToastProvider>
         <BrowserRouter>
+          {/* W14 §3 — the app remembers where it has been, so a back
+              link can go BACK to it instead of pushing a fourth entry
+              onto the pile. One mount, above the routes, because every
+              route change has to be seen. See lib/navHistory.ts. */}
+          <HistoryRecorder />
           <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route
@@ -207,7 +288,7 @@ export default function App() {
             path="/"
             element={
               <ProtectedRoute>
-                <DashboardPage />
+                <HomeRoute />
               </ProtectedRoute>
             }
           />
@@ -218,25 +299,41 @@ export default function App() {
               inside it. Same ProtectedRoute gate as the dashboard — scoping
               stays backend-side. Defined ABOVE /tickets/new and /tickets/:id
               (exact static path; RRv6 ranks it correctly regardless). */}
+          {/* FE-4 (Addendum D §D.12 item 1) — the legacy tickets list is
+              NOT a customer surface: a customer role reaching it lands on
+              Mijn meldingen. Single-ticket deep links (/tickets/:id) are
+              untouched. */}
           <Route
             path="/tickets"
             element={
               <ProtectedRoute>
-                <DashboardPage key="tickets-page" variant="tickets-page" />
+                <ByCustomer
+                  customer={<Navigate to="/my/meldingen" replace />}
+                  other={<DashboardPage key="tickets-page" variant="tickets-page" />}
+                />
               </ProtectedRoute>
             }
           />
-          {/* Sprint 181 §5 — chargeable work: the tickets born from an
-              Extra Work, findable as a group. They ARE tickets and only
-              their origin differs, so this mounts the same list with one
-              server-side filter pinned on rather than a second
-              implementation. Static path, so it must sit above
-              /tickets/:id. */}
+          {/* FE-1 (Addendum D §D.2) — "Chargeable work" is dead as a
+              name and as a page. P-10 B3 — and the Tickets page never
+              shows extra work again, so the old deep link lands where
+              the spawned work IS found: Extra work → Approved. Static
+              path, so it must stay above /tickets/:id. */}
           <Route
             path="/tickets/chargeable"
+            element={<Navigate to="/extra-work/approved" replace />}
+          />
+          {/* W11 — ONE DOOR. Asks what happened and picks the record
+              type from the answers, then hands off to one of the create
+              routes below, all of which are unchanged and still work as
+              deep links. `ProtectedRoute` only: which options the page
+              offers is a role question it answers itself, and the route
+              each answer lands on keeps its own guard. */}
+          <Route
+            path="/new"
             element={
               <ProtectedRoute>
-                <DashboardPage key="chargeable-work" variant="chargeable-work" />
+                <NewWorkPage />
               </ProtectedRoute>
             }
           />
@@ -244,7 +341,10 @@ export default function App() {
             path="/tickets/new"
             element={
               <ProtectedRoute>
-                <CreateTicketPage />
+                <ByCustomer
+                  customer={<MeldingCreatePage />}
+                  other={<CreateTicketPage />}
+                />
               </ProtectedRoute>
             }
           />
@@ -271,7 +371,7 @@ export default function App() {
             path="/notifications"
             element={
               <ProtectedRoute>
-                <NotificationsPage />
+                <NotificationsRoute />
               </ProtectedRoute>
             }
           />
@@ -356,36 +456,59 @@ export default function App() {
             path="/extra-work"
             element={
               <ExtraWorkRoute>
-                <ExtraWorkListPage />
+                <ByCustomer
+                  customer={<MeerwerkTrackerPage />}
+                  other={<ExtraWorkListPage />}
+                />
               </ExtraWorkRoute>
             }
           />
+          {/* P-9 B — the four tabs are STATIC segments beside `/extra-work`,
+              so React Router ranks them above `/extra-work/:id` (the way
+              `/extra-work/new` already relies on). Iterated from the ONE
+              exported tab table, never a second list. A customer on any of
+              them gets the tracker, like the bare address. */}
+          {EXTRA_WORK_TABS.map((tab) => (
+            <Route
+              key={tab}
+              path={`/extra-work/${tab}`}
+              element={
+                <ExtraWorkRoute>
+                  <ByCustomer
+                    customer={<MeerwerkTrackerPage />}
+                    other={<ExtraWorkListPage tab={tab} />}
+                  />
+                </ExtraWorkRoute>
+              }
+            />
+          ))}
           <Route
             path="/extra-work/new"
             element={
               <ExtraWorkRoute>
-                <CreateExtraWorkPage />
+                <ByCustomer
+                  customer={<MeerwerkFlowPage />}
+                  other={<CreateExtraWorkPage />}
+                />
               </ExtraWorkRoute>
             }
           />
-          {/* M3 (SoT Addendum A.5) — dedicated quote-request page.
-              Defined ABOVE /extra-work/:id; React Router v6 ranks
-              static segments over dynamic params anyway, but the
-              explicit ordering keeps the intent obvious. Same gate as
-              /extra-work/new. */}
+          {/* FE-5 — the old "Request a quote" page folded into the
+              create page: the intent is derived at the bottom of the
+              form, never by which entry was clicked (§D.5.2). The
+              address keeps working. */}
           <Route
             path="/extra-work/request-quote"
-            element={
-              <ExtraWorkRoute>
-                <CreateExtraWorkPage intentMode="quote" />
-              </ExtraWorkRoute>
-            }
+            element={<Navigate to="/extra-work/new" replace />}
           />
           <Route
             path="/extra-work/:id"
             element={
               <ExtraWorkRoute>
-                <ExtraWorkDetailPage />
+                <ByCustomer
+                  customer={<MeerwerkDetailPage />}
+                  other={<ExtraWorkDetailPage />}
+                />
               </ExtraWorkRoute>
             }
           />
@@ -593,16 +716,12 @@ export default function App() {
               </AdminRoute>
             }
           />
-          {/* Sprint 184 §3b — the customer's chargeable work. The same
-              ticket list as the sibling route above, with a second pin
-              from the route rather than a second implementation. */}
+          {/* FE-1 — the customer-scoped "Chargeable work" tab is
+              retired (§D.2); the deep link lands on the customer's own
+              ticket list with the meerwerk narrowing preselected. */}
           <Route
             path="/admin/customers/:id/chargeable"
-            element={
-              <AdminRoute>
-                <CustomerChargeableWorkPage />
-              </AdminRoute>
-            }
+            element={<CustomerChargeableRedirect />}
           />
           <Route
             path="/admin/customers/:id/tickets"
@@ -697,35 +816,41 @@ export default function App() {
               </AdminRoute>
             }
           />
-          {/* Sprint 28 Batch 5 — provider-wide service catalog. Single
-              page with two tabs (Services + Categories) to honour
-              §3 "no data dumps". */}
+          {/* FE-6 (§D.3.4) — ONE "Diensten & catalogi" surface with two
+              tabs; each tab is the page its old route opened, behind
+              the same AdminRoute gate. The old addresses redirect. */}
           <Route
-            path="/admin/services"
+            path="/admin/services-catalogs/:tab?"
             element={
               <AdminRoute>
-                <ServicesAdminPage />
+                <ServicesCatalogsPage />
               </AdminRoute>
             }
           />
-          {/* Sprint 178 §1 — the Catalogs area. Same AdminRoute gate as
-              every other per-company admin screen; the individual
-              catalogs keep their own endpoint permissions unchanged. */}
+          <Route
+            path="/admin/services"
+            element={<Navigate to="/admin/services-catalogs/services" replace />}
+          />
           <Route
             path="/admin/catalogs"
+            element={<Navigate to="/admin/services-catalogs/catalogs" replace />}
+          />
+          {/* FE-6 (§D.3.4) — ONE "Mensen" surface: users, employees and
+              invitations as tabs, each behind the gate its route always
+              had (AdminRoute for users and invitations, the SA/CA/BM
+              reader gate for employees). The old list addresses
+              redirect; the per-user pages below are untouched. */}
+          <Route
+            path="/admin/people/:tab?"
             element={
-              <AdminRoute>
-                <CatalogsAdminPage />
-              </AdminRoute>
+              <CustomerReadRoute>
+                <PeopleAdminPage />
+              </CustomerReadRoute>
             }
           />
           <Route
             path="/admin/users"
-            element={
-              <AdminRoute>
-                <UsersAdminPage />
-              </AdminRoute>
-            }
+            element={<Navigate to="/admin/people/users" replace />}
           />
           {/* Sprint 29 Batch 29.6 — view-first split mirroring 29.3
               (companies) and 29.4 (buildings). `/admin/users/:id` now
@@ -748,24 +873,13 @@ export default function App() {
               </AdminRoute>
             }
           />
-          {/* Employees directory — provider-wide. CustomerReadRoute
-              admits SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER
-              (BM read-only); STAFF / CUSTOMER_USER are bounced. */}
           <Route
             path="/admin/employees"
-            element={
-              <CustomerReadRoute>
-                <EmployeesAdminPage />
-              </CustomerReadRoute>
-            }
+            element={<Navigate to="/admin/people/employees" replace />}
           />
           <Route
             path="/admin/invitations"
-            element={
-              <AdminRoute>
-                <InvitationsAdminPage />
-              </AdminRoute>
-            }
+            element={<Navigate to="/admin/people/invitations" replace />}
           />
           <Route
             path="/admin/audit-logs"
@@ -805,6 +919,25 @@ export default function App() {
               <TimesheetsRoute manager>
                 <HoursAdminPage />
               </TimesheetsRoute>
+            }
+          />
+          {/* P-14 A1 — the Agreed hours tab, URL-backed like People's
+              tabs; the same guard as the page it is a tab of. */}
+          <Route
+            path="/admin/hours/agreed"
+            element={
+              <TimesheetsRoute manager>
+                <HoursAdminPage />
+              </TimesheetsRoute>
+            }
+          />
+          {/* Sprint W4-Q §2 — the SLA warning thresholds. */}
+          <Route
+            path="/admin/sla-warnings"
+            element={
+              <SlaWarningsRoute>
+                <SlaWarningsAdminPage />
+              </SlaWarningsRoute>
             }
           />
           {/* Sprint 160 — contracts. Its own guard rather than
@@ -884,7 +1017,16 @@ export default function App() {
               </BillingRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* P-5 S4.1 — an unknown address says so instead of quietly
+              rendering the Dashboard. */}
+          <Route
+            path="*"
+            element={
+              <ProtectedRoute>
+                <NotFoundPage />
+              </ProtectedRoute>
+            }
+          />
           </Routes>
         </BrowserRouter>
       </ToastProvider>

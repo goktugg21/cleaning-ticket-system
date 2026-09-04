@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { api, getApiError } from "../../../api/client";
+import type { BuildingContractRef } from "../../../api/types";
+import { formatMoney } from "../../../lib/intl";
+import { useMissingPieceAnchor } from "../../../lib/missingPiece";
 
 /**
  * Sprint 185 E §2 — who pays which share of a shared building.
@@ -37,14 +40,20 @@ export function BuildingCostShareCard({
   buildingId,
   customers,
   canEdit,
+  contracts = [],
 }: {
   buildingId: number;
+  /** P-5 S7 — the contracts covering this building, so the card can
+   *  say WHERE the split acts with this building's own numbers. */
+  contracts?: BuildingContractRef[];
   /** The customers linked to THIS building — the only ones the server
    *  will accept a share for. */
   customers: { id: number; name: string }[];
   canEdit: boolean;
 }) {
   const { t } = useTranslation("common");
+  // P-5 S7 — where "open the split" lands.
+  const anchor = useMissingPieceAnchor<HTMLDetailsElement>("cost-share");
   const [rows, setRows] = useState<CostShareRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -114,16 +123,52 @@ export function BuildingCostShareCard({
     }
   }
 
+  /* P-4 (Part F) — the split is ADVANCED. Outside the fold: one calm
+     sentence (unsplit: "All work here bills to the ticket's own
+     customer"; split: who pays what). The form, the percentages and
+     Save live inside the fold only. */
+  const splitSentence =
+    rows.length === 0
+      ? t("cost_shares.unsplit_sentence")
+      : t("cost_shares.split_sentence", {
+          shares: rows
+            .map(
+              (row) =>
+                `${row.customer_name || customers.find((c) => c.id === row.customer)?.name || row.customer} ${Number(row.share_pct)}%`,
+            )
+            .join(" · "),
+        });
+
   return (
-    <section
-      className="card card-detail-pad"
+    <details
+      className="action-fold card card-detail-pad"
       style={{ marginBottom: 16 }}
       data-testid="building-cost-shares"
+      ref={anchor}
     >
-      <div className="section-head" style={{ marginBottom: 8 }}>
+      <summary className="form-fold-summary" data-testid="building-cost-shares-summary">
+        {splitSentence}
+        {canEdit && <span className="form-fold-summary-value">{t("cost_shares.change")}</span>}
+      </summary>
+      <div className="section-head" style={{ marginBottom: 8, marginTop: 10 }}>
         <div>
           <div className="section-head-title">{t("cost_shares.title")}</div>
           <div className="section-head-sub">{t("cost_shares.desc")}</div>
+          {/* P-5 S7 — WHERE the split acts, in this building's own
+              numbers when a contract covers it. */}
+          {rows.length > 0 && (
+            <div className="muted small" data-testid="building-cost-shares-where">
+              {contracts[0]?.period_amount
+                ? t("cost_shares.where_it_acts_example", {
+                    contract: contracts[0].contract_type_name ?? contracts[0].contract_no,
+                    amount: formatMoney(contracts[0].period_amount),
+                    shares: rows
+                      .map((row) => `${Number(row.share_pct)}%`)
+                      .join(" / "),
+                  })
+                : t("cost_shares.where_it_acts")}
+            </div>
+          )}
         </div>
       </div>
 
@@ -274,6 +319,6 @@ export function BuildingCostShareCard({
           </button>
         </div>
       )}
-    </section>
+    </details>
   );
 }

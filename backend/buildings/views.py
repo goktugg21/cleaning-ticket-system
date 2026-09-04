@@ -34,6 +34,12 @@ class BuildingViewSet(viewsets.ModelViewSet):
         "is_active",
     ]
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # P-5 S7 — the detail carries the connected facts (contracts).
+        context["connected"] = self.action == "retrieve"
+        return context
+
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
             return [IsAuthenticatedAndActive()]

@@ -31,6 +31,13 @@ export const CHIPS: {
   { key: "blocked", label: "chip_blocked", count: (c) => c.blocked },
 ];
 
+/** FE-4 (Addendum D §D.12 item 5) — the tiles that earn their place on
+ *  the strip. The other three buckets are still chips (same counts, same
+ *  filter) but they live in the "Laat zien" select, so the page opens
+ *  on "what do I do right now" instead of six numbers. */
+export const STRIP_KEYS: readonly ChipKey[] = ["", "overdue", "open"];
+export const FOLDED_KEYS: readonly ChipKey[] = ["in_progress", "done", "blocked"];
+
 export function matchesChip(entry: WorkPlanEntry, chip: ChipKey): boolean {
   if (chip === "") return true;
   if (chip === "overdue") return entry.is_overdue;

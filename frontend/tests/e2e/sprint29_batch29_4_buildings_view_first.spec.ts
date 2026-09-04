@@ -74,12 +74,14 @@ test.describe("Sprint 29 Batch 29.4 — Buildings view-first", () => {
       page.locator('[data-testid="building-detail-page"]'),
     ).toBeVisible({ timeout: 10_000 });
 
-    // Both read-only cards.
+    // The read-only about card + the stats strip (the separate
+    // managers card was folded into the page's stats / people
+    // surfaces).
     await expect(
       page.locator('[data-testid="building-detail-about-card"]'),
     ).toBeVisible();
     await expect(
-      page.locator('[data-testid="building-detail-managers-card"]'),
+      page.locator('[data-testid="building-detail-stats"]'),
     ).toBeVisible();
 
     // The form must NOT be on this URL. The form's `section-managers`

@@ -244,6 +244,9 @@ export function formatMoney(
     return new Intl.NumberFormat(locale, {
       style: "currency",
       currency: "EUR",
+      // P-6 V5.3 — always two decimals: "1234.5" from a serializer that
+      // lost its scale still renders as EUR 1.234,50.
+      minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(amount);
   } catch {

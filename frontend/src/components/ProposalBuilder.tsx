@@ -8,554 +8,385 @@
 // read-only. Every mutation calls the DRAFT-only line CRUD / transition
 // endpoints, then asks the parent to refetch via `onChanged`.
 //
+// P-10 B4 — edits happen IN the row and nothing saves itself: Edit turns
+// a line into inputs with Save · Cancel, an unpriced request line is
+// such a row from the start, and a new line is one at the foot of the
+// table. The editor that used to sit below the table is gone. The rules
+// (units, when Save is refused, the payload) are `lib/pricingRow`'s.
+//
 // Only `ProposalBuilder` is exported (react-refresh/only-export-
-// components); the row/add-line helpers stay local to this file.
+// components); the row helpers stay local to this file.
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  announceDone,
+  safeSessionStorage,
+} from "./guide/doneBannerStore";
 import { FileText, Plus, RefreshCw, X } from "lucide-react";
 
 import { getApiError } from "../api/client";
+import {
+  compareCoverage,
+  coverageConfirmLabel,
+  type CoverageLine,
+} from "../lib/extraWorkCoverage";
+import { describeExtraWorkRefusal } from "../lib/extraWorkRefusal";
+import type { ExtraWorkRefusal } from "../lib/extraWorkRefusal";
 import {
   createProposalLine,
   deleteProposalLine,
   fetchProposalPdf,
   transitionProposal,
   updateProposalLine,
-  type ProposalLineWritePayload,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
 import type { ExtraWorkUnitType, ProposalDetail, ProposalLine } from "../api/types";
 import { formatMoney } from "../lib/intl";
+import {
+  PRICING_ROW_BLOCKER_KEY,
+  PRICING_UNIT_LABEL_KEY,
+  PRICING_UNIT_OPTIONS,
+  emptyPricingRow,
+  pricingRowBlocker,
+  pricingRowEquals,
+  pricingRowFromLine,
+  pricingRowFromRequest,
+  pricingRowMoney,
+  pricingRowPayload,
+  type PricingRowDraft,
+} from "../lib/pricingRow";
+import { unitSuffix } from "../lib/unitLabel";
 import { CollapsibleCard } from "./CollapsibleCard";
+import { CoverageNotice } from "./extra-work/CoverageNotice";
 import { ConfirmDialog } from "./ConfirmDialog";
 import type { ConfirmDialogHandle } from "./ConfirmDialog";
 import { InvoiceLineRow, InvoiceLineTotalsRow } from "./InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "./invoiceLineColumns";
-import { NoteEditorDialog } from "./NoteEditorDialog";
+import { RejectReasonDialog } from "./RejectReasonDialog";
 
 // RF-14 — the live preview pane's visibility survives navigation within
 // a tab session (sessionStorage), so an operator who prefers the full-
 // width builder is not forced to re-hide the pane on every EW.
 const PREVIEW_OPEN_KEY = "ew-proposal-preview-open";
 
-const UNIT_TYPE_VALUES: ExtraWorkUnitType[] = [
-  "HOURS",
-  "SQUARE_METERS",
-  "FIXED",
-  "ITEM",
-  "OTHER",
-];
-const UNIT_TYPE_KEY: Record<ExtraWorkUnitType, string> = {
-  HOURS: "unit_type.hours",
-  SQUARE_METERS: "unit_type.square_meters",
-  FIXED: "unit_type.fixed",
-  ITEM: "unit_type.item",
-  OTHER: "unit_type.other",
-};
-
-// Banker's rounding (ROUND_HALF_EVEN) to 2dp — mirrors the backend
-// Decimal quantisation so the live editor boxes match the persisted
-// totals byte-for-byte. (Ported from the legacy ExtraWorkDetailPage
-// `round2`: scale by 100, snap exact halves to the nearest even, else
-// Math.round, then unscale.)
-function round2(n: number): number {
-  const scaled = n * 100;
-  const floor = Math.floor(scaled);
-  const frac = scaled - floor;
-  let rounded: number;
-  if (Math.abs(frac - 0.5) < 1e-9) {
-    // Exact half: round to the nearest even integer.
-    rounded = floor % 2 === 0 ? floor : floor + 1;
-  } else {
-    rounded = Math.round(scaled);
-  }
-  return rounded / 100;
-}
-
-// Display-only live subtotal / VAT / total for the editor row (the
-// persisted line's backend totals appear after Save reloads the
-// proposal). Empty / non-numeric inputs collapse to 0. The subtotal is
-// rounded FIRST, then VAT and total are derived from the rounded
-// subtotal — matching the backend's staged quantisation.
-function liveLineMoney(
-  quantity: string,
-  unitPrice: string,
-  vatPct: string,
-): { subtotal: number; vat: number; total: number } {
-  const q = Number(quantity);
-  const u = Number(unitPrice);
-  const v = Number(vatPct);
-  const qn = Number.isFinite(q) ? q : 0;
-  const un = Number.isFinite(u) ? u : 0;
-  const vn = Number.isFinite(v) ? v : 0;
-  const subtotal = round2(qn * un);
-  const vat = round2((subtotal * vn) / 100);
-  const total = round2(subtotal + vat);
-  return { subtotal, vat, total };
-}
-
-interface LineFormState {
-  description: string;
-  unit_type: ExtraWorkUnitType;
-  // #108 Part B — non-empty when the unit was entered via "Custom…"
-  // (unit_type is then OTHER on the wire). Cleared whenever a standard
-  // unit — including plain Other — is picked.
-  custom_unit_label: string;
-  quantity: string;
-  unit_price: string;
-  vat_pct: string;
-  customer_explanation: string;
-  internal_note: string;
-}
-
-// A money box: display-only, right-aligned, tabular numbers. Mirrors the
-// legacy composer's three live boxes (Subtotal / VAT / Total).
-function MoneyBox({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="field ew-line-field-money">
-      <span className="field-label">{label}</span>
-      <div
-        className="field-input"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {formatMoney(value)}
-      </div>
-    </div>
-  );
-}
-
-// #108 Part B — a modal-trigger box: a button styled as a field box
-// showing a filled-dot indicator + a one-line preview of the current
-// value (the placeholder when empty). Clicking opens the caller's
-// modal editor — there is no inline editing (Description is
-// strict-modal per owner; the two notes follow the same pattern).
-function ModalFieldBox({
-  label,
-  value,
-  placeholder,
-  onOpen,
-  disabled,
-  testId,
-}: {
+export interface RequestLineSeed {
+  id: number;
   label: string;
-  value: string;
-  placeholder: string;
-  onOpen: () => void;
-  disabled: boolean;
-  testId: string;
-}) {
-  const filled = value.trim() !== "";
-  return (
-    <div className="field">
-      <span className="field-label">{label}</span>
-      <button
-        type="button"
-        className="field-input ew-pricing-note-box"
-        onClick={onOpen}
-        disabled={disabled}
-        data-testid={testId}
-        data-filled={filled ? "true" : "false"}
-      >
-        <span
-          className={
-            filled ? "ew-note-dot ew-note-dot-filled" : "ew-note-dot"
-          }
-          aria-hidden
-        />
-        <span
-          className={
-            filled
-              ? "ew-pricing-note-box-text"
-              : "ew-pricing-note-box-text muted"
-          }
-        >
-          {filled ? value : placeholder}
-        </span>
-      </button>
-    </div>
-  );
-}
-
-// #108 Part B — the "Custom…" unit modal: a single-line, REQUIRED unit
-// name (max 50 chars, mirroring the backend column + the RF-2 rule on
-// the pricing page). Save is disabled until a non-blank name is typed.
-function CustomUnitDialog({
-  initialValue,
-  onSave,
-  onCancel,
-}: {
-  initialValue: string;
-  onSave: (value: string) => void;
-  onCancel: () => void;
-}) {
-  const { t } = useTranslation(["extra_work", "common"]);
-  const [value, setValue] = useState(initialValue);
-  const trimmed = value.trim();
-  return (
-    <div
-      className="reject-modal-backdrop"
-      data-testid="proposal-custom-unit-dialog"
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="reject-modal">
-        <h3 className="reject-modal-title">
-          {t("detail.custom_unit_modal_title")}
-        </h3>
-        <p className="reject-modal-desc">{t("detail.custom_unit_modal_desc")}</p>
-        <input
-          className="field-input"
-          type="text"
-          maxLength={50}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder={t("detail.custom_unit_placeholder")}
-          autoFocus
-          data-testid="proposal-custom-unit-input"
-        />
-        <div className="reject-modal-actions">
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={onCancel}
-            data-testid="proposal-custom-unit-cancel"
-          >
-            {t("detail.note_modal_cancel")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            disabled={trimmed === ""}
-            onClick={() => onSave(trimmed)}
-            data-testid="proposal-custom-unit-save"
-          >
-            {t("detail.note_modal_save")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Shared field cluster for the add-line form.
-//
-// #108 Part B — ONE fixed grid row (replaces the RF-19 two-row grid):
-// description (modal box) / unit / qty / unit price / VAT % / computed
-// subtotal-VAT-total / customer note (modal box) / internal note
-// (modal box) / actions. Description and both notes are strict-modal
-// (a compact trigger box with a filled-dot indicator + one-line
-// preview); the Unit dropdown carries a "Custom…" entry below Other
-// that opens a required unit-name modal. Cells compress via the grid
-// template as the builder column narrows (preview open vs collapsed) —
-// the row NEVER re-wraps, so nothing jumps when values change.
-function LineFields({
-  form,
-  setForm,
-  disabled,
-  showInternal,
-  actionsSlot,
-}: {
-  form: LineFormState;
-  setForm: (next: LineFormState) => void;
-  disabled: boolean;
-  showInternal: boolean;
-  actionsSlot?: ReactNode;
-}) {
-  const { t } = useTranslation(["extra_work", "common"]);
-  // Which modal (if any) is open for THIS line editor instance.
-  const [modal, setModal] = useState<
-    "description" | "customer" | "internal" | "custom_unit" | null
-  >(null);
-  const set = <K extends keyof LineFormState>(key: K, value: LineFormState[K]) =>
-    setForm({ ...form, [key]: value });
-  const money = liveLineMoney(form.quantity, form.unit_price, form.vat_pct);
-  // The select surfaces the stored custom unit name as its own option
-  // ("shown as the unit afterwards"); picking any standard unit —
-  // including plain Other — clears the custom name (mirrors the RF-2
-  // concrete-unit-forces-blank rule).
-  const hasCustomUnit = form.custom_unit_label.trim() !== "";
-  const unitValue = hasCustomUnit ? "__custom" : form.unit_type;
-  return (
-    <>
-    <div className="proposal-addline-row">
-      <ModalFieldBox
-        label={t("detail.pricing_form_description")}
-        value={form.description}
-        placeholder={t("detail.pricing_form_description_placeholder")}
-        onOpen={() => setModal("description")}
-        disabled={disabled}
-        testId="proposal-line-description-box"
-      />
-      <div className="field">
-        <span className="field-label">{t("detail.pricing_form_unit")}</span>
-        <select
-          className="field-select"
-          value={unitValue}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === "__custom_new") {
-              setModal("custom_unit");
-              return;
-            }
-            if (v === "__custom") return;
-            setForm({
-              ...form,
-              unit_type: v as ExtraWorkUnitType,
-              custom_unit_label: "",
-            });
-          }}
-          disabled={disabled}
-          data-testid="proposal-line-unit-select"
-        >
-          {UNIT_TYPE_VALUES.map((u) => (
-            <option key={u} value={u}>
-              {t(UNIT_TYPE_KEY[u])}
-            </option>
-          ))}
-          {hasCustomUnit && (
-            <option value="__custom">{form.custom_unit_label}</option>
-          )}
-          <option value="__custom_new">{t("detail.unit_custom_option")}</option>
-        </select>
-      </div>
-      <div className="field">
-        <span className="field-label">{t("detail.pricing_form_quantity")}</span>
-        <input
-          className="field-input"
-          type="number"
-          step="0.01"
-          min="0"
-          value={form.quantity}
-          onChange={(e) => set("quantity", e.target.value)}
-          disabled={disabled}
-        />
-      </div>
-      <div className="field">
-        <span className="field-label">{t("detail.pricing_form_unit_price")}</span>
-        <input
-          className="field-input"
-          type="number"
-          step="0.01"
-          min="0"
-          value={form.unit_price}
-          onChange={(e) => set("unit_price", e.target.value)}
-          disabled={disabled}
-        />
-      </div>
-      <div className="field">
-        <span className="field-label">{t("detail.pricing_form_vat")}</span>
-        <input
-          className="field-input"
-          type="number"
-          step="0.01"
-          min="0"
-          value={form.vat_pct}
-          onChange={(e) => set("vat_pct", e.target.value)}
-          disabled={disabled}
-        />
-      </div>
-      <MoneyBox label={t("detail.pricing_column_subtotal")} value={money.subtotal} />
-      <MoneyBox label={t("detail.pricing_column_vat")} value={money.vat} />
-      <MoneyBox label={t("detail.pricing_column_total")} value={money.total} />
-      <ModalFieldBox
-        label={t("detail.pricing_customer_note_button")}
-        value={form.customer_explanation}
-        placeholder={t("detail.pricing_form_customer_note_placeholder")}
-        onOpen={() => setModal("customer")}
-        disabled={disabled}
-        testId="proposal-line-customer-note-box"
-      />
-      {showInternal && (
-        <ModalFieldBox
-          label={t("detail.pricing_internal_note_button")}
-          value={form.internal_note}
-          placeholder={t("detail.pricing_form_internal_note_placeholder")}
-          onOpen={() => setModal("internal")}
-          disabled={disabled}
-          testId="proposal-line-internal-note-box"
-        />
-      )}
-      {actionsSlot}
-    </div>
-      {modal === "description" && (
-        <NoteEditorDialog
-          title={t("detail.pricing_form_description")}
-          initialValue={form.description}
-          placeholder={t("detail.pricing_form_description_placeholder")}
-          saveLabel={t("detail.note_modal_save")}
-          cancelLabel={t("detail.note_modal_cancel")}
-          onSave={(value) => {
-            set("description", value);
-            setModal(null);
-          }}
-          onCancel={() => setModal(null)}
-          testId="proposal-line-description-dialog"
-        />
-      )}
-      {modal === "customer" && (
-        <NoteEditorDialog
-          title={t("detail.pricing_customer_note_modal_title")}
-          initialValue={form.customer_explanation}
-          placeholder={t("detail.pricing_form_customer_note_placeholder")}
-          saveLabel={t("detail.note_modal_save")}
-          cancelLabel={t("detail.note_modal_cancel")}
-          onSave={(value) => {
-            set("customer_explanation", value);
-            setModal(null);
-          }}
-          onCancel={() => setModal(null)}
-          testId="proposal-line-customer-note-dialog"
-        />
-      )}
-      {showInternal && modal === "internal" && (
-        <NoteEditorDialog
-          title={t("detail.pricing_internal_note_modal_title")}
-          initialValue={form.internal_note}
-          placeholder={t("detail.pricing_form_internal_note_placeholder")}
-          saveLabel={t("detail.note_modal_save")}
-          cancelLabel={t("detail.note_modal_cancel")}
-          onSave={(value) => {
-            set("internal_note", value);
-            setModal(null);
-          }}
-          onCancel={() => setModal(null)}
-          testId="proposal-line-internal-note-dialog"
-        />
-      )}
-      {modal === "custom_unit" && (
-        <CustomUnitDialog
-          initialValue={form.custom_unit_label}
-          onSave={(name) => {
-            setForm({ ...form, unit_type: "OTHER", custom_unit_label: name });
-            setModal(null);
-          }}
-          onCancel={() => setModal(null)}
-        />
-      )}
-    </>
-  );
-}
-
-function payloadFromForm(
-  form: LineFormState,
-  showInternal: boolean,
-): ProposalLineWritePayload {
-  return {
-    description: form.description.trim(),
-    unit_type: form.unit_type,
-    // Only meaningful for OTHER (the backend forces it blank for any
-    // concrete unit type anyway — RF-2 mirror).
-    custom_unit_label:
-      form.unit_type === "OTHER" ? form.custom_unit_label.trim() : "",
-    quantity: form.quantity,
-    unit_price: form.unit_price,
-    vat_pct: form.vat_pct,
-    customer_explanation: form.customer_explanation,
-    ...(showInternal ? { internal_note: form.internal_note } : {}),
-  };
-}
-
-const EMPTY_LINE_FORM: LineFormState = {
-  description: "",
-  unit_type: "FIXED",
-  custom_unit_label: "",
-  quantity: "1.00",
-  unit_price: "0.00",
-  vat_pct: "21.00",
-  customer_explanation: "",
-  internal_note: "",
-};
-
-/** Sprint 187 §2c — a SAVED line's values, back in the composer's shape.
- *
- *  `unit_type` is `OTHER` on the wire whenever the operator typed a
- *  custom unit, so the round trip has to put the label back in
- *  `custom_unit_label` — otherwise reopening a "per pallet" line and
- *  pressing Save would silently rewrite it to a bare "Other". */
-function formFromLine(line: ProposalLine): LineFormState {
-  return {
-    description: line.description ?? "",
-    unit_type: line.unit_type,
-    custom_unit_label: line.custom_unit_label ?? "",
-    quantity: String(line.quantity),
-    unit_price: String(line.unit_price),
-    vat_pct: String(line.vat_pct),
-    customer_explanation: line.customer_explanation ?? "",
-    internal_note: line.internal_note ?? "",
-  };
+  quantity: string;
+  unit_type: ExtraWorkUnitType;
+  /** The catalog service behind the line, or null for a free-text one. */
+  service: number | null;
+  /** The customer's note on the line, shown under its name. */
+  note?: string;
 }
 
 /**
- * The composer, used for BOTH add and edit.
+ * P-10 B4 — ONE ROW OF THE PRICING TABLE, IN EDIT MODE.
  *
- * Sprint 187 §2c — `PATCH .../lines/<id>/` and its typed client wrapper
- * `updateProposalLine` have both existed since the endpoint shipped, with
- * ZERO importers: the builder was add/delete only, so correcting one
- * price meant deleting the line and retyping every field of it. Edit is
- * wired now, and it reuses this component rather than growing a second
- * form — one set of fields, one validation rule, one place a unit-type
- * change has to be handled.
+ * The owner: edits happen in the row, and nothing saves itself. "Edit"
+ * on a line turns THAT row into inputs — description (custom lines
+ * only), quantity, unit (the catalogue's list plus "other", the one
+ * door to a unit word of the operator's own), unit price, VAT — with
+ * Save · Cancel in its actions cell; the notes sit in a second row under
+ * it while editing. The same row prices a requested line the quote does
+ * not cover yet (P-9 C3: pre-filled with what the customer asked for, so
+ * the operator sees what will change before it changes; Save appears
+ * once something is typed) and adds a new line (an empty row at the foot
+ * of the table). Save is refused with its reason beside it while the
+ * server would refuse it (§D.6 rule 14); the rules are `lib/pricingRow`'s.
  */
-function ProposalLineComposer({
-  disabled,
+function PricingRowEditor({
+  rowKey,
   initial,
-  submitLabel,
-  testIdPrefix,
-  onSubmit,
+  customLine,
+  label,
+  note,
+  sourceTag,
+  showNotes,
+  showInternal,
+  busy,
+  saveWhenChangedOnly = false,
+  focusPrice = false,
+  autoFocus = null,
+  priceAria,
+  priceTestId,
+  rowTestId,
+  onSave,
   onCancel,
+  extraActions,
 }: {
-  disabled: boolean;
-  initial: LineFormState;
-  submitLabel: string;
-  testIdPrefix: string;
-  onSubmit: (payload: ProposalLineWritePayload) => void;
+  /** The row in every testid: a line id, `request-<id>` or `new`. */
+  rowKey: string;
+  initial: PricingRowDraft;
+  /** A line without a catalogue service: its description is typed here. */
+  customLine: boolean;
+  /** The catalogue service's name, when the description is not typed. */
+  label: string | null;
+  /** The customer's note on a requested line, under the name. */
+  note?: string;
+  sourceTag: ReactNode;
+  /** The notes row under the line: the customer note, and the internal
+   *  note of a custom line on a provider read. */
+  showNotes: boolean;
+  showInternal: boolean;
+  busy: boolean;
+  /** An unpriced request row: Save · Cancel only once something is typed. */
+  saveWhenChangedOnly?: boolean;
+  /** The coverage notice's "Add a price for X" lands on the price box. */
+  focusPrice?: boolean;
+  autoFocus?: "description" | "unit_price" | null;
+  priceAria?: string;
+  priceTestId?: string;
+  rowTestId: string;
+  onSave: (draft: PricingRowDraft) => void;
   onCancel: () => void;
+  /** Rendered after Save · Cancel ("Leave it out" on a request row). */
+  extraActions?: ReactNode;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
-  const [form, setForm] = useState<LineFormState>(initial);
+  const [draft, setDraft] = useState<PricingRowDraft>(initial);
+  const priceRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLInputElement>(null);
+  const set = <K extends keyof PricingRowDraft>(key: K, value: PricingRowDraft[K]) =>
+    setDraft((current) => ({ ...current, [key]: value }));
+  const changed = !pricingRowEquals(draft, initial);
+  const blocker = pricingRowBlocker(draft, { customLine });
+  const showSave = !saveWhenChangedOnly || changed;
+  const canSave = blocker === null && !busy;
+  const money = pricingRowMoney(draft);
+  const whyId = `pricing-row-why-${rowKey}`;
+  useEffect(() => {
+    if (autoFocus === "description") descriptionRef.current?.focus();
+    else if (autoFocus === "unit_price") priceRef.current?.focus();
+  }, [autoFocus]);
+  useEffect(() => {
+    if (!focusPrice) return;
+    priceRef.current?.focus();
+    priceRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focusPrice]);
+  const save = () => {
+    if (canSave) onSave(draft);
+  };
+  const cancel = () => {
+    setDraft(initial);
+    onCancel();
+  };
+  // Enter in a box saves (never in the select — Enter opens it); Escape
+  // cancels. Both stay inside the row: nothing submits a form.
+  const onKeyDown = (event: KeyboardEvent<HTMLTableRowElement>) => {
+    if (event.key === "Enter" && (event.target as HTMLElement).tagName === "INPUT") {
+      event.preventDefault();
+      save();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancel();
+    }
+  };
+  const showWhy = showSave && blocker !== null;
   return (
-    <div
-      className="ew-line-row-card proposal-addline"
-      data-testid={`${testIdPrefix}-form`}
-      style={{ marginTop: 12 }}
-    >
-      <LineFields
-        form={form}
-        setForm={setForm}
-        disabled={disabled}
-        showInternal
-        actionsSlot={
-          // #109 Part E — the pre-#108 LABELED buttons restored (owner
-          // point 1): the preview now lives BELOW the composer, so the
-          // single row has the full card width and the labels fit.
-          <div className="proposal-addline-actions">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              disabled={disabled || !form.description.trim()}
-              onClick={() => onSubmit(payloadFromForm(form, true))}
-              data-testid={`${testIdPrefix}-submit`}
-            >
-              {submitLabel}
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              disabled={disabled}
-              onClick={onCancel}
-            >
-              {t("common:cancel")}
-            </button>
+    <>
+      <tr
+        className="invoice-line-row pricing-row-editing"
+        data-testid={rowTestId}
+        data-row-key={rowKey}
+        onKeyDown={onKeyDown}
+      >
+        <td className="invoice-line-row-service">
+          {customLine ? (
+            <input
+              ref={descriptionRef}
+              className="field-input pricing-row-input"
+              type="text"
+              value={draft.description}
+              onChange={(event) => set("description", event.target.value)}
+              placeholder={t("detail.pricing_form_description_placeholder")}
+              aria-label={t("detail.pricing_form_description")}
+              disabled={busy}
+              data-testid={`pricing-row-description-${rowKey}`}
+            />
+          ) : (
+            <div className="invoice-line-row-service-label">{label}</div>
+          )}
+          {note && (
+            <div className="invoice-line-row-service-sub">
+              <span className="muted small">{note}</span>
+            </div>
+          )}
+        </td>
+        <td className="invoice-line-row-source">{sourceTag}</td>
+        <td className="invoice-line-row-num invoice-line-row-qty">
+          <input
+            className="field-input pricing-row-input pricing-row-num"
+            type="number"
+            min="0"
+            step="0.01"
+            inputMode="decimal"
+            value={draft.quantity}
+            onChange={(event) => set("quantity", event.target.value)}
+            aria-label={t("detail.pricing_form_quantity")}
+            disabled={busy}
+            data-testid={`pricing-row-quantity-${rowKey}`}
+          />
+        </td>
+        <td className="invoice-line-row-unit">
+          <select
+            className="field-select pricing-row-input"
+            value={draft.unit_type}
+            onChange={(event) => {
+              const next = event.target.value as ExtraWorkUnitType;
+              // A concrete unit has no unit word; the word survives
+              // only behind "other" (RF-2, the backend's own rule).
+              setDraft((current) => ({
+                ...current,
+                unit_type: next,
+                custom_unit_label: next === "OTHER" ? current.custom_unit_label : "",
+              }));
+            }}
+            aria-label={t("detail.pricing_form_unit")}
+            disabled={busy}
+            data-testid={`pricing-row-unit-${rowKey}`}
+          >
+            {PRICING_UNIT_OPTIONS.map((unit) => (
+              <option key={unit} value={unit}>
+                {t(PRICING_UNIT_LABEL_KEY[unit])}
+              </option>
+            ))}
+          </select>
+          {draft.unit_type === "OTHER" && (
+            <input
+              className="field-input pricing-row-input pricing-row-unit-name"
+              type="text"
+              maxLength={50}
+              value={draft.custom_unit_label}
+              onChange={(event) => set("custom_unit_label", event.target.value)}
+              placeholder={t("detail.custom_unit_placeholder")}
+              aria-label={t("pricing_row.unit_name")}
+              disabled={busy}
+              data-testid={`pricing-row-unit-name-${rowKey}`}
+            />
+          )}
+        </td>
+        <td className="invoice-line-row-num invoice-line-row-money">
+          <input
+            ref={priceRef}
+            className="field-input pricing-row-input pricing-row-num"
+            type="number"
+            min="0"
+            step="0.01"
+            inputMode="decimal"
+            value={draft.unit_price}
+            onChange={(event) => set("unit_price", event.target.value)}
+            aria-label={priceAria ?? t("detail.pricing_form_unit_price")}
+            disabled={busy}
+            data-testid={priceTestId ?? `pricing-row-price-${rowKey}`}
+          />
+        </td>
+        <td className="invoice-line-row-num invoice-line-row-vat-pct">
+          <input
+            className="field-input pricing-row-input pricing-row-num"
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            inputMode="decimal"
+            value={draft.vat_pct}
+            onChange={(event) => set("vat_pct", event.target.value)}
+            aria-label={t("detail.pricing_form_vat")}
+            disabled={busy}
+            data-testid={`pricing-row-vat-${rowKey}`}
+          />
+        </td>
+        {/* Live, display-only: the totals line updates on Save. */}
+        <td className="invoice-line-row-num invoice-line-row-money pricing-row-money">
+          {money ? formatMoney(money.subtotal) : "—"}
+        </td>
+        <td className="invoice-line-row-num invoice-line-row-money pricing-row-money">
+          {money ? formatMoney(money.vat) : "—"}
+        </td>
+        <td
+          className="invoice-line-row-num invoice-line-row-money invoice-line-row-total pricing-row-money"
+          data-testid={`pricing-row-total-${rowKey}`}
+        >
+          {money ? formatMoney(money.total) : "—"}
+        </td>
+        <td className="invoice-line-row-actions">
+          <div className="invoice-line-row-actions-cluster pricing-row-actions">
+            {showSave && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={!canSave}
+                  aria-describedby={showWhy ? whyId : undefined}
+                  onClick={save}
+                  data-testid={`pricing-row-save-${rowKey}`}
+                >
+                  {t("common:save")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={busy}
+                  onClick={cancel}
+                  data-testid={`pricing-row-cancel-${rowKey}`}
+                >
+                  {t("common:cancel")}
+                </button>
+              </>
+            )}
+            {extraActions}
           </div>
-        }
-      />
-    </div>
+        </td>
+      </tr>
+      {(showNotes || showWhy) && (
+        <tr className="pricing-row-notes" data-testid={`pricing-row-notes-${rowKey}`}>
+          <td colSpan={INVOICE_LINE_COLUMN_KEYS.length}>
+            <div className="pricing-row-notes-body">
+              {showNotes && (
+                <label className="pricing-row-note">
+                  <span className="field-label">{t("detail.pricing_customer_note_button")}</span>
+                  <input
+                    className="field-input pricing-row-input"
+                    type="text"
+                    value={draft.customer_explanation}
+                    onChange={(event) => set("customer_explanation", event.target.value)}
+                    placeholder={t("detail.pricing_form_customer_note_placeholder")}
+                    disabled={busy}
+                    data-testid={`pricing-row-customer-note-${rowKey}`}
+                  />
+                </label>
+              )}
+              {showNotes && showInternal && customLine && (
+                <label className="pricing-row-note">
+                  <span className="field-label">{t("detail.pricing_internal_note_button")}</span>
+                  <input
+                    className="field-input pricing-row-input"
+                    type="text"
+                    value={draft.internal_note}
+                    onChange={(event) => set("internal_note", event.target.value)}
+                    placeholder={t("detail.pricing_form_internal_note_placeholder")}
+                    disabled={busy}
+                    data-testid={`pricing-row-internal-note-${rowKey}`}
+                  />
+                </label>
+              )}
+              {showWhy && (
+                /* Rule 14 — the reason Save is refused, beside it. */
+                <p
+                  id={whyId}
+                  className="pricing-row-why"
+                  role="status"
+                  data-testid={`pricing-row-why-${rowKey}`}
+                >
+                  {t(PRICING_ROW_BLOCKER_KEY[blocker])}
+                </p>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -683,6 +514,10 @@ export function ProposalBuilder({
   proposal,
   onChanged,
   parentAdvanceBlocked = false,
+  noCustomerApproval = false,
+  requestLines,
+  customerName = null,
+  onOpenPlan,
 }: {
   ewId: number | string;
   proposal: ProposalDetail;
@@ -692,11 +527,68 @@ export function ProposalBuilder({
   // available yet" line, which is true but useless: the operator cannot
   // tell that ONE click on the workflow card above fixes it.
   parentAdvanceBlocked?: boolean;
+  /** W-FIX4 §2 — the parent request has NO customer-approval step
+   *  (DIRECT_AGREED_PRICE_ORDER / AUTO_START_AFTER_PRICING). On those
+   *  routes every visible string loses "proposal" / "send to customer":
+   *  the SAME send action reads "Start the work", because for this
+   *  request that is literally what SEND does (DRAFT→SENT
+   *  auto-approves and spawns — `proposal_state_machine.py:667`).
+   *  MECHANICS UNTOUCHED: same handler, same endpoint, same statuses.
+   *  The page owns the predicate; this component only words itself. */
+  noCustomerApproval?: boolean;
+  /** W-FIX1 A3, P-9 C3 — the request's own lines. Every one the quote
+   *  does not cover renders in the Pricing table as an unpriced row;
+   *  the send / start / approve confirms say what the price covers. */
+  requestLines?: RequestLineSeed[];
+  /** P-8R A4 — who the price goes to; the send confirm names them. */
+  customerName?: string | null;
+  /** P-8R A3 — a `plan_requirements_unmet` refusal offers "Complete the
+   *  plan"; the page owns the plan modal, so it opens it (at the first
+   *  gap the server named). */
+  onOpenPlan?: (unmet: string[]) => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [addOpen, setAddOpen] = useState(false);
+  // P-8R A3 — the refusal's kind rides with the sentence so the render
+  // site can offer its door; the sentence scrolls into view at the
+  // action buttons it belongs to.
+  const [refusal, setRefusal] = useState<ExtraWorkRefusal | null>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [error]);
+  // P-8R A4 — sending a price asks once, showing the lines and the total.
+  const sendDialogRef = useRef<ConfirmDialogHandle>(null);
+  /* P-9 C3/C4 — what the customer asked for against what the quote
+     prices. The comparison is `lib/extraWorkCoverage`'s; the unpriced
+     rows are the cart lines it finds uncovered, minus the ones the
+     operator chose to leave out (local — nothing is sent). */
+  const cartCoverageLines: CoverageLine[] = (requestLines ?? []).map((line) => ({
+    id: line.id,
+    service: line.service,
+    label: line.label,
+    quantity: line.quantity,
+    unit: unitSuffix({ type: line.unit_type, label: "" }, t),
+  }));
+  const quoteCoverageLines: CoverageLine[] = proposal.lines.map((line) => ({
+    id: line.id,
+    service: line.service,
+    label: (line.service_name || line.description || "").trim(),
+    quantity: line.quantity,
+  }));
+  const coverage = requestLines
+    ? compareCoverage(cartCoverageLines, quoteCoverageLines)
+    : null;
+  const [leftOut, setLeftOut] = useState<ReadonlySet<number>>(() => new Set());
+  const [focusUnpriced, setFocusUnpriced] = useState<number | null>(null);
+  const unpricedRows: RequestLineSeed[] = (coverage?.uncovered ?? [])
+    .map((line) => (requestLines ?? []).find((r) => r.id === line.id))
+    .filter((line): line is RequestLineSeed => line !== undefined)
+    .filter((line) => !leftOut.has(line.id));
+  const hasContractLine = proposal.lines.some(
+    (line) => line.price_source === "CONTRACT",
+  );
   // Provider override-decision modal (SENT proposal). A customer decides
   // without a reason; a PROVIDER driving the customer decision is an
   // override and the backend coerces is_override + REQUIRES a non-blank
@@ -704,11 +596,11 @@ export function ProposalBuilder({
   const [overridePrompt, setOverridePrompt] = useState<
     "CUSTOMER_APPROVED" | "CUSTOMER_REJECTED" | null
   >(null);
-  const [overrideReason, setOverrideReason] = useState("");
-  // Sprint 187 §2c — the id of the saved line currently open for edit,
-  // or null. One at a time: two open editors on the same table is two
+  // Sprint 187 §2c / P-10 B4 — the row open for edit: a saved line's
+  // id, "new" for the line being added at the foot of the table, or
+  // null. One at a time: two open editors on the same table is two
   // sources of truth for a row.
-  const [editingLineId, setEditingLineId] = useState<number | null>(null);
+  const [editingLineId, setEditingLineId] = useState<number | "new" | null>(null);
   // Sprint 187 §2b — discard a DRAFT / withdraw a SENT quote.
   // Rendered UNCONDITIONALLY and driven through the ref (CLAUDE.md §3):
   // wrapping a native <dialog> in `{cond && ...}` mounts an invisible
@@ -762,7 +654,9 @@ export function ProposalBuilder({
       // signal to refresh the live PDF preview.
       setPreviewNonce((n) => n + 1);
     } catch (err) {
-      setError(getApiError(err));
+      const described = describeExtraWorkRefusal(err, t);
+      setError(described.sentence);
+      setRefusal(described);
     } finally {
       setBusy(false);
     }
@@ -778,19 +672,76 @@ export function ProposalBuilder({
       // vanishes with no way back except reloading the page.
       setEditingLineId((current) => (current === lineId ? null : current));
     });
-  const addLine = (payload: ProposalLineWritePayload) =>
+  // P-10 B4 — a new line is the row at the foot of the table; Save
+  // creates it, and only Save.
+  const addLine = (draft: PricingRowDraft) =>
     void run(async () => {
-      await createProposalLine(ewId, proposal.id, payload);
-      setAddOpen(false);
+      await createProposalLine(
+        ewId,
+        proposal.id,
+        pricingRowPayload(draft, { includeInternal: isProvider }),
+      );
+      setEditingLineId(null);
     });
+  // P-9 C3 / P-10 B4 — pricing an unpriced row creates the quote line
+  // from the request's own words, with the quantity and unit as the
+  // operator left them, through the SAME call "Add line" makes — on
+  // Save, never on a keystroke.
+  const priceRequestLine = (line: RequestLineSeed, draft: PricingRowDraft) =>
+    void run(async () => {
+      await createProposalLine(
+        ewId,
+        proposal.id,
+        pricingRowPayload(draft, { service: line.service, includeInternal: isProvider }),
+      );
+      setFocusUnpriced((current) => (current === line.id ? null : current));
+    });
+  const leaveOut = (lineId: number) =>
+    setLeftOut((prev) => new Set([...prev, lineId]));
+  // The coverage notice's door: close the confirm, put the row back if
+  // it was left out, and land on its price box (the focus itself runs
+  // in the row's effect — a focus in the handler that closes a
+  // <dialog> does nothing).
+  const addPriceFor = (line: CoverageLine) => {
+    sendDialogRef.current?.close();
+    setLeftOut((prev) => {
+      if (!prev.has(line.id)) return prev;
+      const next = new Set(prev);
+      next.delete(line.id);
+      return next;
+    });
+    setFocusUnpriced(line.id);
+  };
   // Sprint 187 §2c — the PATCH that had no caller. Same `run()` helper
   // as every other mutation here, so it gets the same refetch and the
   // same live-preview refresh rather than a second refresh path.
-  const saveLine = (lineId: number, payload: ProposalLineWritePayload) =>
+  const saveLine = (line: ProposalLine, draft: PricingRowDraft) =>
     void run(async () => {
-      await updateProposalLine(ewId, proposal.id, lineId, payload);
+      await updateProposalLine(
+        ewId,
+        proposal.id,
+        line.id,
+        pricingRowPayload(draft, { includeInternal: isProvider }),
+      );
       setEditingLineId(null);
     });
+  // The Source cell of a row in edit mode — the same tag the read-only
+  // row shows (InvoiceLineRow's rule, restated for the three cases a
+  // row editor has: a saved line, a requested line, a new line).
+  const sourceTag = (source: string, labelKey: string) => (
+    <span
+      className={`invoice-line-row-source-tag invoice-line-row-source-${source}`}
+      data-testid="invoice-line-row-source-tag"
+    >
+      {t(labelKey)}
+    </span>
+  );
+  const lineSourceTag = (line: ProposalLine) =>
+    line.price_source === "CONTRACT"
+      ? sourceTag("contract", "invoice_row.source.contract_price")
+      : Number.parseFloat(line.unit_price) > 0
+        ? sourceTag("custom", "invoice_row.source.own_price")
+        : sourceTag("custom", "invoice_row.source.needs_proposal");
   // Sprint 187 §2b — discard (DRAFT) / withdraw (SENT). The reason is
   // sent ONLY on the SENT leg: the backend coerces `is_override` there
   // and 400s `override_reason_required` without one, while the DRAFT leg
@@ -806,13 +757,40 @@ export function ProposalBuilder({
       cancelDialogRef.current?.close();
       setCancelReason("");
     });
-  const send = () =>
-    void run(() => transitionProposal(ewId, proposal.id, { to_status: "SENT" }));
+  // P-8R A4 — Send asks first (the lines, the total, the customer);
+  // the confirm runs the same transition it always did.
+  const send = () => {
+    setError("");
+    sendDialogRef.current?.open();
+  };
+  const confirmSend = () =>
+    void run(async () => {
+      await transitionProposal(ewId, proposal.id, { to_status: "SENT" });
+      sendDialogRef.current?.close();
+      // P-12 F2 (§D.24 rule 4) — the ceremony ANSWERS: what happened,
+      // what did not, and the next step. Written to the request's
+      // banner slot; when the send auto-starts and the page redirects
+      // to the spawned ticket, the detail page relays it there.
+      announceDone(
+        safeSessionStorage(),
+        `ew-${ewId}`,
+        noCustomerApproval
+          ? {
+              title: t("extra_work:proposal.banner_started_title"),
+              body: t("extra_work:proposal.banner_started_body"),
+            }
+          : {
+              title: t("extra_work:proposal.banner_sent_title"),
+              body: t("extra_work:proposal.banner_sent_body"),
+              actionLabel: t("extra_work:proposal.banner_sent_action"),
+              actionTo: "/extra-work/with-customer",
+            },
+      );
+    });
   const approve = () => {
     if (isProvider) {
       // Provider approval of a SENT proposal is an override — collect the
       // mandatory reason before firing the transition.
-      setOverrideReason("");
       setOverridePrompt("CUSTOMER_APPROVED");
       return;
     }
@@ -822,7 +800,6 @@ export function ProposalBuilder({
   };
   const reject = () => {
     if (isProvider) {
-      setOverrideReason("");
       setOverridePrompt("CUSTOMER_REJECTED");
       return;
     }
@@ -830,17 +807,18 @@ export function ProposalBuilder({
       transitionProposal(ewId, proposal.id, { to_status: "CUSTOMER_REJECTED" }),
     );
   };
-  const submitOverride = () => {
+  const submitOverride = (reason: string) => {
     const to = overridePrompt;
-    if (to === null || overrideReason.trim() === "") return;
+    if (to === null || reason.trim() === "") return;
+    // The modal closes on confirm; a refusal lands under the decision
+    // buttons (the acting control), scrolled into view.
+    setOverridePrompt(null);
     void run(async () => {
       await transitionProposal(ewId, proposal.id, {
         to_status: to,
         is_override: true,
-        override_reason: overrideReason.trim(),
+        override_reason: reason.trim(),
       });
-      setOverridePrompt(null);
-      setOverrideReason("");
     });
   };
 
@@ -875,7 +853,11 @@ export function ProposalBuilder({
 
   return (
     <CollapsibleCard
-      title={t("detail.proposal_builder_title")}
+      title={t(
+        noCustomerApproval
+          ? "detail.proposal_builder_title_start"
+          : "detail.proposal_builder_title",
+      )}
       meta={
         <>
           {t("detail.card_lines_count", { count: proposal.lines.length })}
@@ -912,22 +894,43 @@ export function ProposalBuilder({
             </button>
           </div>
         )}
-        <p className="muted small" style={{ marginTop: 0 }}>
-          {t("detail.proposal_builder_helper")}
-        </p>
-        {error && (
-          <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
-            {error}
-          </div>
+        {/* W-UX F16 -- the "set a price" instruction is only true while
+            the lines can still be edited. P-9 C7 -- and each sentence
+            only while what it names is on the table: "contract prices
+            are filled in" when a contract line is, "give the other
+            lines a price" when an unpriced row is. */}
+        {canEdit && (hasContractLine || unpricedRows.length > 0) && (
+          <p
+            className="muted small"
+            style={{ marginTop: 0 }}
+            data-testid="extra-work-proposal-helper"
+          >
+            {[
+              hasContractLine ? t("detail.proposal_builder_helper_contract") : null,
+              unpricedRows.length > 0
+                ? t("detail.proposal_builder_helper_unpriced")
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          </p>
         )}
-
-        {/* Saved proposal lines render read-only in the same table layout
-            as the cart's "Requested services" (InvoiceLineRow). When the
-            viewer can edit, each row carries a Remove action — there is no
-            inline edit; a line is changed by removing it and re-adding it
-            through the composer below (legacy composer behavior). */}
-        {proposal.lines.length === 0 ? (
-          <p className="muted small">{t("detail.proposal_builder_empty")}</p>
+        {/* P-10 B4 — THE PRICING TABLE. Saved lines render read-only
+            (InvoiceLineRow); Edit turns that row into inputs in place;
+            every requested line the quote does not cover yet is such a
+            row from the start, pre-filled with what the customer asked
+            for (P-9 C3); a new line is a row at the foot. One row edits
+            at a time. */}
+        {proposal.lines.length === 0 &&
+        unpricedRows.length === 0 &&
+        editingLineId !== "new" ? (
+          <p className="muted small">
+            {t(
+              noCustomerApproval
+                ? "detail.proposal_builder_empty_start"
+                : "detail.proposal_builder_empty",
+            )}
+          </p>
         ) : (
           <div className="ew-table-scroll">
             <table className="data-table ew-pricing-table">
@@ -939,23 +942,92 @@ export function ProposalBuilder({
                 </tr>
               </thead>
               <tbody>
-                {proposal.lines.map((line) => (
-                  <InvoiceLineRow
-                    key={line.id}
-                    lineKind="proposal"
-                    line={line}
-                    editable={canEdit}
-                    onRemove={canEdit ? () => removeLine(line.id) : undefined}
-                    // Sprint 187 §2c — `InvoiceLineRow` has rendered an
-                    // Edit button whenever `onEdit` is passed since it
-                    // was written; the builder simply never passed one.
-                    onEdit={
-                      canEdit ? () => setEditingLineId(line.id) : undefined
-                    }
-                    rowTestId="extra-work-proposal-line-row"
-                    subLabel={renderNoteSub(line)}
+                {proposal.lines.map((line) =>
+                  canEdit && editingLineId === line.id ? (
+                    <PricingRowEditor
+                      key={line.id}
+                      rowKey={String(line.id)}
+                      initial={pricingRowFromLine(line)}
+                      customLine={line.service === null}
+                      label={(line.service_name || line.description || "").trim() || "—"}
+                      sourceTag={lineSourceTag(line)}
+                      showNotes
+                      showInternal={isProvider}
+                      busy={busy}
+                      autoFocus="unit_price"
+                      rowTestId="extra-work-proposal-line-editing"
+                      onSave={(draft) => saveLine(line, draft)}
+                      onCancel={() => setEditingLineId(null)}
+                    />
+                  ) : (
+                    <InvoiceLineRow
+                      key={line.id}
+                      lineKind="proposal"
+                      line={line}
+                      editable={canEdit}
+                      onRemove={canEdit ? () => removeLine(line.id) : undefined}
+                      onEdit={canEdit ? () => setEditingLineId(line.id) : undefined}
+                      editTestId={`pricing-row-edit-${line.id}`}
+                      rowTestId="extra-work-proposal-line-row"
+                      subLabel={renderNoteSub(line)}
+                      audience={isProvider ? "provider" : "customer"}
+                    />
+                  ),
+                )}
+                {/* P-9 C3 — every requested line is on the table. */}
+                {canEdit &&
+                  unpricedRows.map((line) => (
+                    <PricingRowEditor
+                      key={`request-${line.id}`}
+                      rowKey={`request-${line.id}`}
+                      initial={pricingRowFromRequest(line)}
+                      customLine={line.service === null}
+                      label={line.label}
+                      note={line.note}
+                      sourceTag={sourceTag(
+                        "needs_proposal",
+                        "invoice_row.source.needs_proposal",
+                      )}
+                      showNotes={false}
+                      showInternal={isProvider}
+                      busy={busy}
+                      saveWhenChangedOnly
+                      focusPrice={focusUnpriced === line.id}
+                      priceAria={t("detail.pricing_unpriced_price_aria", { line: line.label })}
+                      priceTestId={`extra-work-proposal-unpriced-price-${line.id}`}
+                      rowTestId="extra-work-proposal-unpriced-row"
+                      onSave={(draft) => priceRequestLine(line, draft)}
+                      onCancel={() => undefined}
+                      extraActions={
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={busy}
+                          onClick={() => leaveOut(line.id)}
+                          data-testid={`extra-work-proposal-unpriced-leave-out-${line.id}`}
+                        >
+                          {t("detail.pricing_leave_out")}
+                        </button>
+                      }
+                    />
+                  ))}
+                {canEdit && editingLineId === "new" && (
+                  <PricingRowEditor
+                    key="new"
+                    rowKey="new"
+                    initial={emptyPricingRow()}
+                    customLine
+                    label={null}
+                    sourceTag={sourceTag("custom", "invoice_row.source.own_price")}
+                    showNotes
+                    showInternal={isProvider}
+                    busy={busy}
+                    autoFocus="description"
+                    rowTestId="extra-work-proposal-new-row"
+                    onSave={addLine}
+                    onCancel={() => setEditingLineId(null)}
                   />
-                ))}
+                )}
                 <InvoiceLineTotalsRow
                   subtotal={proposal.subtotal_amount}
                   vatAmount={proposal.vat_amount}
@@ -966,59 +1038,24 @@ export function ProposalBuilder({
           </div>
         )}
 
-        {/* Sprint 187 §2c — the edit composer for ONE saved line, opened
-            from that line's Edit button. Keyed by line id so switching
-            rows re-seeds the form rather than carrying the previous
-            line's values into the next one. */}
-        {canEdit && editingLineId !== null && (
-          <div className="ew-pricing-add-form">
-            {(() => {
-              const line = proposal.lines.find((l) => l.id === editingLineId);
-              if (!line) return null;
-              return (
-                <ProposalLineComposer
-                  key={line.id}
-                  disabled={busy}
-                  initial={formFromLine(line)}
-                  submitLabel={t("common:save")}
-                  testIdPrefix="proposal-edit-line"
-                  onSubmit={(payload) => saveLine(line.id, payload)}
-                  onCancel={() => setEditingLineId(null)}
-                />
-              );
-            })()}
-          </div>
-        )}
-
-        {/* Add-line composer. Live per-line Subtotal / VAT / Total + the
-            note modals live in here; on save the line drops into the
-            read-only table above. */}
+        {/* P-10 B4 — a new line is a row at the foot of the table (the
+            editor-below-the-table is gone); this button only opens it,
+            and only while no other row is being edited. */}
         {canEdit && editingLineId === null && (
           <div className="ew-pricing-add-form">
-            {addOpen ? (
-              <ProposalLineComposer
-                disabled={busy}
-                initial={EMPTY_LINE_FORM}
-                submitLabel={t("detail.proposal_add_line")}
-                testIdPrefix="proposal-add-line"
-                onSubmit={addLine}
-                onCancel={() => setAddOpen(false)}
-              />
-            ) : (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ marginTop: 12 }}
-                disabled={busy}
-                onClick={() => setAddOpen(true)}
-                data-testid="proposal-add-line-toggle"
-              >
-                <Plus size={14} strokeWidth={2.2} />
-                <span style={{ marginLeft: 6 }}>
-                  {t("detail.proposal_add_line")}
-                </span>
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              style={{ marginTop: 12 }}
+              disabled={busy}
+              onClick={() => setEditingLineId("new")}
+              data-testid="proposal-add-line-toggle"
+            >
+              <Plus size={14} strokeWidth={2.2} />
+              <span style={{ marginLeft: 6 }}>
+                {t("detail.proposal_add_line")}
+              </span>
+            </button>
           </div>
         )}
 
@@ -1060,11 +1097,19 @@ export function ProposalBuilder({
               onClick={send}
               data-testid="extra-work-proposal-send"
             >
-              {busy ? t("detail.proposal_sending") : t("detail.proposal_send")}
+              {busy
+                ? t(
+                    noCustomerApproval
+                      ? "detail.proposal_sending_start"
+                      : "detail.proposal_sending",
+                  )
+                : t(
+                    noCustomerApproval
+                      ? "detail.proposal_send_start"
+                      : "detail.proposal_send",
+                  )}
             </button>
-            <p className="muted small" style={{ margin: "6px 0 0" }}>
-              {t("detail.proposal_send_hint")}
-            </p>
+            
           </div>
         ) : (
           canEdit && (
@@ -1075,16 +1120,32 @@ export function ProposalBuilder({
                 disabled
                 data-testid="extra-work-proposal-send-blocked"
               >
-                {t("detail.proposal_send")}
+                {t(
+                  noCustomerApproval
+                    ? "detail.proposal_send_start"
+                    : "detail.proposal_send",
+                )}
               </button>
               <p
                 className="muted small"
                 style={{ margin: "6px 0 0" }}
                 data-testid="extra-work-proposal-send-blocked-reason"
               >
-                {parentAdvanceBlocked
-                  ? t("detail.proposal_send_blocked_parent")
-                  : t("detail.proposal_send_blocked_reason")}
+                {proposal.lines.length === 0
+                  ? /* W-FIX1 A3 — nothing to send without a line; the
+                       server's `can_send` says the same. */
+                    t("detail.proposal_send_blocked_no_lines")
+                  : parentAdvanceBlocked
+                  ? t(
+                      noCustomerApproval
+                        ? "detail.proposal_send_blocked_parent_start"
+                        : "detail.proposal_send_blocked_parent",
+                    )
+                  : t(
+                      noCustomerApproval
+                        ? "detail.proposal_send_blocked_reason_start"
+                        : "detail.proposal_send_blocked_reason",
+                    )}
               </p>
             </div>
           )
@@ -1098,23 +1159,34 @@ export function ProposalBuilder({
             {canApprove && (
               <button
                 type="button"
-                className="btn btn-primary btn-sm"
+                /* P-8R A4 — a provider deciding on the customer's behalf
+                   is an override: amber, never green. The customer's own
+                   approve stays the primary green. */
+                className={isProvider ? "btn btn-warning btn-sm" : "btn btn-primary btn-sm"}
                 disabled={busy}
                 onClick={approve}
                 data-testid="extra-work-proposal-approve"
               >
-                {t("detail.proposal_approve")}
+                {t(
+                  noCustomerApproval
+                    ? "detail.proposal_approve_start"
+                    : "detail.proposal_approve",
+                )}
               </button>
             )}
             {canReject && (
               <button
                 type="button"
-                className="btn btn-secondary btn-sm"
+                className={isProvider ? "btn btn-danger btn-sm" : "btn btn-secondary btn-sm"}
                 disabled={busy}
                 onClick={reject}
                 data-testid="extra-work-proposal-reject"
               >
-                {t("detail.proposal_reject")}
+                {t(
+                  noCustomerApproval
+                    ? "detail.proposal_reject_start"
+                    : "detail.proposal_reject",
+                )}
               </button>
             )}
           </div>
@@ -1142,68 +1214,121 @@ export function ProposalBuilder({
               data-testid="extra-work-proposal-cancel"
             >
               {cancelNeedsReason
-                ? t("detail.proposal_withdraw")
+                ? t(
+                    noCustomerApproval
+                      ? "detail.proposal_withdraw_start"
+                      : "detail.proposal_withdraw",
+                  )
                 : t("detail.proposal_discard")}
             </button>
           </div>
         )}
 
-        {/* Provider override-decision modal. The confirm button stays
-            disabled until a non-blank reason is typed, mirroring the
-            backend's `override_reason_required` guard. */}
-        {overridePrompt !== null && (
+        {/* P-8R A3 — the refusal, AT the buttons it answers, in the
+            reader's words, with its door. */}
+        {error && (
           <div
-            className="reject-modal-backdrop"
-            data-testid="extra-work-proposal-override-dialog"
-            role="dialog"
-            aria-modal="true"
+            ref={errorRef}
+            className="alert-error"
+            role="alert"
+            style={{ marginTop: 12 }}
+            data-testid="extra-work-proposal-error"
+            data-refusal-kind={refusal?.kind ?? "generic"}
           >
-            <div className="reject-modal">
-              <h3 className="reject-modal-title">
-                {overridePrompt === "CUSTOMER_APPROVED"
-                  ? t("detail.proposal_override_approve_title")
-                  : t("detail.proposal_override_reject_title")}
-              </h3>
-              <p className="reject-modal-desc">
-                {t("detail.proposal_override_desc")}
-              </p>
-              <textarea
-                className="field-textarea reject-modal-textarea"
-                data-testid="extra-work-proposal-override-reason"
-                value={overrideReason}
-                onChange={(e) => setOverrideReason(e.target.value)}
-                placeholder={t("detail.proposal_override_reason_placeholder")}
-                rows={4}
-                autoFocus
-              />
-              <div className="reject-modal-actions">
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  disabled={busy}
-                  onClick={() => {
-                    setOverridePrompt(null);
-                    setOverrideReason("");
-                  }}
-                  data-testid="extra-work-proposal-override-cancel"
-                >
-                  {t("detail.note_modal_cancel")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  disabled={busy || overrideReason.trim() === ""}
-                  onClick={submitOverride}
-                  data-testid="extra-work-proposal-override-confirm"
-                >
-                  {busy
-                    ? t("detail.proposal_override_submitting")
-                    : t("detail.proposal_override_confirm")}
-                </button>
-              </div>
-            </div>
+            <div>{error}</div>
+            {refusal?.kind === "plan_gap" && onOpenPlan && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ marginTop: 8 }}
+                onClick={() => onOpenPlan(refusal.unmet)}
+                data-testid="extra-work-proposal-complete-plan"
+              >
+                {t("refused.complete_plan")}
+              </button>
+            )}
           </div>
         )}
+
+        {/* P-8R A4 — the provider's decision on the customer's behalf:
+            the amber reason modal (the drawer's pattern). */}
+        <RejectReasonDialog
+          open={overridePrompt !== null}
+          tone="warning"
+          title={
+            overridePrompt === "CUSTOMER_APPROVED"
+              ? t("detail.proposal_override_approve_title")
+              : t("detail.proposal_override_reject_title")
+          }
+          description={t("detail.proposal_override_desc")}
+          placeholder={t("detail.proposal_override_reason_placeholder")}
+          confirmLabel={
+            overridePrompt === "CUSTOMER_APPROVED"
+              ? coverageConfirmLabel(
+                  t,
+                  coverage,
+                  "approve",
+                  t("detail.proposal_override_confirm"),
+                )
+              : t("detail.proposal_override_confirm")
+          }
+          cancelLabel={t("detail.note_modal_cancel")}
+          onCancel={() => setOverridePrompt(null)}
+          onConfirm={(reason) => submitOverride(reason)}
+        >
+          {/* P-9 C4 — the same coverage block on the approve-on-behalf
+              ceremony; approving fewer lines than asked is said here. */}
+          {overridePrompt === "CUSTOMER_APPROVED" && (
+            <CoverageNotice coverage={coverage} />
+          )}
+        </RejectReasonDialog>
+        {/* P-8R A4 — Send asks once: the lines, the total, the customer. */}
+        <ConfirmDialog
+          ref={sendDialogRef}
+          title={t(
+            noCustomerApproval
+              ? "detail.send_dialog_title_start"
+              : "detail.send_dialog_title",
+          )}
+          body={
+            <div data-testid="extra-work-proposal-send-dialog">
+              <ul style={{ margin: "0 0 8px", paddingLeft: 18 }}>
+                {proposal.lines.map((line) => (
+                  <li key={line.id} data-testid="extra-work-proposal-send-dialog-line">
+                    {(line.service_name || line.description || "").trim() || `#${line.id}`}
+                    {" — "}
+                    {line.quantity} × {formatMoney(line.unit_price)}
+                  </li>
+                ))}
+              </ul>
+              <p style={{ fontWeight: 600 }} data-testid="extra-work-proposal-send-dialog-total">
+                {t("detail.pricing_column_total")}: {formatMoney(proposal.total_amount)}
+              </p>
+              {/* P-9 C4 — does this price cover what was asked? Amber
+                  when not; a missing line is a door onto its row. */}
+              <CoverageNotice coverage={coverage} onAddPrice={addPriceFor} />
+              <p className="muted small">
+                {t(
+                  noCustomerApproval
+                    ? "detail.send_dialog_question_start"
+                    : "detail.send_dialog_question",
+                  { customer: customerName ?? t("detail.send_dialog_customer_fallback") },
+                )}
+              </p>
+            </div>
+          }
+          confirmLabel={coverageConfirmLabel(
+            t,
+            coverage,
+            noCustomerApproval ? "start" : "send",
+            t(noCustomerApproval ? "detail.proposal_send_start" : "detail.coverage_send_exact"),
+          )}
+          busy={busy}
+          busyLabel={t(
+            noCustomerApproval ? "detail.proposal_sending_start" : "detail.proposal_sending",
+          )}
+          onConfirm={confirmSend}
+        />
         {/* Sprint 187 §2b — UNCONDITIONAL, ref-driven (CLAUDE.md §3).
             `{canCancel && <ConfirmDialog/>}` would mount an invisible
             native <dialog> and the trigger above would look dead — the
@@ -1212,15 +1337,31 @@ export function ProposalBuilder({
           ref={cancelDialogRef}
           title={
             cancelNeedsReason
-              ? t("detail.proposal_withdraw_confirm_title")
-              : t("detail.proposal_discard_confirm_title")
+              ? t(
+                  noCustomerApproval
+                    ? "detail.proposal_withdraw_confirm_title_start"
+                    : "detail.proposal_withdraw_confirm_title",
+                )
+              : t(
+                  noCustomerApproval
+                    ? "detail.proposal_discard_confirm_title_start"
+                    : "detail.proposal_discard_confirm_title",
+                )
           }
           body={
             <>
               <p style={{ marginTop: 0 }}>
                 {cancelNeedsReason
-                  ? t("detail.proposal_withdraw_confirm_body")
-                  : t("detail.proposal_discard_confirm_body")}
+                  ? t(
+                      noCustomerApproval
+                        ? "detail.proposal_withdraw_confirm_body_start"
+                        : "detail.proposal_withdraw_confirm_body",
+                    )
+                  : t(
+                      noCustomerApproval
+                        ? "detail.proposal_discard_confirm_body_start"
+                        : "detail.proposal_discard_confirm_body",
+                    )}
               </p>
               {cancelNeedsReason && (
                 <textarea
@@ -1229,11 +1370,15 @@ export function ProposalBuilder({
                   value={cancelReason}
                   onChange={(e) => setCancelReason(e.target.value)}
                   placeholder={t(
-                    "detail.proposal_withdraw_reason_placeholder",
+                    noCustomerApproval
+                      ? "detail.proposal_withdraw_reason_placeholder_start"
+                      : "detail.proposal_withdraw_reason_placeholder",
                   )}
                   rows={3}
                   aria-label={t(
-                    "detail.proposal_withdraw_reason_placeholder",
+                    noCustomerApproval
+                      ? "detail.proposal_withdraw_reason_placeholder_start"
+                      : "detail.proposal_withdraw_reason_placeholder",
                   )}
                 />
               )}
@@ -1241,7 +1386,11 @@ export function ProposalBuilder({
           }
           confirmLabel={
             cancelNeedsReason
-              ? t("detail.proposal_withdraw")
+              ? t(
+                  noCustomerApproval
+                    ? "detail.proposal_withdraw_start"
+                    : "detail.proposal_withdraw",
+                )
               : t("detail.proposal_discard")
           }
           onConfirm={confirmCancel}

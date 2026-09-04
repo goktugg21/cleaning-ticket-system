@@ -213,7 +213,6 @@ class IntentFixtureMixin:
         return {
             "service": self.service_priced.id,
             "quantity": qty,
-            "requested_date": "2026-06-15",
             "customer_note": "",
         }
 
@@ -221,7 +220,6 @@ class IntentFixtureMixin:
         return {
             "service": self.service_unpriced.id,
             "quantity": qty,
-            "requested_date": "2026-06-15",
             "customer_note": "",
         }
 
@@ -229,7 +227,6 @@ class IntentFixtureMixin:
         return {
             "custom_description": description,
             "quantity": qty,
-            "requested_date": "2026-06-15",
             "customer_note": "",
         }
 
@@ -250,6 +247,15 @@ class IntentFixtureMixin:
             "title": title,
             "description": "Sprint 2A cart description",
             "category": ExtraWorkCategory.DEEP_CLEANING,
+            # W-EW1 §2 — ONE DATE FOR THE WHOLE CART. The per-line
+            # `requested_date` stopped being client-supplied in 181708a
+            # (`line_requested_date_not_accepted`); the request-level
+            # `preferred_date` is stamped onto every line by `validate()`
+            # instead. Kept at 2026-06-15 so each line still resolves
+            # against exactly the date these tests were written for — the
+            # fixture contract is `valid_from=2026-01-01, valid_to=None`,
+            # so the agreed-price window is unchanged.
+            "preferred_date": "2026-06-15",
             "line_items": list(line_items),
         }
         if intent is not None:
@@ -669,7 +675,6 @@ class AdHocLineShapeTests(IntentFixtureMixin, TestCase):
             [
                 {
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ],
@@ -690,7 +695,6 @@ class AdHocLineShapeTests(IntentFixtureMixin, TestCase):
             "service": self.service_priced.id,
             "custom_description": "Both set is ambiguous",
             "quantity": "1.00",
-            "requested_date": "2026-06-15",
             "customer_note": "",
         }
         payload = self._payload(

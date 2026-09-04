@@ -1,0 +1,351 @@
+/* W-UX1 §2 — the plan area's add-people block.
+ *
+ * One class, and only what turning the picker into a block needs. The
+ * chips themselves reuse `.assign-picker` / `.assign-picker-row` from
+ * index.css, which this wave does not own — so nothing here restyles
+ * them, it only gives them a labelled container with room around it.
+ */
+.ew-plan-crew-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* W-PLAN Task 3 — the past-day freeze. A frozen cell shows the value
+ * (the plan's history stays visible) and withholds only the input;
+ * the bar above the grid is where the recorded override is asked for.
+ * Component-scoped: every class is new and used only by this dialog. */
+.ew-plan-past-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ew-plan-past-prompt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+.ew-plan-past-prompt .field-textarea {
+  flex: 1;
+  min-height: 38px;
+}
+.ew-plan-cell-frozen {
+  display: inline-block;
+  min-width: 44px;
+  padding: 4px 6px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 4px;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  text-align: right;
+  cursor: not-allowed;
+}
+.ew-plan-past-lock {
+  color: var(--text-faint);
+  margin-right: 3px;
+  vertical-align: -1px;
+}
+
+/* W-TABS Task 3 — the required mark and the manager row. A star is a
+ * star: marked, never explained. */
+.ew-plan-req {
+  color: var(--red);
+  margin-left: 3px;
+  font-weight: 700;
+}
+.ew-plan-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.ew-plan-manager-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* W-HOURS5 Task 1 — HEAD / BODY / FOOT.
+ *
+ * Measured on ticket 373 at 1366x768: the dialog is 92vh over 1047px of
+ * content and the LAST crew row started below the dialog's bottom edge;
+ * a click on the clipped part of the row landed on the dialog box, not
+ * on the input. The whole card used to be the scroll box, so the fold
+ * was wherever the card ended and nothing marked it. Now only the BODY
+ * scrolls: the head stays, the foot (the actions) stays, and the foot's
+ * top border IS the fold on every screen. `.card.ew-plan-dialog` keeps
+ * its width and max-height from index.css; this only redistributes the
+ * padding and the overflow. */
+.card.ew-plan-dialog.ew-plan-dialog--framed {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+.ew-plan-head {
+  flex: 0 0 auto;
+  padding: 22px 24px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* P-1 §4 — the subtitle's `margin-top: -10px` (index.css) was written
+   for the unframed dialog, whose flex gap of 16px it pulls back by
+   ten; inside the framed head there is no gap to pull back, so the
+   subtitle sat ON the title (measured on /extra-work/88: the two rects
+   overlapped by 8px). The head has its own gap now; the subtitle keeps
+   nothing negative. */
+.ew-plan-head .ew-plan-dialog-sub {
+  margin: 0;
+}
+.ew-plan-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  /* P-1 §4 — this is the scheduling moment: the numbered sections get
+     the guided form's air instead of the dense grid's. */
+  gap: 26px;
+}
+.ew-plan-body > .ew-plan-section + .ew-plan-section {
+  padding-top: 18px;
+  border-top: 1px solid var(--border-soft);
+}
+.ew-plan-foot {
+  flex: 0 0 auto;
+  padding: 12px 24px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--surface);
+}
+.ew-plan-foot .ew-plan-actions {
+  margin: 0;
+}
+
+/* W-HOURS5 Task 2 — the crew block: two groups (people, managers),
+ * each a chip row, an optional one-line hint, and a one-line adder
+ * (picker + Add) that stacks when narrow. */
+.ew-plan-crew {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.ew-plan-crew-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ew-plan-crew-hint {
+  margin: 0;
+}
+.ew-plan-crew-add-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ew-plan-crew-add-picker {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  .ew-plan-crew-add-line {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* P-4 (Part B) — THE GUIDED PLAN DIALOG.
+ *
+ * Three numbered stages down one column, the guided form's measure:
+ * the wide grid is gone (a person's days are chips that wrap, and an
+ * hours box per chosen day), so the dialog no longer needs 1180px to
+ * show a week. Errors are inline sentences at the field; the amber
+ * `.field-warning` is the same sentence shape for a warning that does
+ * not block (a day past the deadline). */
+.card.ew-plan-dialog.ew-plan-dialog--guided {
+  width: min(880px, 96vw);
+}
+.ew-plan-dialog--guided .ew-plan-dates {
+  max-width: none;
+  grid-template-columns: minmax(0, 260px) minmax(0, 260px);
+}
+.ew-plan-dialog--guided .field .field-label {
+  margin-bottom: 4px;
+}
+.field-warning {
+  margin: 4px 0 0;
+  color: var(--state-waiting);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.field-input-invalid {
+  border-color: var(--red);
+}
+.ew-plan-customer-strip {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 13px;
+}
+.ew-plan-question {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--state-waiting-bg);
+  border: 1px solid var(--amber-border);
+}
+.ew-plan-question-text {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+.ew-plan-question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ew-plan-people {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ew-plan-person {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.ew-plan-person-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.ew-plan-person-total {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.ew-plan-day-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.ew-plan-day-chips-label {
+  margin-right: 4px;
+}
+.ew-plan-day-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ew-plan-day-chip.is-on {
+  background: var(--accent-bg, var(--surface-2));
+  border-color: var(--accent, var(--text));
+  color: var(--text);
+  font-weight: 600;
+}
+.ew-plan-day-chip.is-locked {
+  color: var(--text-faint);
+  cursor: not-allowed;
+  border-style: dashed;
+}
+.ew-plan-hours-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+}
+.ew-plan-hours-line-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: center;
+  min-width: 110px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.ew-plan-hours-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ew-plan-hours-box .ew-plan-crew-hours {
+  width: 72px;
+}
+.ew-plan-hours-box--undated {
+  padding-left: 10px;
+  border-left: 1px dashed var(--border-soft);
+}
+.ew-plan-outside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.ew-plan-outside-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--state-waiting-bg);
+  border: 1px solid var(--amber-border);
+  color: var(--state-waiting);
+  font-size: 12px;
+}
+.ew-plan-summary-error {
+  flex: 1 1 auto;
+  text-align: right;
+}
+.ew-plan-dialog--guided .ew-plan-budget {
+  max-width: 280px;
+}
+
+/* P-5 S2.3 — an hours box commits on blur/Enter and the totals say so. */
+.ew-plan-person-total.is-committed,
+.ew-plan-total strong.is-committed {
+  animation: ew-plan-commit 0.9s ease;
+}
+.ew-plan-committed-word {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--green);
+  font-weight: 600;
+}
+@keyframes ew-plan-commit {
+  0% { background: var(--green-faint); }
+  100% { background: transparent; }
+}
+/* P-5 S2.1 — the remove-X on a person's hours row. */
+.ew-plan-person-head .ew-plan-type-remove {
+  margin-left: auto;
+}
+.ew-plan-person-tag {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 6px;
+}

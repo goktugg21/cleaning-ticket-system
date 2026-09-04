@@ -19,12 +19,17 @@ Three things are pinned here.
    bulk edit that silently wipes a date nobody touched is a data-loss bug
    that looks like a successful save.
 
-3. **The deadline is provider-only** — the §3 decision. A customer-side
-   actor is refused on create AND on the two date endpoints. The reasoning
-   is recorded on the serializer and the view: the customer already has
-   `preferred_date` ("I would like it around then"); the deadline is what
-   turns a row red and what an operator is measured against, so a customer
-   who could set it could make the provider look late by typing a date.
+3. **The deadline is provider-only on the two EDIT endpoints** — what is
+   left of the §3 decision after W-EW1 §1. A customer-side actor is still
+   refused by `PATCH .../dates/` and `POST /bulk-dates/`: moving a deadline
+   after the fact is renegotiation, not asking.
+
+   W-EW1 §1 REVERSED the third surface, create: a customer may now state a
+   deadline when it asks for the work, because `deadline` belongs to the
+   ASKED FOR / OWED pair beside `preferred_date`, while what the provider is
+   measured against having committed to is `provider_planned_date` /
+   `provider_planned_end_date`, which no customer can reach. That reversal
+   and its tenant-scope guard are pinned in `test_w_ew1_dates.py`.
 """
 from __future__ import annotations
 
@@ -367,8 +372,13 @@ class BulkDatesTests(_Base):
         self.assertEqual(response.status_code, 400, response.data)
 
 
-class CreateRefusesACustomerDeadlineTests(_Base):
-    """The third surface: the create form itself."""
+class CreateAcceptsACustomerDeadlineTests(_Base):
+    """The third surface: the create form itself.
+
+    Renamed at W-EW1 §1, which reversed what this class asserted. The
+    class is kept rather than deleted so the reversal is visible in one
+    place; the full new contract lives in `test_w_ew1_dates.py`.
+    """
 
     def _payload(self, **extra):
         payload = {
@@ -387,28 +397,28 @@ class CreateRefusesACustomerDeadlineTests(_Base):
             "description": "please",
             "line_items": [
                 {
+                    # W-EW1 §2 — no per-line date any more: the server
+                    # stamps every line from the request-level
+                    # `preferred_date`. Sending one here would now be
+                    # refused with `line_requested_date_not_accepted`.
                     "custom_description": "ad hoc work",
                     "quantity": "1.00",
-                    # Field-level validation runs BEFORE `validate()`, so an
-                    # incomplete line would fail the request for the wrong
-                    # reason and the deadline gate would never be reached.
-                    "requested_date": (
-                        timezone.localdate() + timedelta(days=2)
-                    ).isoformat(),
                 }
             ],
         }
         payload.update(extra)
         return payload
 
-    def test_a_customer_setting_a_deadline_is_refused_with_400(self):
+    def test_a_customer_setting_a_deadline_is_now_ACCEPTED(self):
+        """W-EW1 §1 — the exact reversal of the Sprint 176 §3 rule."""
+        owed = timezone.localdate() + timedelta(days=7)
         response = self.api(self.cust_basic_a).post(
             "/api/extra-work/",
-            self._payload(deadline=timezone.localdate().isoformat()),
+            self._payload(deadline=owed.isoformat()),
             format="json",
         )
-        self.assertEqual(response.status_code, 400, response.data)
-        self.assertIn("deadline", str(response.data))
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(str(response.data["deadline"]), owed.isoformat())
 
     def test_a_customer_may_still_state_a_preferred_date(self):
         """The wish is not what is refused — only the commitment."""

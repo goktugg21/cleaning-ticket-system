@@ -1,0 +1,247 @@
+/* P-12 §D.24 — the guidance standard's shared pieces. Palette from the
+ * app tokens (index.css :root); shapes from the invoices-redesign
+ * mock. Scoped file beside the components, the workplan/ precedent. */
+
+/* ---- kickers (the small uppercase word on the two cards) ---------- */
+.guide-kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.guide-kicker-start { color: var(--green); }
+.guide-kicker-done { color: var(--teal); }
+
+/* ---- rule 2: Start here ------------------------------------------- */
+.guide-start {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  background: var(--green-faint);
+  border: 1px solid #cfe9da;
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin: 0 0 16px;
+}
+.guide-start-sentence { margin: 0; flex: 1; }
+.guide-start-sentence b { font-weight: 600; }
+
+/* ---- rule 3: the road --------------------------------------------- */
+.guide-road {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+  overflow-x: auto;
+  list-style: none;
+  padding: 0;
+}
+.guide-road .guide-step {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  padding: 10px 14px 12px;
+  margin-bottom: -1px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 150px;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  font: inherit;
+}
+.guide-step-no {
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.guide-step-nm {
+  font-weight: 600;
+  color: var(--text-muted);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.guide-step-n {
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--closed-soft);
+  border-radius: 999px;
+  padding: 1px 9px;
+  color: var(--text);
+}
+.guide-road .guide-step-current {
+  border-bottom-color: var(--green);
+}
+.guide-step-current .guide-step-nm { color: var(--text); }
+.guide-step-current .guide-step-n {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+/* progress variant: nothing clickable, done steps quietly green */
+.guide-road-progress { border-bottom: 0; margin-bottom: 8px; }
+.guide-road-progress .guide-step {
+  cursor: default;
+  border-bottom: 3px solid var(--border-soft);
+  min-width: 120px;
+}
+.guide-road-progress .guide-step-done { border-bottom-color: var(--green-soft); }
+.guide-road-progress .guide-step-done .guide-step-nm { color: var(--green); }
+.guide-road-progress .guide-step-current { border-bottom-color: var(--green); }
+
+/* the tab's teach line + the one money line ------------------------- */
+.guide-teach {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.guide-teach-words { max-width: 68ch; }
+.guide-teach-title {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0 0 4px;
+}
+.guide-teach-body { margin: 0; color: var(--text-muted); }
+.guide-money {
+  background: var(--green-faint);
+  border: 1px solid #cfe9da;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-weight: 500;
+  min-width: 200px;
+  color: var(--text-muted);
+}
+.guide-money b {
+  display: block;
+  font-size: 18px;
+  color: var(--text);
+}
+
+/* ---- rule 4: the Done banner -------------------------------------- */
+.guide-done {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  background: var(--teal-soft);
+  border: 1px solid #bfe3dc;
+  border-left: 4px solid var(--teal);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin: 0 0 12px;
+}
+.guide-done-words { flex: 1; }
+.guide-done-title { margin: 0; font-weight: 600; }
+.guide-done-body { margin: 2px 0 0; color: var(--text-muted); }
+.guide-done-dismiss {
+  appearance: none;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+}
+.guide-done-dismiss:hover { background: rgba(15, 107, 94, 0.08); }
+
+/* the moved-to row's tint (rule 4's highlight) ---------------------- */
+@keyframes guide-highlight-fade {
+  0% { background-color: #d7f2e4; }
+  80% { background-color: #eefaf4; }
+  100% { background-color: transparent; }
+}
+.guide-highlight > td,
+.guide-highlight {
+  animation: guide-highlight-fade 10s ease-out forwards;
+}
+
+/* ---- rule 5: the teaching empty state ----------------------------- */
+.guide-empty {
+  padding: 22px 16px;
+  color: var(--text-muted);
+}
+.guide-empty b {
+  display: block;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.guide-empty p { margin: 0 0 10px; }
+
+/* ---- rule 6: a connection in words -------------------------------- */
+.guide-connection {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+@media (max-width: 900px) {
+  .guide-start,
+  .guide-done {
+    flex-wrap: wrap;
+  }
+  .guide-road .guide-step { min-width: 130px; }
+}
+
+/* ---- §D.24.2: the Finance pages' company selector ----------------- */
+.guide-company {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.guide-company .filter-control {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ---- P-13 rule 8: "How this page works" — the capabilities layer -- */
+.guide-how {
+  margin: 0 0 14px;
+  border: 1px solid var(--border, #e2e5ea);
+  border-radius: 8px;
+  background: var(--surface-2, #fafbfc);
+  padding: 0;
+}
+.guide-how-summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  list-style-position: inside;
+}
+.guide-how[open] .guide-how-summary {
+  border-bottom: 1px solid var(--border, #e2e5ea);
+}
+.guide-how-lines {
+  margin: 0;
+  padding: 8px 12px 10px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.guide-how-line {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+/* ---- P-13 rule 8: the one line under a primary button ------------- */
+.guide-what {
+  margin: 4px 0 0;
+  font-size: 12px;
+}

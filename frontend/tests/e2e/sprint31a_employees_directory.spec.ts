@@ -8,7 +8,9 @@ import { loginAs } from "./fixtures/login";
  * Employees directory (feature/employees-directory).
  *
  * Two surfaces over two backend endpoints:
- *   - Provider directory  GET /api/employees/         (/admin/employees)
+ *   - Provider directory  GET /api/employees/
+ *     (/admin/people/employees — FE-6: the Employees tab of the People
+ *     page; /admin/employees redirects there)
  *   - Customer directory  GET /api/customers/<cid>/employees/
  *                         (/admin/customers/:id/employees + /my/employees)
  *
@@ -17,7 +19,8 @@ import { loginAs } from "./fixtures/login";
  *      (navigate to the user account) + STAFF rows expose the inline
  *      employment-type pencil edit.
  *   2. BUILDING_MANAGER reaches the provider directory read-only (no edit
- *      affordance) via its own sidebar entry.
+ *      affordance) via the People sidebar entry, which lands them on
+ *      the Employees tab (the only People tab their gate allows).
  *   3. CUSTOMER_USER reaches /my/employees and sees the customer
  *      directory; a non-CCA customer user has NO edit affordance.
  *   4. SUPER_ADMIN reaches the customer-scoped directory via the customer
@@ -31,7 +34,7 @@ test.describe("Employees directory", () => {
     page,
   }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/admin/employees");
+    await page.goto("/admin/people/employees");
 
     await expect(
       page.locator('[data-testid="employees-admin-page"]'),
@@ -71,12 +74,14 @@ test.describe("Employees directory", () => {
   test("building manager reaches the directory read-only", async ({ page }) => {
     await loginAs(page, DEMO_USERS.managerAll);
 
-    // BM has its own sidebar entry (no admin group).
-    const navEntry = page.locator('[data-testid="sidebar-employees-bm"]');
+    // FE-6 — the BM sees the People entry; the People page lands them
+    // on its Employees tab (users / invitations are not theirs).
+    const navEntry = page.locator('[data-testid="sidebar-people"]');
     await expect(navEntry).toBeVisible({ timeout: 10_000 });
     await navEntry.click();
 
-    await page.waitForURL((url) => url.pathname === "/admin/employees");
+    await page.waitForURL((url) => url.pathname === "/admin/people/employees");
+    await expect(page.locator('[data-testid="people-tab-users"]')).toHaveCount(0);
     await expect(
       page.locator('[data-testid="employees-admin-page"]'),
     ).toBeVisible({ timeout: 10_000 });
@@ -98,6 +103,9 @@ test.describe("Employees directory", () => {
     // the edit affordance must be absent.
     await loginAs(page, DEMO_USERS.customerB1B2);
 
+    // FE-6 — the customer nav folds its secondary entries (messages,
+    // employees, documents, settings) behind "Meer"; open it first.
+    await page.locator('[data-testid="sidebar-meer-toggle"]').click();
     const navEntry = page.locator('[data-testid="sidebar-my-employees"]');
     await expect(navEntry).toBeVisible({ timeout: 10_000 });
     await navEntry.click();
@@ -157,14 +165,17 @@ test.describe("Employees directory", () => {
     page,
   }) => {
     // Setup (via API as SUPER_ADMIN): in Amanda's customer, make Amanda a
-    // CUSTOMER_COMPANY_ADMIN and force ONE other user to a plain
-    // CUSTOMER_USER on all their buildings. Then, filtering Amanda's
+    // CUSTOMER_COMPANY_ADMIN (SoT Addendum A.1: company-wide, through the
+    // company-admin endpoint — a per-building access_role can no longer
+    // carry it) and force ONE other user to a plain CUSTOMER_USER on all
+    // their buildings. Then, filtering Amanda's
     // directory by CUSTOMER_USER drops Amanda's own (CCA) row — which is
     // exactly the case the Codex #1 bug regressed (canEdit was derived
     // from the filtered list, so the edit affordance vanished). The fix
     // derives canEdit from the viewer's own role independently of the
     // filter, so the affordance must remain.
     const ccaEmail = DEMO_USERS.customerB3.email; // Amanda
+    let ccaCleanup: { customerId: number; userId: number } | undefined;
     const sa = await apiAs(DEMO_USERS.super.email);
     try {
       const customers =
@@ -209,7 +220,11 @@ test.describe("Employees directory", () => {
         }
         return rows.length;
       };
-      await setAllAccess(amandaId as number, "CUSTOMER_COMPANY_ADMIN");
+      const makeAdmin = await sa.post(
+        `/api/customers/${customerId}/users/${amandaId}/company-admin/`,
+      );
+      expect([200, 201]).toContain(makeAdmin.status());
+      ccaCleanup = { customerId: customerId as number, userId: amandaId as number };
       const otherCount = await setAllAccess(otherId as number, "CUSTOMER_USER");
       expect(otherCount).toBeGreaterThan(0);
     } finally {
@@ -241,5 +256,18 @@ test.describe("Employees directory", () => {
         .locator('[data-testid="customer-employee-edit-access-role"]')
         .first(),
     ).toBeVisible();
+
+    // Restore: Amanda goes back to a plain member so later specs (and
+    // reruns) start from the seeded baseline.
+    if (ccaCleanup) {
+      const restore = await apiAs(DEMO_USERS.super.email);
+      try {
+        await restore.delete(
+          `/api/customers/${ccaCleanup.customerId}/users/${ccaCleanup.userId}/company-admin/`,
+        );
+      } finally {
+        await restore.dispose();
+      }
+    }
   });
 });

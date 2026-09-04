@@ -7,6 +7,7 @@
 import { api } from "./client";
 import type { PaginatedResponse } from "./types";
 import type {
+  ContractHoursPattern,
   HourType,
   HourTypeWritePayload,
   StandardSetResult,
@@ -17,6 +18,7 @@ import type {
   TimesheetSummary,
   WeekLock,
   WeekStatus,
+  WeeksWithHours,
 } from "./timesheets.types";
 
 /**
@@ -226,17 +228,6 @@ export async function saveWeekGrid(payload: {
 // Week locks
 // ---------------------------------------------------------------------------
 
-export async function listWeekLocks(params: {
-  company?: number | "";
-  iso_year?: number;
-}): Promise<WeekLock[]> {
-  const response = await api.get<PaginatedResponse<WeekLock>>(
-    "/timesheets/weeks/",
-    { params: cleanParams(params) },
-  );
-  return response.data.results;
-}
-
 /**
  * Ask about ONE week. The list cannot answer this: absence of a lock
  * row means OPEN, so an empty week appears in neither collection and a
@@ -250,6 +241,66 @@ export async function fetchWeekStatus(params: {
   const response = await api.get<WeekStatus>("/timesheets/weeks/status/", {
     params: cleanParams(params),
   });
+  return response.data;
+}
+
+/** W10 — materialise one week from the standing agreements.
+ *
+ *  Idempotent, so the week view calls it every time a week is opened:
+ *  that is what makes a sheet arrive filled without anybody pressing
+ *  anything. The rules (validity window, closed weeks, and never
+ *  touching a week somebody has already worked in) live on the server.
+ */
+export async function fillWeekFromContracts(payload: {
+  iso_year: number;
+  iso_week: number;
+  company?: number | "";
+  /** W12 — fill ONE person's week. A manager may name anybody; for
+   *  everybody else the server ignores this and uses the caller, so
+   *  **My hours** simply omits it. */
+  employee?: number | "";
+}): Promise<{ created: number; skipped_existing: number }> {
+  const response = await api.post("/timesheets/entries/fill-week/", cleanParams(payload));
+  return response.data;
+}
+
+/**
+ * W12 §5 — this employee's standing agreements in force during a date
+ * window.
+ *
+ * `employee` is a filter, not a permission: the endpoint restricts a
+ * non-manager to their own rows regardless of what is asked for, so
+ * this cannot be turned into a way to read a colleague's contract by
+ * changing one number in the request.
+ */
+export async function listContractHoursPatterns(params: {
+  employee: number;
+  valid_between_start: string;
+  valid_between_end: string;
+}): Promise<ContractHoursPattern[]> {
+  const response = await api.get<{ results: ContractHoursPattern[] }>(
+    "/timesheets/contract-hours/",
+    { params: cleanParams(params) },
+  );
+  return response.data.results ?? [];
+}
+
+/**
+ * P-9 D3 — which weeks of a year hold saved hours, and how many. One
+ * aggregate query server-side, scoped exactly like the entries list
+ * (a manager reads the company, everyone else their own rows), and
+ * `company` narrows only. NOT cached here, deliberately: the pages
+ * refetch it whenever they refetch the entries, so a week is marked the
+ * moment its hours are saved. (No server cache either — see the view.)
+ */
+export async function listWeeksWithHours(params: {
+  iso_year: number;
+  company?: number | "";
+}): Promise<WeeksWithHours> {
+  const response = await api.get<WeeksWithHours>(
+    "/timesheets/weeks/with-hours/",
+    { params: cleanParams(params) },
+  );
   return response.data;
 }
 
@@ -287,7 +338,13 @@ export async function reopenWeek(payload: {
 // ---------------------------------------------------------------------------
 
 export async function fetchTimesheetSummary(
-  filters: TimeEntryFilters = {},
+  /** hours2 — `source_id` narrows to ONE job on top of `source_type`,
+   *  which is how the operational ticket reads the hours booked to it
+   *  (`?source_type=TICKET&source_id=<ticket id>`). Widened here rather
+   *  than on `TimeEntryFilters`: the ticket's comparison is the one
+   *  caller that asks per record, and the summary is the endpoint that
+   *  answers it over EVERY row rather than a page of them. */
+  filters: TimeEntryFilters & { source_id?: number } = {},
 ): Promise<TimesheetSummary> {
   const response = await api.get<TimesheetSummary>("/timesheets/summary/", {
     params: cleanParams(filters),
@@ -320,4 +377,84 @@ export async function downloadTimesheetSummaryCsv(
   link.click();
   document.body.removeChild(link);
   window.URL.revokeObjectURL(blobUrl);
+}
+
+// ---------------------------------------------------------------------------
+// hours2 Part 3 — the admin week grid's row proposal
+// ---------------------------------------------------------------------------
+
+/**
+ * One job a person may book hours against — the SAME shape
+ * `GET /api/reports/hour-sources/` returns (`HourSourceOption`), so the
+ * grid's Job column and the picker read one vocabulary.
+ */
+export interface WeekAssignmentJob {
+  source_type: string;
+  source_id: number;
+  title: string;
+  building: number | null;
+  /** P-12 B5 (§D.24 rule 6) — where the job's hours GO: the customer
+   *  whose next invoice they feed, and that customer's billing day
+   *  (1..28, "LAST_OF_MONTH", or null when no schedule is set). */
+  customer_name?: string | null;
+  invoice_day?: number | "LAST_OF_MONTH" | null;
+}
+
+export interface WeekAssignmentPerson {
+  employee: number;
+  /** P-15 §0.2 — does this person hold an APPROVED auto-fill pattern
+   *  in force this week? Only approved patterns fill the sheet; the
+   *  grid says so under everyone whose standard lines stay empty. */
+  has_approved_pattern: boolean;
+  /** The buildings this person may enter, in the grid's company. */
+  building_ids: number[];
+  /** THIS week's proposal: the jobs the person is on this week, with
+   *  the building each job is at. One grid row each. */
+  assignments: WeekAssignmentJob[];
+  /** Every open job the person is on, any week — what the manual
+   *  "Add row" may offer as an exception. A superset of `assignments`. */
+  jobs: WeekAssignmentJob[];
+  jobs_truncated: boolean;
+}
+
+export interface WeekAssignments {
+  company: number;
+  iso_year: number;
+  iso_week: number;
+  week_start: string;
+  week_end: string;
+  employees: WeekAssignmentPerson[];
+}
+
+/**
+ * What the week grid may PROPOSE for each selected person: the jobs
+ * they are on this week (ticket slots and the plan's days, via the
+ * spawned ticket) and the buildings they may enter.
+ *
+ * Served by `backend/reports/views_week_assignments.py` — under
+ * `reports/`, not `timesheets/`, for the reason `listHourSources` gives:
+ * `timesheets` imports nothing from `tickets` or `extra_work`, and this
+ * read needs both. The CLIENT lives here beside the grid's other calls
+ * because that is the screen it feeds. Managers only (SA / CA); an
+ * employee id outside the company is absent from the answer, never an
+ * error.
+ */
+export async function listWeekAssignments(params: {
+  iso_year: number;
+  iso_week: number;
+  company?: number | "";
+  employees: number[];
+}): Promise<WeekAssignments> {
+  const search = new URLSearchParams();
+  search.set("iso_year", String(params.iso_year));
+  search.set("iso_week", String(params.iso_week));
+  if (params.company !== undefined && params.company !== "") {
+    search.set("company", String(params.company));
+  }
+  for (const id of params.employees) search.append("employee", String(id));
+  const response = await api.get<WeekAssignments>(
+    "/reports/week-assignments/",
+    { params: search },
+  );
+  return response.data;
 }

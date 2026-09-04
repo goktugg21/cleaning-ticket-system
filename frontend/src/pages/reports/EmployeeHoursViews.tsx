@@ -1,9 +1,12 @@
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 
+import { StatusBadge } from "../../components/StatusBadge";
+import { hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 import { PeriodReportView } from "./PeriodReportView";
 import type { PeriodPayload } from "./PeriodReportView";
 import type { ReportFilters } from "../../api/reports";
+import { BoundedList } from "../../components/BoundedList";
 
 /**
  * Sprint 178 §2 — the three employee-hours reports and the ticket report.
@@ -55,6 +58,12 @@ export function EmployeeHoursByBuildingView({ filters }: ReportViewProps) {
       filters={filters}
     >
       {(payload) => (
+        <BoundedList
+          size="lg"
+          count={Math.max(1, payload.buildings.length)}
+          ariaLabel={t("employee_hours_building_title")}
+          testIdPrefix="employee-hours-building"
+        >
         <div className="table-wrap">
           {payload.buildings.map((bucket) => (
             <div key={bucket.building ?? "none"} style={{ marginBottom: 16 }}>
@@ -86,6 +95,7 @@ export function EmployeeHoursByBuildingView({ filters }: ReportViewProps) {
             {t("grand_total")}: {payload.total}
           </p>
         </div>
+        </BoundedList>
       )}
     </PeriodReportView>
   );
@@ -128,6 +138,12 @@ export function EmployeeHoursWeeklyView({ filters }: ReportViewProps) {
       filters={filters}
     >
       {(payload) => (
+        <BoundedList
+          size="lg"
+          count={Math.max(1, payload.weeks.length)}
+          ariaLabel={t("employee_hours_weekly_title")}
+          testIdPrefix="employee-hours-weekly"
+        >
         <div className="table-wrap">
           {payload.weeks.map((week) => (
             <div
@@ -180,10 +196,7 @@ export function EmployeeHoursWeeklyView({ filters }: ReportViewProps) {
                         <tr key={bucket.hour_type}>
                           <td />
                           <td className="muted small">
-                            {bucket.hour_type_name}
-                            {bucket.hour_type_code
-                              ? ` (${bucket.hour_type_code})`
-                              : ""}
+                            {hourTypeLabelFrom(bucket.hour_type_name, undefined, t)}
                           </td>
                           {DAYS.map((day) => (
                             <td key={day} className="contract-num muted small">
@@ -222,6 +235,7 @@ export function EmployeeHoursWeeklyView({ filters }: ReportViewProps) {
             {t("grand_total")}: {payload.total}
           </p>
         </div>
+        </BoundedList>
       )}
     </PeriodReportView>
   );
@@ -251,11 +265,17 @@ export function EmployeeHoursByExtraWorkView({ filters }: ReportViewProps) {
       filters={filters}
     >
       {(payload) => (
+        <BoundedList
+          size="lg"
+          count={Math.max(1, payload.extra_work.length)}
+          ariaLabel={t("employee_hours_extra_work_title")}
+          testIdPrefix="employee-hours-extra-work"
+        >
         <div className="table-wrap">
           {payload.extra_work.map((job) => (
             <div key={job.source_id} style={{ marginBottom: 16 }}>
               <div className="form-section-title report-group-title">
-                {job.title ?? `#${job.source_id}`} — {job.total}
+                {job.title ?? t("common:hours_week_grid.no_source")} — {job.total}
               </div>
               <table className="data-table data-table-dense">
                 <thead>
@@ -279,6 +299,7 @@ export function EmployeeHoursByExtraWorkView({ filters }: ReportViewProps) {
             {t("grand_total")}: {payload.total}
           </p>
         </div>
+        </BoundedList>
       )}
     </PeriodReportView>
   );
@@ -311,6 +332,12 @@ export function TicketReportView({ filters }: ReportViewProps) {
       filters={filters}
     >
       {(payload) => (
+        <BoundedList
+          size="lg"
+          count={Math.max(1, payload.rows.length)}
+          ariaLabel={t("ticket_report_title")}
+          testIdPrefix="ticket-report"
+        >
         <div className="table-wrap">
           {/* Sprint 179B §4 — this line sat flush against the table it
               summarises. Same breathing room the group titles now get. */}
@@ -340,7 +367,12 @@ export function TicketReportView({ filters }: ReportViewProps) {
                 <tr key={row.id}>
                   <td>{row.ticket_no}</td>
                   <td>{row.title}</td>
-                  <td>{row.status}</td>
+                  <td>
+                    <StatusBadge
+                      status={{ kind: "ticket", value: row.status }}
+                      variant="cell"
+                    />
+                  </td>
                   <td>{row.building_name ?? "—"}</td>
                   <td>{row.customer_name ?? "—"}</td>
                   {/* An em dash, not a zero: an unfinished ticket has no
@@ -353,9 +385,22 @@ export function TicketReportView({ filters }: ReportViewProps) {
             </tbody>
           </table>
         </div>
+        </BoundedList>
       )}
     </PeriodReportView>
   );
+}
+
+/** One category line, in the buildings breakdown and in the roll-up.
+ *  Both come from the same server-side builder, so they cannot be
+ *  shaped differently. */
+interface MeldingenCategoryRow {
+  category: number | null;
+  category_name: string | null;
+  category_name_en: string | null;
+  category_slug: string | null;
+  category_color: string | null;
+  count: number;
 }
 
 interface MeldingenByCategoryPayload extends PeriodPayload {
@@ -363,22 +408,27 @@ interface MeldingenByCategoryPayload extends PeriodPayload {
     building: number | null;
     building_name: string | null;
     total: number;
-    categories: {
-      category: number | null;
-      category_name: string | null;
-      count: number;
-    }[];
+    categories: MeldingenCategoryRow[];
   }[];
+  /** W13 — the same period rolled up ACROSS buildings, one line per
+   *  group. "How many tickets did we open in 2026, and what are the
+   *  groups?" is this list. */
+  categories: MeldingenCategoryRow[];
+  total: number;
   uncategorised: number;
 }
 
 /**
- * Sprint 185 E §1 — "how many meldingen per category per building".
+ * Two readings of one period, in the order they are asked for.
  *
- * The monthly customer review, which was unanswerable before this sprint
- * because nothing in the system classified the WORK. Same shell as the
- * three hours reports (period picker, CSV, PDF, empty state), same
- * building-outside / rows-inside shape as `employee-hours-by-building`.
+ * FIRST, the groups: "how many tickets did we open in 2026? What are the
+ * groups of these tickets?" — W13's question, and it is answered by the
+ * table at the top without the reader adding anything up.
+ *
+ * THEN, per building: "how many meldingen per category per building",
+ * the monthly customer review. Same shell as the three hours reports
+ * (period picker, CSV, PDF, empty state), same building-outside /
+ * rows-inside shape as `employee-hours-by-building`.
  *
  * An UNCATEGORISED bucket arrives with `category_name: null` and is
  * rendered as a named row rather than dropped: the report's total has to
@@ -386,7 +436,21 @@ interface MeldingenByCategoryPayload extends PeriodPayload {
  * untagged" is the number that says whether the taxonomy is being used.
  */
 export function MeldingenByCategoryView({ filters }: ReportViewProps) {
-  const { t } = useTranslation(["reports", "common"]);
+  const { t, i18n } = useTranslation(["reports", "common"]);
+  /* W14 §1 — THE READER'S LANGUAGE, ON THE ONE SURFACE THAT WAS TOLD TO
+     PICK AND NEVER DID.
+     `reports/category_report.py::_category_row` ships BOTH labels and
+     says so in as many words: "neither is resolved here. The reader's
+     language is a CLIENT concern." This client then rendered
+     `category_name` — the Dutch column — unconditionally, so an English
+     reader met "Storing" in the report while the ticket list beside it
+     said "Malfunction". `i18n.language` is the same value the rest of
+     the page is rendered in; the Dutch label stays the fallback for an
+     English label nobody filled in, matching `label_for`. */
+  const label = (row: MeldingenCategoryRow) =>
+    i18n.language.startsWith("en")
+      ? row.category_name_en || row.category_name
+      : row.category_name;
   return (
     <PeriodReportView<MeldingenByCategoryPayload>
       endpoint="/reports/meldingen-by-category/"
@@ -396,7 +460,59 @@ export function MeldingenByCategoryView({ filters }: ReportViewProps) {
       filters={filters}
     >
       {(payload) => (
+        <BoundedList
+          size="lg"
+          count={Math.max(1, payload.categories.length + payload.buildings.length)}
+          ariaLabel={t("meldingen_category_title")}
+          testIdPrefix="meldingen-category"
+        >
         <div className="table-wrap">
+          {/* W13 — the groups, before the buildings. */}
+          {payload.categories.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <div className="form-section-title report-group-title">
+                {t("meldingen_groups_title")} — {payload.total}
+              </div>
+              <table className="data-table data-table-dense">
+                <thead>
+                  <tr>
+                    <th>{t("common:ticket_categories.field_label")}</th>
+                    <th className="contract-num">{t("meldingen_count")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payload.categories.map((row) => (
+                    <tr
+                      key={row.category ?? "none"}
+                      data-testid="meldingen-group-row"
+                    >
+                      <td>
+                        {label(row) ? (
+                          <>
+                            <span
+                              className="ticket-category-chip"
+                              style={
+                                row.category_color
+                                  ? { background: row.category_color }
+                                  : undefined
+                              }
+                              aria-hidden="true"
+                            />
+                            {label(row)}
+                          </>
+                        ) : (
+                          <span className="muted-empty">
+                            {t("meldingen_uncategorised")}
+                          </span>
+                        )}
+                      </td>
+                      <td className="contract-num">{row.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           {payload.buildings.map((bucket) => (
             <div
               key={bucket.building ?? "none"}
@@ -408,7 +524,7 @@ export function MeldingenByCategoryView({ filters }: ReportViewProps) {
               <table className="data-table data-table-dense">
                 <thead>
                   <tr>
-                    <th>{t("common:work_categories.field_label")}</th>
+                    <th>{t("common:ticket_categories.field_label")}</th>
                     <th className="contract-num">{t("meldingen_count")}</th>
                   </tr>
                 </thead>
@@ -416,7 +532,7 @@ export function MeldingenByCategoryView({ filters }: ReportViewProps) {
                   {bucket.categories.map((row) => (
                     <tr key={row.category ?? "none"}>
                       <td>
-                        {row.category_name ?? (
+                        {label(row) ?? (
                           <span className="muted-empty">
                             {t("meldingen_uncategorised")}
                           </span>
@@ -434,6 +550,7 @@ export function MeldingenByCategoryView({ filters }: ReportViewProps) {
             : {payload.uncategorised}
           </p>
         </div>
+        </BoundedList>
       )}
     </PeriodReportView>
   );

@@ -14,6 +14,7 @@
 // stays right even when `entries` hits its bound — which the response
 // says out loud through `truncated`.
 import { api } from "./client";
+import type { ExtraWorkDisplayPhase } from "./types";
 
 /** Why a card is in the week it is in. §12B: a card shown outside its
  *  planned week must say why. */
@@ -21,17 +22,98 @@ export type WorkPlanPlacement =
   | "PLANNED"
   | "STARTED_EARLY"
   | "STARTED"
-  | "OVERDUE";
+  | "OVERDUE"
+  /** W-PLANTRUTH §1b — planned for a day that has passed, still not
+   *  done, so the DISPLAY rolled it onto today's column. The planned
+   *  date itself never moved: `rolled_from` is it. */
+  | "ROLLED"
+  /** P-1 §3 — finished by the worker, waiting for a manager; on today
+   *  for readers who can confirm it, with `stuck_age_days`. */
+  | "REVIEW";
 
 /** The normalised state, shared by both sources. NOT `slot_status` and
  *  NOT the extra-work status — those two enums agree about almost
  *  nothing; the server maps each onto these four once. */
 export type WorkPlanState = "OPEN" | "IN_PROGRESS" | "DONE" | "BLOCKED";
 
-export type WorkPlanKind = "TICKET_SLOT" | "EXTRA_WORK";
+/**
+ * W-VIEWER — the three shapes a card can be, and WHO gets which.
+ *
+ *   TICKET       the JOB. One card per ticket, on the ticket's own
+ *                scheduled date, whatever its people's days say. What a
+ *                provider-management caller reading the company's week
+ *                gets. `status` is a TICKET status.
+ *   TICKET_SLOT  one person's dated piece of a ticket, on the day THEY
+ *                were given, with THEIR parts. What a caller reading
+ *                their own week gets, and the only ticket shape a STAFF
+ *                caller can get. `status` is a SLOT status.
+ *   EXTRA_WORK   an extra-work request nobody has spawned a ticket for
+ *                yet. `status` is an extra-work status.
+ *
+ * The badge is picked off this field, which is why the first two are
+ * separate kinds rather than one kind with a flag: they carry different
+ * status vocabularies.
+ */
+export type WorkPlanKind = "TICKET" | "TICKET_SLOT" | "EXTRA_WORK";
 
 /** One card. Both kinds answer with the SAME shape — extra work has no
  *  dated slot, so its three time fields are null rather than absent. */
+/** W-LATE §3b — where a part stands against its own window. Mirrors
+ *  `tickets/lateness.part_state`; `NONE` is "no window". */
+export type WorkPlanPartState = "NONE" | "OPEN" | "LAST_DAY" | "MISSED" | "DONE";
+
+/** One named part of a ticket, as the Work Plan shows it, with its own
+ *  window (W-LATE §3a) and the STATE the server decided for it. */
+export interface WorkPlanPart {
+  id: number;
+  title: string;
+  planned_start: string | null;
+  planned_end: string | null;
+  time_window_label: string;
+  is_done: boolean;
+  state: WorkPlanPartState;
+}
+
+/** W-LATE — one rung of the ladder. `1` planned date passed, `2`
+ *  deadline passed, `3` never done (thirty days past the anchor with no
+ *  hour booked). Mirrors `tickets/lateness.py`, the ONE owner. */
+export type LateLevel = 1 | 2 | 3;
+
+/** W-LATE phase 2 — one escalation step that has fired for this job:
+ *  which rung spoke, when, and to whom (display names resolved at
+ *  render time from the recipients the step actually reached). */
+export interface WorkPlanEscalationStep {
+  /** The STORED step values. `L3_QUARANTINE` keeps its spelling because
+   *  it is a stored choice (W-PLANTRUTH §1c renamed the rung, not the
+   *  data); everything the reader sees says "never done". */
+  step: "L2_MANAGERS" | "L2_ESCALATED" | "L3_QUARANTINE";
+  notified_at: string;
+  names: string[];
+}
+
+/** W-LATE §1b — the facts the ladder produced for one JOB. Always
+ *  present on every entry; `level: null` means "not late". The server
+ *  is the owner of the rule (`tickets/lateness.py`); the client only
+ *  reads this through `components/workplan/lateness.ts`. */
+export interface WorkPlanLateness {
+  level: LateLevel | null;
+  /** The last planned day — the window end — that L1 compares against. */
+  planned_date: string | null;
+  planned_days_late: number | null;
+  deadline: string | null;
+  deadline_days_late: number | null;
+  /** What L3 counts from: the deadline, else the planned date. */
+  anchor: string | null;
+  anchor_days: number | null;
+  /** Days late against the plan, else against the deadline. */
+  days_late: number | null;
+  /** Decimal as a string, the way every amount travels. */
+  hours_booked: string;
+  /** W-LATE §2 — the steps the ladder has spoken for this job; empty
+   *  when nothing has fired. */
+  escalation_steps: WorkPlanEscalationStep[];
+}
+
 export interface WorkPlanEntry {
   kind: WorkPlanKind;
   /** "slot-12" / "ew-7" — unique across both sources, so a merged list
@@ -47,6 +129,10 @@ export interface WorkPlanEntry {
   status: string;
   state: WorkPlanState;
   ticket_status: string | null;
+  /** P-11 A1 — the extra-work row's status word: the same
+   *  `display_phase` the Extra work list shows, server-decided; null
+   *  on ticket and slot rows (those carry `ticket_status`). */
+  display_phase: ExtraWorkDisplayPhase | null;
   ticket_type: string | null;
   urgency: string | null;
   customer_name: string | null;
@@ -57,17 +143,131 @@ export interface WorkPlanEntry {
   due_date: string | null;
   scheduled_start_at: string | null;
   scheduled_end_at: string | null;
+  /** P-3 §A.3 — the clock, decided by the SERVER in its own zone
+   *  ("09:30"), or null when the plan is a DAY and not a time. A card
+   *  prints a clock from these and never from the raw instant above:
+   *  a date-only plan stored as Amsterdam midnight rendered as
+   *  "01:00 AM" in a browser three hours east. */
+  start_time: string | null;
+  end_time: string | null;
   time_window_label: string | null;
   assignment_note: string | null;
   completion_note: string | null;
   unable_to_complete_reason: string | null;
+  /** P-7 S8 — why the job was parked (the ON_HOLD leg's note); set on
+   *  the parked list's rows only. */
+  parked_reason?: string | null;
   /** The day column this card hangs on, "YYYY-MM-DD". */
   day: string;
   placement: WorkPlanPlacement;
+  /** W-PLANTRUTH §1b — on a ROLLED card only: the day it was PLANNED
+   *  for (the date that placed it, and the date its badge prints) and
+   *  how many whole days past that today is. Null on every other card. */
+  rolled_from: string | null;
+  rolled_days: number | null;
   is_overdue: boolean;
   overdue_days: number | null;
+  /** W-VIEWER §5 — this reader's standing against the promise, SIGNED
+   *  and whole: `3` is three days left, `0` is today, `-2` is two days
+   *  past. Null when nothing was promised. "Late or not" says it one day
+   *  too late to act on; this is what lets somebody read where they
+   *  stand without opening the ticket. */
+  days_until_due: number | null;
+  /** W-VIEWER §5 — nothing is being asked of THIS reader right now, so
+   *  the card renders calm rather than urgent. For a worker: their slot
+   *  is off their hands and every part of theirs is done. For a manager:
+   *  the job is not in a status the provider side is holding — the
+   *  ruling's own example is work sent to the customer and waiting on
+   *  their answer, which they may still withdraw. Visible either way;
+   *  just not shouting. */
+  viewer_settled: boolean;
+  /** FE-4 (Addendum D §D.12) — the honest-date facts. `created_at` is
+   *  when the record was created and is NEVER dressed as a plan;
+   *  `plan_source` says whether the window came from the ticket's own
+   *  schedule, the provider's commitment, or the customer's WISH (a
+   *  wish is captioned as one); `due_kind` is what the headline
+   *  lateness counts against; `settled_at` / `settled_days_after_due`
+   *  are the past-tense facts of work that is over. */
+  created_at: string | null;
+  /** P-10 A4 — the creation day as the server states it ("YYYY-MM-DD"). */
+  created_day: string | null;
+  plan_source: "TICKET" | "PROVIDER_PLAN" | "CUSTOMER_WISH" | null;
+  /** P-15 §0.4 — the customer's wish as a bare fact ("Wished for
+   *  {date}"), carried only when the wish is the record's sole date.
+   *  It places nothing; the Not-planned strip prints it. */
+  wished_day: string | null;
+  /** P-1 — a date is a plan only if a PERSON made it. `has_real_plan`
+   *  is false for a seeded date nobody set; such a card reads "created
+   *  ... not planned yet", never "planned", never late. `planned_by_name`
+   *  / `planned_at` say who and when; `created_by_name` says who opened
+   *  the record. */
+  has_real_plan: boolean;
+  planned_by_name: string | null;
+  planned_at: string | null;
+  created_by_name: string | null;
+  due_kind: "DEADLINE" | "PLANNED_DAY" | null;
+  settled_at: string | null;
+  /** P-8R E — when the work was reported done (the moment it went to
+   *  the customer / the manager for a check), server-computed from the
+   *  status history; null unless the ticket is waiting on that check. */
+  reported_done_at: string | null;
+  /** P-9 §A.3 — the one card standard's facts, on every kind (null
+   *  where they do not apply): who reported the work done and how many
+   *  whole days ago, when the customer approved, who the finished work
+   *  was sent to, the plan's hours ("4.00"), and how many days after
+   *  the last planned day the finish came (0 = on the day). The three
+   *  `*_day` fields are the same moments as DAYS decided by the server
+   *  in its own zone (P-3 §A.3) — print those, never a slice of the
+   *  instant. */
+  reported_done_by_name: string | null;
+  waiting_days: number | null;
+  approved_at: string | null;
+  sent_to_name: string | null;
+  planned_hours: string | null;
+  settled_days_after_plan: number | null;
+  settled_day: string | null;
+  reported_done_day: string | null;
+  approved_day: string | null;
+  /** P-10 A4 — the finished card's Details: the manager's check and the
+   *  customer's approval (server day + name), and the report's clock
+   *  ("15:00", or null at midnight / unknown). */
+  manager_checked_day: string | null;
+  manager_checked_by_name: string | null;
+  approved_by_name: string | null;
+  /** P-15 §0.3 — the approval leg was an on-behalf override: the card
+   *  words the manager's check as the sign-off. */
+  approved_on_behalf: boolean;
+  reported_done_time: string | null;
+  settled_days_after_due: number | null;
+  /** WP-1 G2 — whole days this job has sat with NO planned date at
+   *  all. Null on every dated entry. The "Nog niet gepland" lane
+   *  prints it past a threshold so dateless work still nags. */
+  unplanned_age_days: number | null;
+  /** WP-1 G1 — whole days this job has been stuck (somebody said
+   *  "unable" and nobody is assigned any more). Set on the rows of
+   *  `stuck_entries`, null everywhere else. */
+  stuck_age_days: number | null;
+  /** P-4 (Part E) — the waiting drawer acts: may THIS reader answer on
+   *  the customer's behalf (the ticket detail's own
+   *  `actions.can_override_customer_decision`, same rule, same answer).
+   *  False on every row that is not waiting on the customer. */
+  can_override_customer_decision: boolean;
+  /** P-3 §A.5 — a REAL plan whose last day is past the deadline. Said
+   *  on the card and the detail; nothing is blocked. */
+  planned_after_deadline: boolean;
   assignee_names: string[];
   assignee_count: number;
+  /** P-10 A2 — the managers answerable for the job (the three tiers of
+   *  `ticket_responsible_manager_recipients`); filled on the rows of
+   *  `review_entries`, empty everywhere else. */
+  manager_names: string[];
+  /** W-N1 §3 — the parts of this ticket THIS entry's person holds.
+   *  Always an array, never null, and empty for extra work, which has
+   *  no parts. Scope is the server's: a STAFF viewer's rows carry their
+   *  own parts, a manager's carry everyone's. */
+  parts: WorkPlanPart[];
+  /** W-LATE §1b — the rung this JOB stands on. */
+  lateness: WorkPlanLateness;
   /** The completion actions belong to the person holding the slot — an
    *  admin reading the team's week is not working it. */
   can_complete: boolean;
@@ -85,6 +285,21 @@ export interface WorkPlanCounts {
   overdue_all: number;
   upcoming: number;
   undated: number;
+  /** P-7 S8 — the parked sub-view's number. */
+  parked: number;
+  /** W-LATE §1a — late JOBS (deduped), any week, the strip's own count. */
+  late: number;
+  /** WP-1 G1 — stuck jobs (blocked with nobody assigned), whole scope. */
+  stuck: number;
+  /** P-3 §A.1 — jobs waiting on the customer, whole scope. */
+  waiting_customer: number;
+  /** P-10 A2 — reported done, waiting for a manager's check, and NOT
+   *  this viewer's to check: the strip's number, whole scope. For a
+   *  worker: their own reported-done slots. */
+  review: number;
+  /** P-10 A2 — the review jobs THIS viewer is responsible for: their
+   *  today cards. 0 for a worker and for anyone responsible for none. */
+  review_mine: number;
 }
 
 export interface WorkPlanWeek {
@@ -100,6 +315,10 @@ export interface WorkPlanResponse {
   week: WorkPlanWeek;
   today: string;
   scope: "own" | "company";
+  /** FE-5 step 0 — whether this viewer may put undated work on a day.
+   *  The server's answer, from the same role rule its two schedule
+   *  endpoints enforce; the lane shows "Plan vandaag" only when true. */
+  can_plan: boolean;
   counts: WorkPlanCounts;
   entries: WorkPlanEntry[];
   overdue_entries: WorkPlanEntry[];
@@ -109,17 +328,48 @@ export interface WorkPlanResponse {
    *  `counts.undated` has always been here; the ROWS had not, so the
    *  page could only say how much work it was declining to show. */
   undated_entries: WorkPlanEntry[];
+  /** P-7 S8 — parked (ON_HOLD) undated work: out of the nag, in its
+   *  own quiet list inside the drawer, with reasons. */
+  parked_entries: WorkPlanEntry[];
+  /** W-LATE §1a — the late strip: one row per late JOB, sorted by the
+   *  ladder (orange leftmost, bordeaux rightmost), each carrying the
+   *  same `lateness` the week cards carry. */
+  late_entries: WorkPlanEntry[];
+  /** WP-1 G1 — "Vastgelopen — actie nodig": work that stopped without
+   *  being done (unable-to-complete with nobody assigned; extra work
+   *  whose ticket ended blocked). A row leaves only when a human
+   *  reschedules, reassigns or cancels through the existing actions. */
+  stuck_entries: WorkPlanEntry[];
+  /** P-3 §A.1 — work sent to the customer and waiting on their answer.
+   *  In the current week these rows are in NO day column; they live
+   *  behind the "Wacht op klant" chip, whole scope. */
+  waiting_customer_entries: WorkPlanEntry[];
+  /** P-10 A2 — the "Waiting for a manager's check" strip (or, for a
+   *  worker, "Reported done, waiting for the check"): whole scope,
+   *  never a column. The responsible manager's own rows are NOT here —
+   *  they hang on their today with placement REVIEW. */
+  review_entries: WorkPlanEntry[];
   limits: {
     entries: number;
     overdue_entries: number;
     upcoming_entries: number;
     undated_entries: number;
+    parked_entries: number;
+    late_entries: number;
+    stuck_entries: number;
+    waiting_customer_entries: number;
+    review_entries: number;
   };
   truncated: {
     entries: boolean;
     overdue_entries: boolean;
     upcoming_entries: boolean;
     undated_entries: boolean;
+    parked_entries: boolean;
+    late_entries: boolean;
+    stuck_entries: boolean;
+    waiting_customer_entries: boolean;
+    review_entries: boolean;
   };
 }
 

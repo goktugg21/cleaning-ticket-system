@@ -82,7 +82,14 @@ class ContractRevisionListCreateView(generics.ListCreateAPIView):
                 ContractRevision.objects.filter(contract=contract)
             )
             .select_related("contract", "created_by")
-            .prefetch_related("lines__building")
+            .prefetch_related(
+                "lines__building",
+                "lines__department",
+                # P-12 C3 - the line's recurring rules, one prefetch so the
+                # nested serializer's `recurring` field costs no per-row query
+                # (test_query_counts pins the page cost).
+                "lines__recurring_jobs",
+            )
             .order_by("-effective_from", "-id")
         )
 
@@ -166,7 +173,14 @@ class ContractRevisionDetailView(generics.RetrieveUpdateDestroyAPIView):
             self.request.user,
             annotate_revision_totals(ContractRevision.objects.all())
             .select_related("contract", "contract__company", "created_by")
-            .prefetch_related("lines__building"),
+            .prefetch_related(
+                "lines__building",
+                "lines__department",
+                # P-12 C3 - the line's recurring rules, one prefetch so the
+                # nested serializer's `recurring` field costs no per-row query
+                # (test_query_counts pins the page cost).
+                "lines__recurring_jobs",
+            ),
         )
 
     def perform_update(self, serializer):
@@ -233,7 +247,7 @@ class ContractLineListCreateView(generics.ListCreateAPIView):
         revision = self._revision()
         return (
             ContractLine.objects.filter(revision=revision)
-            .select_related("building")
+            .select_related("building", "department")
             .order_by("sort_order", "id")
         )
 
@@ -260,6 +274,7 @@ class ContractLineDetailView(generics.RetrieveUpdateDestroyAPIView):
             self.request.user,
             ContractLine.objects.select_related(
                 "building",
+                "department",
                 "revision",
                 "revision__contract",
                 "revision__contract__company",

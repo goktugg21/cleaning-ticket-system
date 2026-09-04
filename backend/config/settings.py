@@ -1,4 +1,6 @@
 import os
+
+from celery.schedules import crontab
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
@@ -145,6 +147,32 @@ else:
             "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "cleaning_ticket_password"),
             "HOST": os.environ.get("POSTGRES_HOST", "db"),
             "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            # Persistent database connections.
+            #
+            # Django's default is CONN_MAX_AGE=0, which opens a BRAND NEW
+            # Postgres connection for every single HTTP request and closes
+            # it again at request_finished. On crmtest that handshake was
+            # measured at a median 204.5 ms (same PK query: 11.0 ms on a
+            # persistent connection vs 215.5 ms on a fresh one), because the
+            # host is a single-vCPU box and the connection setup is
+            # CPU-bound, not query-bound.
+            #
+            # The ticket detail page issues ~15 API calls, so that default
+            # was costing roughly 3 seconds of pure connection setup per
+            # page load — and each of those seconds occupied one of only
+            # GUNICORN_WORKERS (3) synchronous workers, which is what turns
+            # a slow box into an unresponsive one.
+            #
+            # CONN_HEALTH_CHECKS (Django 4.1+) is what makes reuse safe: at
+            # the start of each request Django pings the pooled connection
+            # and transparently replaces it if the server closed it (db
+            # container restart, idle timeout), so a recycled connection can
+            # never surface as a "connection already closed" 500.
+            #
+            # Connection budget: 3 gunicorn workers + 2 celery workers +
+            # beat hold at most ~6 connections against max_connections=100.
+            "CONN_MAX_AGE": int(os.environ.get("CONN_MAX_AGE", "60")),
+            "CONN_HEALTH_CHECKS": True,
         }
     }
 
@@ -341,6 +369,112 @@ SLA_AT_RISK_THRESHOLD = 0.8  # fraction of target consumed before AT_RISK
 # accrue an SLA. Stored as ISO date in TIME_ZONE; converted at use sites.
 SLA_ENGINE_START_DATE = "2026-05-06"
 
+# ---------------------------------------------------------------------------
+# Sprint W1-B §2.7 — the time-driven warning sweep (`sla.warnings.sweep`).
+#
+# The SLA engine above measures; these decide when silence becomes a
+# message. Every default is deliberately generous — a warning system that
+# cries early gets muted, and a muted warning system is the state we
+# started from.
+#
+# SPRINT W4-Q §2 — THESE ARE NOW THE FALLBACK, NOT THE SOURCE OF TRUTH.
+#
+# W1-B made them env vars so the owner could tune them without a code
+# change, which is still a deploy, and — worse — one number for every
+# tenant on the platform. A provider running a same-day emergency service
+# and a provider running a monthly contract round do not agree on when
+# silence becomes a problem, and a shared number is wrong for both.
+#
+# Each provider company can now store its own value
+# (`sla.models.SlaWarningThreshold`, edited at /admin/sla-warnings), and
+# `sla.thresholds.resolve` reads the company's number where there is one
+# and the value below where there is not — PER FIELD, so a company that
+# tuned only its manager-review clock keeps these defaults for the rest.
+#
+# Nothing had to change in any existing deployment for that to be true:
+# until somebody saves a number, no company has a row, and every warning
+# resolves to exactly the value below. Do NOT delete these — a company
+# that has configured nothing has nothing else to fall back on.
+#
+# One unit note: the two *_BUSINESS_SECONDS pairs are seconds here
+# because they were written for the engine, and business HOURS on the
+# model and the screen because that is what a person tuning them thinks
+# in. `sla.thresholds` does that conversion in one place.
+# ---------------------------------------------------------------------------
+
+#: Warn the customer this many calendar days before their billing cutoff
+#: that finished work still waiting on their approval will be invoiced on
+#: that date anyway (the `extra_work.billing.is_earned` cutoff arm).
+SLA_WARN_APPROVAL_CUTOFF_DAYS = int(
+    os.environ.get("SLA_WARN_APPROVAL_CUTOFF_DAYS", "5")
+)
+
+#: ...and escalate ONE hop to the provider side inside this many days of
+#: the cutoff. Must be <= the figure above or the hop never fires before
+#: the first notice does.
+SLA_WARN_APPROVAL_CUTOFF_ESCALATE_DAYS = int(
+    os.environ.get("SLA_WARN_APPROVAL_CUTOFF_ESCALATE_DAYS", "2")
+)
+
+#: Business seconds a ticket may sit at WAITING_MANAGER_REVIEW — staff
+#: have said "done" and nobody has checked it — before the responsible
+#: manager is warned. One business day by default.
+SLA_WARN_MANAGER_REVIEW_BUSINESS_SECONDS = int(
+    os.environ.get("SLA_WARN_MANAGER_REVIEW_BUSINESS_SECONDS", str(8 * 60 * 60))
+)
+
+#: ...and the second, larger threshold at which the one escalation hop
+#: reaches the company admins. Three business days by default.
+SLA_WARN_MANAGER_REVIEW_ESCALATE_BUSINESS_SECONDS = int(
+    os.environ.get(
+        "SLA_WARN_MANAGER_REVIEW_ESCALATE_BUSINESS_SECONDS", str(24 * 60 * 60)
+    )
+)
+
+#: Business seconds past a planned start before "this has not started" is
+#: worth saying. Half a business day by default, so a job that slips a
+#: morning is not an incident.
+SLA_WARN_NOT_STARTED_BUSINESS_SECONDS = int(
+    os.environ.get("SLA_WARN_NOT_STARTED_BUSINESS_SECONDS", str(4 * 60 * 60))
+)
+
+#: ...and the escalation hop to the responsible manager. Two business
+#: days by default.
+SLA_WARN_NOT_STARTED_ESCALATE_BUSINESS_SECONDS = int(
+    os.environ.get(
+        "SLA_WARN_NOT_STARTED_ESCALATE_BUSINESS_SECONDS", str(16 * 60 * 60)
+    )
+)
+
+#: How long one (event type, subject, recipient) stays quiet after a
+#: warning went out. The sweep runs on the same 5-minute beat as the SLA
+#: reconciler, so WITHOUT this every warning would be re-sent 288 times a
+#: day. 24h means at most one warning per person per problem per day —
+#: across BOTH channels since W4-Q, not one mail plus one bell.
+SLA_WARN_COOLDOWN_HOURS = int(os.environ.get("SLA_WARN_COOLDOWN_HOURS", "24"))
+
+# ---------------------------------------------------------------------------
+# W3-H — the hourly rate labour cost is computed at (plan §2.8).
+#
+# UNSET BY DEFAULT, and the default is the design rather than a gap.
+# The FALLBACK hourly rate, for anyone with no personal one.
+#
+# W4-R designed the per-person rate this comment used to await:
+# `reports.models.EmployeeHourlyRate`, one dated row per person per
+# company, resolved as of the DAY of the hour being costed so a raise
+# never re-prices past work. It lives in `reports` because `timesheets`
+# is written never to hold a wage and says so at the field.
+#
+# This setting is what costs the hours of somebody who has no row. Leave
+# it unset and those hours are simply not costed — the hours screen says
+# so rather than printing EUR 0,00, which would claim the work cost
+# nothing. A crew where SOME people are unpriced yields no job total at
+# all, not a partial one.
+#
+# Read ONLY by `reports.labour_cost.resolve_deployment_hourly_rate`. A
+# second reader would be a second rule.
+LABOUR_COST_HOURLY_RATE_EUR = os.environ.get("LABOUR_COST_HOURLY_RATE_EUR", "")
+
 CELERY_BEAT_SCHEDULE = {
     "reconcile-sla-states": {
         "task": "sla.tasks.reconcile_sla_states",
@@ -366,6 +500,56 @@ CELERY_BEAT_SCHEDULE = {
     "run-daily-invoice-run": {
         "task": "invoicing.tasks.run_daily_invoice_run",
         "schedule": 24 * 60 * 60,
+    },
+    # W-N1 §1 — the deadline reminder. DAILY, not every five minutes:
+    # the window it watches is 48 hours wide and the reminder fires ONCE
+    # per ticket per person ever, so a tighter beat would buy nothing
+    # and only widen the blast radius of a bad row. See
+    # `tickets/deadline_reminders.py` for why it does not repeat.
+    "sweep-deadline-reminders": {
+        "task": "tickets.tasks.sweep_deadline_reminders",
+        "schedule": 24 * 60 * 60,
+    },
+    # W-LATE §2c — the late ladder. Hourly: its facts are DAYS (a
+    # deadline passed, thirty days without an hour), so a five-minute
+    # beat would buy nothing, and a daily one would make "the deadline
+    # passed at midnight" arrive up to a day late. Every step is deduped
+    # by a `TicketEscalation` row written in the same transaction as
+    # the notifications, so the cadence changes WHEN a step speaks,
+    # never HOW OFTEN. See `tickets/escalations.py`.
+    "sweep-late-escalations": {
+        "task": "tickets.tasks.sweep_late_escalations",
+        "schedule": 60 * 60,
+    },
+    # Sprint W1-B §2.7 — the time-driven warning sweep. Same 5-minute
+    # cadence as the SLA reconciler above, and for the same reason: it
+    # answers "has a threshold been crossed since I last looked?", which
+    # is only useful if it looks often. What stops it becoming 288 mails
+    # a day is the cooldown (per company since W4-Q, falling back to
+    # SLA_WARN_COOLDOWN_HOURS), which is a query against the rows the
+    # sweep itself wrote on both channels — the same
+    # data-is-the-idempotency-key argument `invoicing/tasks.py` makes for
+    # the invoice claim, rather than a "did we run today?" flag.
+    "sweep-sla-warnings": {
+        "task": "sla.tasks.sweep_sla_warnings",
+        "schedule": 5 * 60,
+    },
+    # P-5 S8.4 — Monday 07:00 (server zone): the weekly list of warnings
+    # sent, for the companies that switched it on.
+    "send-sla-weekly-summary": {
+        "task": "sla.tasks.send_sla_weekly_summary",
+        "schedule": crontab(hour=7, minute=0, day_of_week="mon"),
+    },
+    # WP-1 G4 — the billing-month-at-risk digest. WEEKLY: the guard's
+    # panel is recomputed live on every page load, so the mail exists to
+    # make a broken completion chain impossible to miss for a month,
+    # not to nag daily. The task de-dups per recipient over a six-day
+    # window (a query against the NotificationLog rows it wrote — the
+    # same data-is-the-idempotency-key argument the invoice claim
+    # makes), so a beat restart cannot double-mail the week.
+    "send-billing-month-at-risk-digest": {
+        "task": "invoicing.tasks.send_billing_month_at_risk_digest",
+        "schedule": 7 * 24 * 60 * 60,
     },
 }
 
@@ -434,3 +618,9 @@ validate_production_settings(globals(), environ=os.environ)
 if "test" in sys.argv or os.environ.get("DJANGO_TEST", "") == "1":
     CELERY_TASK_ALWAYS_EAGER = True
     CELERY_TASK_EAGER_PROPAGATES = True
+    # Persistent connections are a production latency optimisation only.
+    # The test runner wraps each test in a transaction on a connection it
+    # owns; leaving CONN_MAX_AGE at the production default would keep
+    # connections alive across tests for no benefit, so pin it back to
+    # Django's per-request default here.
+    DATABASES["default"]["CONN_MAX_AGE"] = 0

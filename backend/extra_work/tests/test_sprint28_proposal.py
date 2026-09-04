@@ -40,6 +40,7 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+from .plan_gate_fixture import make_plan_complete
 from extra_work.proposal_state_machine import (
     apply_proposal_transition,
     TransitionError,
@@ -161,6 +162,9 @@ class ProposalFixtureMixin:
             category=ExtraWorkCategory.DEEP_CLEANING,
             status=status,
         )
+        # W-PLAN — pricing is gated on a complete plan; this
+        # module tests pricing surfaces, not the gate.
+        make_plan_complete(ew)
         # A cart item is seeded so the EW looks like a real cart-first
         # request. NOTE: the B2 SEND-time cart-coverage gate was REMOVED
         # on 2026-06-03 (owner decision) — proposal lines no longer have
@@ -558,7 +562,12 @@ class CustomerRejectTests(ProposalFixtureMixin, TestCase):
         before = Ticket.objects.count()
         response = self._api(self.cust_user).post(
             self._transition_url(ew.id, proposal.id),
-            {"to_status": ProposalStatus.CUSTOMER_REJECTED},
+            {
+                "to_status": ProposalStatus.CUSTOMER_REJECTED,
+                # P-16 repin - P-8R: a customer rejection carries its
+                # reason as `note` (rejection_note_required).
+                "note": "not needed",
+            },
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)
@@ -962,7 +971,12 @@ class ProposalReSendAfterRejectionTests(ProposalFixtureMixin, TestCase):
         # Customer rejects.
         self._api(self.cust_user).post(
             self._transition_url(ew.id, proposal.id),
-            {"to_status": ProposalStatus.CUSTOMER_REJECTED},
+            {
+                "to_status": ProposalStatus.CUSTOMER_REJECTED,
+                # P-16 repin - P-8R: a customer rejection carries its
+                # reason as `note` (rejection_note_required).
+                "note": "not needed",
+            },
             format="json",
         )
         ew.refresh_from_db()

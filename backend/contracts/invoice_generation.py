@@ -57,7 +57,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .billing import build_forecast, money
-from .models import Contract, ContractInvoice, ContractLifecycle
+from .models import Contract, ContractInvoice, ContractKind, ContractLifecycle
 from .revisions import active_revision
 
 
@@ -174,15 +174,21 @@ def _due_rows(contract, on: date):
 
 
 def generate_invoices_for_contract(
-    contract, *, actor, on: Optional[date] = None
+    contract, *, actor=None, system: bool = False, on: Optional[date] = None
 ) -> GenerationResult:
     """Create DRAFT invoices for every due, not-yet-invoiced period.
 
-    `actor` is REQUIRED and has no default. `Invoice.created_by` is NOT
-    NULL, so every invoice records who made it — and a scheduled run is
-    not exempt from that question, it just has to answer it in
-    configuration instead of from a request. The management command
-    takes the user explicitly for the same reason.
+    Either `actor` or `system=True`. When this was written
+    `Invoice.created_by` was NOT NULL, so a caller had to name somebody;
+    Sprint 183 §3 made it nullable precisely so a scheduled run could
+    stop borrowing a person's name for documents they did not create, and
+    the Extra Work run has passed `system=True` ever since. That stale
+    requirement was the last thing keeping contract billing off the daily
+    run -- W11 removes it, and a system run's drafts render as System
+    exactly like the Extra Work ones beside them.
+
+    A caller that names an actor still gets that actor; the management
+    command does, because a person typed the command.
 
     (Found the hard way: the first version of this passed `actor=None`
     and wrapped the write in a broad `except IntegrityError`, which
@@ -192,16 +198,33 @@ def generate_invoices_for_contract(
     "already generated" case — that is the expected outcome of a second
     run and is counted, not reported as a failure.
     """
-    if actor is None:
+    if actor is None and not system:
         raise ValueError(
-            "generate_invoices_for_contract requires an actor: "
-            "Invoice.created_by is NOT NULL."
+            "generate_invoices_for_contract needs an actor, or system=True "
+            "to record the run as the system."
         )
     from invoicing.models import Invoice, InvoiceLine
     from invoicing.services import recompute_invoice_totals
 
     today = on or timezone.localdate()
     result = GenerationResult(created=[])
+
+    # W16 — AN EXTRA WORK REGISTER NEVER BILLS. This is the guard that
+    # makes the register safe to exist.
+    #
+    # Its lines mirror `ExtraWorkRequest` rows that ALREADY reach an
+    # invoice through `invoicing/selectors.py`, whose unbilled pool is
+    # defined as "no live `InvoiceLine` claims this row". A register
+    # line is not an `InvoiceLine` and claims nothing, so if this
+    # function billed a register the pool would go on offering the same
+    # work and every customer would be billed twice for every job.
+    #
+    # Checked HERE, before the lifecycle test, because a register is
+    # deliberately ACTIVE — it is not a proposal awaiting approval —
+    # and would otherwise sail straight past it. `test_w16_register`
+    # pins this.
+    if contract.kind == ContractKind.EXTRA_WORK:
+        return result
 
     # A DRAFT or CANCELLED contract does not bill. The status is derived
     # (`Contract.status`), so this reads the same answer the UI shows
@@ -233,7 +256,9 @@ def generate_invoices_for_contract(
                     status=Invoice.Status.DRAFT,
                     period_year=row.period_start.year,
                     period_month=row.period_start.month,
-                    created_by=actor,
+                    # NULL = the system, the same thing the Extra Work
+                    # run records for its own scheduled drafts.
+                    created_by=None if system else actor,
                 )
                 for index, line in enumerate(lines):
                     amount = money(line.amount)
@@ -289,11 +314,11 @@ def generate_invoices_for_contract(
 
 
 def generate_invoices(
-    *, actor, company=None, on: Optional[date] = None
+    *, actor=None, system: bool = False, company=None, on: Optional[date] = None
 ) -> GenerationResult:
     """Run the generator across every ACTIVE contract, optionally of one
-    company. The callable a management command, a test, or a future
-    scheduled task all share.
+    company. The callable the management command, the tests and the
+    DAILY RUN all share -- W11 made the last of those true.
     """
     today = on or timezone.localdate()
     combined = GenerationResult(created=[])
@@ -301,7 +326,9 @@ def generate_invoices(
     if company is not None:
         contracts = contracts.filter(company=company)
     for contract in contracts.select_related("company", "customer"):
-        one = generate_invoices_for_contract(contract, actor=actor, on=today)
+        one = generate_invoices_for_contract(
+            contract, actor=actor, system=system, on=today
+        )
         combined.created.extend(one.created)
         combined.skipped_existing += one.skipped_existing
         combined.skipped_not_due += one.skipped_not_due

@@ -198,11 +198,16 @@ class CartFixtureMixin:
             "title": "Cart submission",
             "description": "shopping cart",
             "category": ExtraWorkCategory.DEEP_CLEANING,
+            # W-EW1 §2 — the cart's ONE date. It lives at request level
+            # now; the server stamps every line's `requested_date` from
+            # it, and that stamped date is what the price resolver is
+            # called with. Kept at the value the per-line dates used to
+            # carry so every window this fixture depends on still hits.
+            "preferred_date": "2026-06-15",
             "line_items": [
                 {
                     "service": self.service_priced.id,
                     "quantity": "2.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "Top floor",
                 }
             ],
@@ -225,13 +230,11 @@ class CartRequestCreateTests(CartFixtureMixin, TestCase):
             {
                 "service": self.service_priced.id,
                 "quantity": "2.00",
-                "requested_date": "2026-06-15",
                 "customer_note": "Top floor",
             },
             {
                 "service": self.service_unpriced.id,
                 "quantity": "50.00",
-                "requested_date": "2026-06-20",
                 "customer_note": "",
             },
         ]
@@ -250,7 +253,9 @@ class CartRequestCreateTests(CartFixtureMixin, TestCase):
         self.assertEqual(len(lines), 2)
         self.assertEqual(lines[0].service_id, self.service_priced.id)
         self.assertEqual(lines[0].quantity, Decimal("2.00"))
+        # W-EW1 §2 — both lines took the cart's one date.
         self.assertEqual(lines[0].requested_date, date(2026, 6, 15))
+        self.assertEqual(lines[1].requested_date, date(2026, 6, 15))
         self.assertEqual(lines[0].customer_note, "Top floor")
         # `unit_type` denormalised from Service.unit_type at create
         # time (HOURS on the priced service).
@@ -276,9 +281,15 @@ class CartRequestCreateTests(CartFixtureMixin, TestCase):
         line.refresh_from_db()
         self.assertEqual(line.unit_type, ExtraWorkPricingUnitType.HOURS)
 
-    def test_per_line_requested_date_distinct_from_preferred_date(self):
+    def test_the_line_date_now_FOLLOWS_the_preferred_date(self):
+        """W-EW1 §2 — the exact reversal of the Sprint 28 rule.
+
+        This test used to prove a line could hold a date DISTINCT from
+        the request's `preferred_date`. One date flow means the opposite:
+        the line follows the request, and there is no way to separate
+        them from the outside.
+        """
         payload = self._base_payload(preferred_date="2026-07-01")
-        payload["line_items"][0]["requested_date"] = "2026-06-15"
         response = self._api(self.cust_basic_a).post(
             URL, payload, format="json"
         )
@@ -286,7 +297,7 @@ class CartRequestCreateTests(CartFixtureMixin, TestCase):
         request = ExtraWorkRequest.objects.get(id=response.data["id"])
         self.assertEqual(request.preferred_date, date(2026, 7, 1))
         line = request.line_items.get()
-        self.assertEqual(line.requested_date, date(2026, 6, 15))
+        self.assertEqual(line.requested_date, date(2026, 7, 1))
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +326,6 @@ class CartRequestRoutingDecisionTests(CartFixtureMixin, TestCase):
             {
                 "service": self.service_priced.id,
                 "quantity": "1.00",
-                "requested_date": "2026-06-15",
                 "customer_note": "",
             },
             {
@@ -323,7 +333,6 @@ class CartRequestRoutingDecisionTests(CartFixtureMixin, TestCase):
                 # returns None ↦ whole cart routes to PROPOSAL.
                 "service": self.service_unpriced.id,
                 "quantity": "1.00",
-                "requested_date": "2026-06-15",
                 "customer_note": "",
             },
         ]
@@ -342,7 +351,6 @@ class CartRequestRoutingDecisionTests(CartFixtureMixin, TestCase):
             {
                 "service": self.service_unpriced.id,
                 "quantity": "1.00",
-                "requested_date": "2026-06-15",
                 "customer_note": "",
             },
         ]
@@ -355,13 +363,13 @@ class CartRequestRoutingDecisionTests(CartFixtureMixin, TestCase):
             ExtraWorkRoutingDecision.PROPOSAL,
         )
 
-    def test_resolver_called_with_per_line_date(self):
+    def test_resolver_called_with_the_carts_date(self):
         # Date outside the contract window ↦ resolver returns None
         # even though there IS a contract row for this service. This
-        # locks the "resolver is called with line.requested_date"
-        # contract.
-        payload = self._base_payload()
-        payload["line_items"][0]["requested_date"] = "2025-12-01"
+        # still locks "the resolver is called with line.requested_date";
+        # W-EW1 §2 only changed WHERE that date comes from, so the date
+        # is now moved on the request rather than on the line.
+        payload = self._base_payload(preferred_date="2025-12-01")
         response = self._api(self.cust_basic_a).post(
             URL, payload, format="json"
         )
@@ -414,13 +422,11 @@ class CartRequestValidationTests(CartFixtureMixin, TestCase):
             {
                 "service": self.service_priced.id,
                 "quantity": "1.00",
-                "requested_date": "2026-06-15",
                 "customer_note": "",
             },
             {
                 "service": self.service_priced.id,
                 "quantity": "2.00",
-                "requested_date": "2026-06-20",
                 "customer_note": "",
             },
         ]
@@ -453,13 +459,20 @@ class CartRequestValidationTests(CartFixtureMixin, TestCase):
         )
         self.assertEqual(response.status_code, 400, response.data)
 
-    def test_missing_requested_date_rejected(self):
+    def test_a_per_line_requested_date_is_rejected(self):
+        """W-EW1 §2 reversed this one too.
+
+        A line with no date used to be the error. Now a line WITH a date
+        is: the cart has one date, and a stale client that still sends a
+        per-line one is told so rather than having it silently dropped.
+        """
         payload = self._base_payload()
-        payload["line_items"][0].pop("requested_date")
+        payload["line_items"][0]["requested_date"] = "2026-06-15"
         response = self._api(self.cust_basic_a).post(
             URL, payload, format="json"
         )
         self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("line_requested_date_not_accepted", str(response.data))
 
 
 # ---------------------------------------------------------------------------

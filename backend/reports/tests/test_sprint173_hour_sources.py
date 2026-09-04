@@ -48,10 +48,23 @@ class ModuleIndependenceTests(TimesheetsFixture):
         for path in root.rglob("*.py"):
             if "tests" in path.parts or "migrations" in path.parts:
                 continue
-            body = path.read_text(encoding="utf-8")
-            for forbidden in ("from tickets", "import tickets", "from extra_work"):
-                if forbidden in body:
-                    offenders.append(f"{path.name}: {forbidden}")
+            # P-16 repin — the boundary is MODULE-LOAD independence:
+            # no top-level import of tickets/extra_work (four nullable
+            # FKs stay impossible). A CALL-TIME import inside a
+            # function is the documented seam (`_source_in_scope`
+            # resolves a source id through the owning module's scoper
+            # "imported at call time so this module keeps its import
+            # boundary" — its own words). Scan unindented lines only.
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line != line.lstrip():
+                    continue  # indented = call-time, the allowed seam
+                for forbidden in (
+                    "from tickets",
+                    "import tickets",
+                    "from extra_work",
+                ):
+                    if line.startswith(forbidden):
+                        offenders.append(f"{path.name}: {forbidden}")
         self.assertEqual(offenders, [])
 
     def test_the_source_is_a_pair_not_a_foreign_key(self):

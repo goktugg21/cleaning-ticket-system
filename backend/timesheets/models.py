@@ -782,6 +782,29 @@ class ContractHours(models.Model):
         help_text="See ContractHoursStatus for the transitions and who may make them.",
     )
 
+    # W10 — does this agreement fill the weekly sheet by itself?
+    #
+    # The question "should this person's normal hours appear in their
+    # weeks?" is answered ONCE, here, when the agreement is written.
+    # Not every week by somebody who has to remember. With this on,
+    # `timesheets.fill` writes a DRAFT TimeEntry per working day of
+    # every week inside the validity window, and the sheet is never
+    # blank.
+    #
+    # Default False so every row written before this column existed
+    # keeps behaving exactly as it did. An agreement that silently
+    # started generating hours for past weeks would be a fact nobody
+    # stated.
+    auto_fill = models.BooleanField(
+        default=False,
+        help_text=(
+            "Fill this person's weekly sheet from this agreement, for "
+            "every week inside the validity window. The filled rows are "
+            "ordinary TimeEntry rows and stay editable until the week "
+            "is closed."
+        ),
+    )
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,

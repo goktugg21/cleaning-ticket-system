@@ -56,6 +56,7 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+from .plan_gate_fixture import make_plan_complete
 from tickets.models import Ticket, TicketStatus
 
 
@@ -170,7 +171,6 @@ class OneTicketFixtureMixin:
             {
                 "service": svc.id,
                 "quantity": "2.00",
-                "requested_date": "2026-06-15",
                 "customer_note": f"note for {svc.name}",
             }
             for svc in services
@@ -181,6 +181,13 @@ class OneTicketFixtureMixin:
             "title": "Sprint6A cart",
             "description": "cart description",
             "category": ExtraWorkCategory.DEEP_CLEANING,
+            # W-EW1 §2 — ONE DATE FOR THE WHOLE CART. Per-line
+            # `requested_date` stopped being client-supplied in
+            # 181708a (`line_requested_date_not_accepted`); the
+            # request-level `preferred_date` is stamped onto every
+            # line by `validate()`. Date unchanged, so each line
+            # resolves against the same contract window as before.
+            "preferred_date": "2026-06-15",
             "line_items": line_items,
         }
         return self._api(actor).post(EW_URL, payload, format="json")
@@ -346,6 +353,8 @@ class ProposalOneTicketTests(OneTicketFixtureMixin, TestCase):
         return ew
 
     def _build_sent_proposal(self, ew):
+        # W-PLAN — pricing is gated on a complete plan.
+        make_plan_complete(ew)
         # Create a DRAFT proposal with two lines.
         resp = self._api(self.admin).post(
             f"/api/extra-work/{ew.id}/proposals/",
@@ -395,7 +404,9 @@ class ProposalOneTicketTests(OneTicketFixtureMixin, TestCase):
 
         resp = self._api(self.cust_user).post(
             f"/api/extra-work/{ew.id}/proposals/{proposal_id}/transition/",
-            {"to_status": ProposalStatus.CUSTOMER_REJECTED},
+            # P-5 — a refusal names its reason (`rejection_note_required`);
+            # brought up to that contract in P-11, the first run since.
+            {"to_status": ProposalStatus.CUSTOMER_REJECTED, "note": "too dear"},
             format="json",
         )
         self.assertEqual(resp.status_code, 200, resp.data)

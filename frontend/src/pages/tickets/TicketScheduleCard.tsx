@@ -1,72 +1,108 @@
-// Sprint 1 (frontend) — operational "Scheduled date" control on the
-// ticket detail. Surfaces the existing POST/DELETE
-// /tickets/<id>/schedule/ action (Sprint 9B backend) as a
-// set / change / clear control, for ALL ticket types.
+// W-H — the Scheduling card.
 //
-// Provider-management ONLY (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER,
-// `canManage`). STAFF + customer roles see the scheduled date READ-ONLY —
-// no control, no network call (the backend would 403 them). The schedule
-// itself is operational (no amounts) and visible to every role that sees
-// the ticket detail; for a CUSTOMER_USER the backend already redacts the
-// provider-internal reschedule audit fields.
+// It used to hold four things: a single `Scheduled date`, a `Status`
+// repeating what that date already said, a FREE-TEXT `Time window
+// (optional)` and a `Reason for change`. Asked when a job starts, when
+// it ends, how long it runs and who planned it, it could answer the
+// first one.
 //
-// The backend is additive: scheduling never changes the workflow `status`
-// and never disturbs SLA. `scheduled_start_at` is a DateTimeField on the
-// wire — we send the picked calendar day as a full ISO-8601 datetime at
-// local midnight (mirroring StaffSlotEditor's local-tz round-trip) rather
-// than a bare date, which DateTimeField would reject. Changing an existing
-// schedule REQUIRES a reason (backend stable code
-// `reschedule_reason_required`); the first set does not.
-import { useState, useRef } from "react";
+// The other three answers were already in the response and unread:
+//
+//   * `scheduled_end_at` has been on the Ticket model, in the schedule
+//     serializer and in the POST body since Sprint 9B. The form never
+//     offered it, so the column was null on every ticket in the system.
+//   * The parent Extra Work's dates have ridden on `extra_work_origin`
+//     since Sprint 184 §1 — and `TicketExtraWorkOrigin` never declared
+//     them, so no screen could read them.
+//   * Who set the schedule has been on the `TicketStatusHistory`
+//     annotation row since Sprint 9B, with no way to recognise the row.
+//
+// So nothing here is copied onto the ticket. The Extra Work owns the
+// asked-for and committed dates and this card borrows them through the
+// link the ticket already has; the ticket owns its own operational
+// window; the history row owns who set it.
+//
+// THE FREE-TEXT WINDOW IS GONE. "Morning, 09:00-12:00" typed as prose
+// could not be reported on, compared against worked hours, or handed to
+// a worker in any structured form. `scheduled_start_at` and
+// `scheduled_end_at` are DateTimeFields, so the window is now the times
+// on the dates that already own them — no new column, and one fact in
+// one place. A legacy label still shows while it exists, and the next
+// save replaces it with real times.
+//
+// Provider-management ONLY (`canManage`) may set anything. STAFF and
+// customer roles read the window; the backend redacts the
+// provider-internal fields (`reschedule_reason`, `rescheduled_from`,
+// `schedule_planned_by_name`) for a CUSTOMER_USER, and a role with no
+// button gets no button at all rather than a disabled one.
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CalendarClock, Pencil, Plus, Trash2, X } from "lucide-react";
+import { CalendarClock, CalendarPlus, Pencil } from "lucide-react";
+import "../../components/workplan/workplan-zones.css";
 import axios from "axios";
 
 import { getApiError } from "../../api/client";
 import { setTicketSchedule, clearTicketSchedule } from "../../api/admin";
-import { formatDate } from "../../lib/intl";
+import { formatDate, formatDateTime } from "../../lib/intl";
+import { plannedDayIso } from "../../lib/isoWeek";
 import type { TicketDetail, TicketStatus } from "../../api/types";
 import { CollapsibleCard } from "../../components/CollapsibleCard";
-import { ConfirmDialog } from "../../components/ConfirmDialog";
-import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 
 // Frontend mirror of the backend `_SCHEDULE_TERMINAL_STATUSES`. The
 // schedule endpoint 400s (`schedule_not_allowed_terminal`) on these, so
-// we hide the management affordances (the read-only date still renders).
+// the button is absent (the read-out still renders).
 const TERMINAL_SCHEDULE_STATUSES: ReadonlySet<TicketStatus> = new Set<
   TicketStatus
 >(["APPROVED", "REJECTED", "CLOSED", "CONVERTED_TO_EXTRA_WORK"]);
 
-// Read an ISO datetime back into a <input type="date"> value (local
-// calendar day), so the prefill round-trips with `dateInputToIso`.
-function isoToDateInput(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
+// ---------------------------------------------------------------------
+// Date <-> input plumbing.
+//
+// The stored value is a DateTimeField. The form splits it into a
+// calendar day and a clock time so the operator picks each with the
+// control built for it, and joins them back on save. Local time
+// throughout, mirroring StaffAssignmentSection's round-trip: the day the
+// operator picked is the day stored and the day read back.
+// ---------------------------------------------------------------------
+/* P-3 §A.3 — THE SERVER OWNS THE DAY AND THE CLOCK.
+   The card used to take both off the stored instant in the BROWSER's
+   zone: a date-only plan (stored as Amsterdam midnight) read as
+   "01:00" from a browser three hours east, and as the previous day
+   from one west of Greenwich. The detail now carries the day
+   (`scheduled_start_day`, ISO) and the clock (`scheduled_start_time`,
+   "HH:MM" or null) as the server states them, and the dialog sends a
+   NAIVE local datetime back (`plannedDayIso`), which the server reads
+   in its own zone. No `Date` arithmetic on either side. */
 
-// Convert a date-input value ("YYYY-MM-DD") to a full ISO-8601 datetime.
-// Appending "T00:00:00" (no trailing Z) makes the Date constructor use
-// the browser's local timezone, so the day the operator picked is the
-// day stored — and is the same day `isoToDateInput` reads back.
-function dateInputToIso(date: string): string | null {
+function inputsToIso(date: string, time: string): string | null {
   if (!date) return null;
-  const d = new Date(`${date}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+  return plannedDayIso(date, time);
 }
 
-// Date-only display (the time component is a fixed local midnight, so we
-// never surface it). Locale-aware via lib/intl (app language, not the host
-// OS locale); keeps the "" empty sentinel so a missing date renders nothing.
-function formatScheduledDate(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return formatDate(iso);
+/** "27 aug 2026" or "27 aug 2026 09:30": a day, plus its clock only
+ *  when the server says one exists. */
+function momentText(day: string | null, clock: string | null): string {
+  if (!day) return "";
+  const date = formatPlainDate(day);
+  return clock ? `${date} ${clock}` : date;
 }
+
+/** A plain ISO date ("2026-09-03") as the reader's date. */
+/** Whole days from `from` to `to`, both YYYY-MM-DD, in local time. */
+function daysAfter(from: string, to: string): number {
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm, td] = to.split("-").map(Number);
+  const a = new Date(fy, fm - 1, fd).getTime();
+  const b = new Date(ty, tm - 1, td).getTime();
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+
+function formatPlainDate(value: string | null | undefined): string {
+  if (!value) return "";
+  return formatDate(`${value}T00:00:00`);
+}
+
+/** Whole calendar days from start to end, both counted. */
 
 export function TicketScheduleCard({
   ticket,
@@ -79,26 +115,45 @@ export function TicketScheduleCard({
 }) {
   const { t } = useTranslation("ticket_detail");
 
-  const [editing, setEditing] = useState(false);
-  const [dateValue, setDateValue] = useState("");
-  const [windowLabel, setWindowLabel] = useState("");
+  const [open, setOpen] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [startDate, setStartDate] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [endTime, setEndTime] = useState("");
   const [reason, setReason] = useState("");
+  // P-9 ruling 12(e) — one plan, one date: the people's days move with
+  // the job's day unless the operator unticks it. Shown ticked.
+  const [applyToSlots, setApplyToSlots] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Rule 4 — every action answers, in words. Cleared when the next one
+  // starts, so it always describes the change the operator just made.
+  const [result, setResult] = useState<string | null>(null);
 
-  const clearRef = useRef<ConfirmDialogHandle>(null);
-  const [clearBusy, setClearBusy] = useState(false);
-
-  const isReschedule = ticket.schedule_status !== "UNSCHEDULED";
+  const isPlanned = ticket.schedule_status !== "UNSCHEDULED";
   const isTerminal = TERMINAL_SCHEDULE_STATUSES.has(ticket.status);
   const canEdit = canManage && !isTerminal;
 
-  const statusLabel =
-    ticket.schedule_status === "RESCHEDULED"
-      ? t("schedule.status_rescheduled")
-      : ticket.schedule_status === "SCHEDULED"
-        ? t("schedule.status_scheduled")
-        : t("schedule.status_unscheduled");
+  const origin = ticket.extra_work_origin;
+  // P-5 S1.4 — meerwerk words on a meerwerk job.
+  const kindContext = ticket.kind === "MEERWERK" ? "meerwerk" : undefined;
+  // P-5 S1.2 — ONE STORY. The job's window is the resolved one
+  // (`job_start_day` / `job_end_day`: the ticket's own days when a
+  // person set them, else the meerwerk plan's first/last work day). A
+  // customer's WISH is not a plan, so with `plan_source` CUSTOMER_WISH
+  // the job reads "not planned yet" and the wish stays in "asked for".
+  const fromMeerwerkPlan =
+    !ticket.scheduled_start_day && ticket.plan_source === "PROVIDER_PLAN";
+  const planStart = fromMeerwerkPlan
+    ? ticket.job_start_day
+    : (ticket.scheduled_start_day ?? null);
+  const planEnd = fromMeerwerkPlan
+    ? ticket.job_end_day
+    : (ticket.scheduled_end_day ?? null);
+  const planStartTime = ticket.scheduled_start_day ? ticket.scheduled_start_time : null;
+  const planEndTime = ticket.scheduled_end_day ? ticket.scheduled_end_time : null;
+  const days = planStart && planEnd ? daysAfter(planStart, planEnd) + 1 : 0;
 
   // Map the backend's stable schedule error codes to friendly i18n
   // copy; fall back to the generic API error otherwise. We match the
@@ -110,11 +165,11 @@ export function TicketScheduleCard({
         case "reschedule_reason_required":
           return t("schedule.error_reason_required");
         case "schedule_not_allowed_terminal":
-          return t("schedule.error_terminal");
+          return t("schedule.error_terminal", { context: kindContext });
         case "schedule_forbidden_scope":
-          return t("schedule.error_forbidden_scope");
+          return t("schedule.error_forbidden_scope", { context: kindContext });
         case "schedule_forbidden_for_role":
-          return t("schedule.error_forbidden_role");
+          return t("schedule.error_forbidden_role", { context: kindContext });
         case "schedule_invalid":
           return t("schedule.error_invalid");
         default:
@@ -124,39 +179,77 @@ export function TicketScheduleCard({
     return getApiError(err);
   }
 
-  function openEdit() {
-    setDateValue(isoToDateInput(ticket.scheduled_start_at));
-    setWindowLabel(ticket.time_window_label);
+  function openModal() {
+    // P-5 S1.1 — editing the meerwerk-derived window edits the SAME
+    // plan: the dialog opens on it, and the save lands on both records
+    // (`tickets/schedule.py` mirrors the window onto the meerwerk).
+    setStartDate(planStart ?? "");
+    setStartTime(planStartTime ?? "");
+    setEndDate(planEnd ?? "");
+    setEndTime(planEndTime ?? "");
     setReason("");
+    setApplyToSlots(true);
     setError(null);
-    setEditing(true);
+    setResult(null);
+    setConfirmClear(false);
+    setOpen(true);
   }
 
-  function cancelEdit() {
-    setEditing(false);
+  function closeModal() {
+    setOpen(false);
+    setConfirmClear(false);
     setError(null);
   }
 
   async function handleSave() {
-    const iso = dateInputToIso(dateValue);
-    if (!iso) {
+    const startIso = inputsToIso(startDate, startTime);
+    if (!startIso) {
       setError(t("schedule.error_required"));
       return;
     }
-    // Mirror the backend: changing an existing schedule needs a reason.
-    if (isReschedule && !reason.trim()) {
+    const endIso = inputsToIso(endDate, endTime);
+    // The server refuses an end before its start, and says so as a bare
+    // English sentence rather than through the stable-code channel the
+    // other five schedule errors use. Catching it here is what keeps
+    // that sentence off a Dutch operator's screen; the server check is
+    // still the one that decides.
+    if (endIso && endIso < startIso) {
+      setError(t("schedule.error_invalid"));
+      return;
+    }
+    // Mirror the backend: changing an existing plan needs a reason.
+    if (isPlanned && !reason.trim()) {
       setError(t("schedule.error_reason_required"));
       return;
     }
+    const movedFrom = momentText(
+      ticket.scheduled_start_day,
+      ticket.scheduled_start_time,
+    );
     setBusy(true);
     setError(null);
     try {
       await setTicketSchedule(ticket.id, {
-        scheduled_start_at: iso,
-        time_window_label: windowLabel.trim(),
-        reschedule_reason: isReschedule ? reason.trim() : "",
+        scheduled_start_at: startIso,
+        scheduled_end_at: endIso,
+        // The window is the times now. Sending it empty is what retires
+        // a legacy label, in the same save that replaces it.
+        time_window_label: "",
+        reschedule_reason: isPlanned ? reason.trim() : "",
+        // P-9 12(e) — explicit, so the intent is on the wire whatever
+        // the server's default.
+        apply_to_slots: applyToSlots,
       });
-      setEditing(false);
+      setOpen(false);
+      const toText = momentText(startDate, startTime.trim() || null);
+      const endText = momentText(endDate || null, endTime.trim() || null);
+      setResult(
+        isPlanned && movedFrom
+          ? t("schedule.result_moved", { from: movedFrom, to: toText })
+          : endIso
+            ? t("schedule.result_planned", { from: toText, to: endText })
+            : t("schedule.result_planned_single", { from: toText }),
+      );
       await onChanged();
     } catch (err) {
       setError(mapError(err));
@@ -165,39 +258,155 @@ export function TicketScheduleCard({
     }
   }
 
-  async function handleClearConfirm() {
-    setClearBusy(true);
+  async function handleClear() {
+    setBusy(true);
     setError(null);
     try {
       await clearTicketSchedule(ticket.id);
-      clearRef.current?.close();
+      setOpen(false);
+      setConfirmClear(false);
+      setResult(t("schedule.result_cleared"));
       await onChanged();
     } catch (err) {
       setError(mapError(err));
-      clearRef.current?.close();
     } finally {
-      setClearBusy(false);
+      setBusy(false);
     }
   }
 
-  const saveDisabled =
-    busy || !dateValue || (isReschedule && !reason.trim());
+  // -------------------------------------------------------------------
+  // What was asked for, and what was committed on the parent work.
+  //
+  // ONE renderer, used by the card and by the modal — rule 3 of this
+  // wave is that the operator sees the customer's date exactly where
+  // they set their own, and two copies of this block would be two
+  // places to keep in step. Rows with no value do not render.
+  // -------------------------------------------------------------------
+  const wantedDate = ticket.customer_wanted_date;
+  const askedStart = origin?.preferred_date ?? null;
+  const askedEnd = origin?.planned_end_date ?? null;
+  const deadline = origin?.deadline ?? null;
+  const committedStart = origin?.provider_planned_date ?? null;
+  const committedEnd = origin?.provider_planned_end_date ?? null;
+  // P-5 S1.2 — a fact that only repeats the plan is not a second fact.
+  // The wish and the requested period render only when they differ
+  // from the plan; the meerwerk's committed window only when THIS job
+  // holds a different date of its own (it kept it on a plan move) —
+  // then it says what it is, in words.
+  const sameAsPlan = (from: string | null, to: string | null) =>
+    !!planStart && from === planStart && (to ?? from) === (planEnd ?? planStart);
+  const showWanted = Boolean(wantedDate) && wantedDate !== planStart;
+  const showAskedWindow = Boolean(askedStart) && !sameAsPlan(askedStart, askedEnd);
+  const showCommitted =
+    Boolean(committedStart && origin) && !sameAsPlan(committedStart, committedEnd);
+  const hasAsked = Boolean(
+    showWanted || showAskedWindow || deadline || showCommitted,
+  );
+
+  // W21 §3 — every row STACKS: label on its own line, value on its own
+  // line, at every width. The kv grid puts label and value side by side
+  // above 1100px, and a date range in the rail's narrow value column
+  // wrapped mid-range (the owner's screenshot); an inline style wins
+  // over the media query without touching the shared class. The title
+  // link that shared the committed cell is DELETED, not restyled — the
+  // job page needs no door to the request page, and the work's title
+  // already heads this very page.
+  const stackedRow = {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+  } as const;
+
+  const renderAsked = (testId: string) =>
+    hasAsked ? (
+      <div className="plan-asked" data-testid={testId}>
+        <div className="plan-asked-head">{t("schedule.asked_heading")}</div>
+        <div className="detail-kv-list">
+          {showWanted && (
+            <div className="detail-kv-row" style={stackedRow}>
+              <span className="detail-kv-label">
+                {t("schedule.asked_wanted_label")}
+              </span>
+              <span className="detail-kv-val" data-testid="ticket-schedule-wanted">
+                {formatPlainDate(wantedDate)}
+              </span>
+            </div>
+          )}
+          {showAskedWindow && (
+            <div className="detail-kv-row" style={stackedRow}>
+              <span className="detail-kv-label">
+                {t("schedule.asked_window_label")}
+              </span>
+              <span className="detail-kv-val" data-testid="ticket-schedule-asked-window">
+                {askedEnd
+                  ? t("schedule.range", {
+                      from: formatPlainDate(askedStart),
+                      to: formatPlainDate(askedEnd),
+                    })
+                  : formatPlainDate(askedStart)}
+              </span>
+            </div>
+          )}
+          {deadline && (
+            <div className="detail-kv-row" style={stackedRow}>
+              <span className="detail-kv-label">
+                {t("schedule.asked_deadline_label")}
+              </span>
+              <span className="detail-kv-val" data-testid="ticket-schedule-deadline">
+                {formatPlainDate(deadline)}
+              </span>
+            </div>
+          )}
+          {showCommitted && (
+            <div className="detail-kv-row" style={stackedRow}>
+              <span className="detail-kv-label">
+                {t("schedule.meerwerk_plan_differs_label")}
+              </span>
+              <span
+                className="detail-kv-val"
+                data-testid="ticket-schedule-committed"
+              >
+                {committedEnd
+                  ? t("schedule.range", {
+                      from: formatPlainDate(committedStart),
+                      to: formatPlainDate(committedEnd),
+                    })
+                  : formatPlainDate(committedStart)}
+              </span>
+              {/* W-FIX1 B3 (audit F15) — a commitment that ends after the
+                  customer's deadline is allowed and FLAGGED, in the warn
+                  tone; ticket 373 showed Aug 25–28 under "must be
+                  finished by Aug 26" with nothing said. */}
+              <span className="muted small">
+                {t("schedule.meerwerk_plan_differs_hint")}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    ) : null;
 
   return (
     <CollapsibleCard
       title={t("schedule.card_title")}
       meta={
-        ticket.scheduled_start_at
-          ? formatScheduledDate(ticket.scheduled_start_at)
+        planStart
+          ? planEnd
+            ? t("schedule.range", {
+                from: momentText(planStart, planStartTime),
+                to: momentText(planEnd, planEndTime),
+              })
+            : momentText(planStart, planStartTime)
           : t("schedule.not_scheduled")
       }
       // #110 Part A — default COLLAPSED like the other right-column
       // cards. No persistKey; remounts per ticket via the keyed wrapper.
-      defaultOpen={false}
+      // W-PLAN2 Task 2 — open by default (Details + Activity are the
+      // only cards that stay collapsed).
+      defaultOpen
       testId="ticket-schedule-card"
     >
       <div style={{ padding: "14px 18px 16px" }}>
-        {/* Current value (read-only for everyone). */}
         <div
           className="detail-kv-list"
           data-testid="ticket-schedule-current"
@@ -205,37 +414,145 @@ export function TicketScheduleCard({
         >
           <div className="detail-kv-row">
             <span className="detail-kv-label">
-              {t("schedule.current_date_label")}
+              {t("schedule.starts_label")}
             </span>
             <span className="detail-kv-val" data-testid="ticket-schedule-date">
               <CalendarClock size={14} strokeWidth={2} />
-              {ticket.scheduled_start_at
-                ? formatScheduledDate(ticket.scheduled_start_at)
-                : t("schedule.not_scheduled")}
+              {/* P-9 ruling 12(b) — an unplanned job's schedule card IS
+                  the "Not planned yet — plan it" row, the lane's words. */}
+              {planStart
+                ? momentText(planStart, planStartTime)
+                : canEdit
+                  ? t("schedule.not_scheduled_plan_it")
+                  : t("schedule.not_scheduled")}
             </span>
           </div>
+          {/* P-5 S1.2 — where the window came from, when it is not the
+              ticket's own: the meerwerk plan. One plan, said once. */}
+          {fromMeerwerkPlan && planStart && (
+            <div className="detail-kv-row">
+              <span
+                className="muted small"
+                data-testid="ticket-schedule-source-meerwerk"
+              >
+                {t("schedule.source_meerwerk_plan")}
+              </span>
+            </div>
+          )}
+          {/* P-3 §A.5 — the plan's last day is past the deadline: stated,
+              in the same tone the after-deadline commitment uses. */}
+          {(ticket.planned_after_deadline ||
+            (deadline && planEnd && planEnd > deadline)) && (
+            <div className="detail-kv-row">
+              <span
+                className="detail-kv-val ew-hours-tone-over"
+                data-testid="ticket-schedule-planned-after-deadline"
+              >
+                {t("facts.planned_after_deadline")}
+                {deadline && planEnd && planEnd > deadline
+                  ? ` — ${t("schedule.committed_after_deadline", {
+                      count: daysAfter(deadline, planEnd),
+                    })}`
+                  : ""}
+              </span>
+            </div>
+          )}
+          {planEnd && (
+            <div className="detail-kv-row">
+              <span className="detail-kv-label">
+                {t("schedule.ends_label")}
+              </span>
+              <span className="detail-kv-val" data-testid="ticket-schedule-end">
+                {momentText(planEnd, planEndTime)}
+              </span>
+            </div>
+          )}
+          {days > 0 && (
+            <div className="detail-kv-row">
+              <span className="detail-kv-label">
+                {t("schedule.duration_label")}
+              </span>
+              <span
+                className="detail-kv-val"
+                data-testid="ticket-schedule-duration"
+              >
+                {t("schedule.duration_days", { count: days })}
+              </span>
+            </div>
+          )}
+          {ticket.schedule_planned_by_name && (
+            <div className="detail-kv-row">
+              <span className="detail-kv-label">
+                {t("schedule.planned_by_label")}
+              </span>
+              <span
+                className="detail-kv-val"
+                data-testid="ticket-schedule-planned-by"
+              >
+                {ticket.schedule_planned_at
+                  ? t("schedule.planned_by_value", {
+                      name: ticket.schedule_planned_by_name,
+                      when: formatDateTime(ticket.schedule_planned_at),
+                    })
+                  : ticket.schedule_planned_by_name}
+              </span>
+            </div>
+          )}
+          {ticket.rescheduled_from_day && (
+            <div className="detail-kv-row">
+              <span className="detail-kv-label">
+                {t("schedule.moved_from_label")}
+              </span>
+              {/* P-5 S9.2 — the DAY, as the server states it (P-3 §A.3);
+                  the raw instant read as the wrong day east of Greenwich. */}
+              <span
+                className="detail-kv-val"
+                data-testid="ticket-schedule-moved-from"
+              >
+                {formatPlainDate(ticket.rescheduled_from_day)}
+              </span>
+            </div>
+          )}
+          {ticket.reschedule_reason && (
+            <div className="detail-kv-row">
+              <span className="detail-kv-label">
+                {t("schedule.moved_reason_label")}
+              </span>
+              <span className="detail-kv-val">{ticket.reschedule_reason}</span>
+            </div>
+          )}
+          {/* The retired free-text window, while a ticket still carries
+              one. The next save writes real times and this row stops
+              existing. */}
           {ticket.time_window_label && (
             <div className="detail-kv-row">
               <span className="detail-kv-label">
                 {t("schedule.window_label")}
               </span>
-              <span className="detail-kv-val">{ticket.time_window_label}</span>
+              <span
+                className="detail-kv-val"
+                data-testid="ticket-schedule-legacy-window"
+              >
+                {ticket.time_window_label}
+              </span>
             </div>
           )}
-          <div className="detail-kv-row">
-            <span className="detail-kv-label">
-              {t("schedule.status_label")}
-            </span>
-            <span
-              className="detail-kv-val"
-              data-testid="ticket-schedule-status"
-            >
-              {statusLabel}
-            </span>
-          </div>
         </div>
 
-        {error && (
+        {renderAsked("ticket-schedule-asked")}
+
+        {result && (
+          <div
+            className="alert-info"
+            role="status"
+            data-testid="ticket-schedule-result"
+            style={{ marginTop: 10 }}
+          >
+            {result}
+          </div>
+        )}
+
+        {error && !open && (
           <div
             className="alert-error"
             role="alert"
@@ -246,173 +563,278 @@ export function TicketScheduleCard({
           </div>
         )}
 
-        {/* Management affordances — provider-management only, and only
-            while the ticket is not in a terminal status (the backend
-            rejects scheduling a terminal ticket). STAFF / customer roles
-            fall through to the read-only display above. */}
-        {canEdit && !editing && (
-          <div
-            style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}
-          >
-            {isReschedule ? (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={openEdit}
-                  data-testid="ticket-schedule-change-button"
-                >
-                  <Pencil size={13} strokeWidth={2} />
-                  {t("schedule.change_button")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => {
-                    setError(null);
-                    clearRef.current?.open();
-                  }}
-                  data-testid="ticket-schedule-clear-button"
-                >
-                  <Trash2 size={13} strokeWidth={2} />
-                  {t("schedule.clear_button")}
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={openEdit}
-                data-testid="ticket-schedule-set-button"
-              >
-                <Plus size={14} strokeWidth={2.2} />
-                {t("schedule.set_button")}
-              </button>
-            )}
-          </div>
-        )}
-
-        {canEdit && editing && (
-          <form
-            data-testid="ticket-schedule-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleSave();
-            }}
-            style={{ marginTop: 12 }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
+        {canEdit && (
+          <div style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={openModal}
+              data-testid={
+                isPlanned
+                  ? "ticket-schedule-change-button"
+                  : "ticket-schedule-set-button"
+              }
             >
-              <strong className="small">
-                {isReschedule
-                  ? t("schedule.change_button")
-                  : t("schedule.set_button")}
-              </strong>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                aria-label={t("schedule.cancel_button")}
-                onClick={cancelEdit}
-                disabled={busy}
-              >
-                <X size={14} strokeWidth={2.2} />
-              </button>
-            </div>
-
-            <div className="field" style={{ marginTop: 6 }}>
-              <label className="field-label" htmlFor="ticket-schedule-date">
-                {t("schedule.date_field_label")}
-              </label>
-              <input
-                id="ticket-schedule-date"
-                className="field-input"
-                type="date"
-                value={dateValue}
-                onChange={(event) => setDateValue(event.target.value)}
-                disabled={busy}
-                data-testid="ticket-schedule-date-input"
-              />
-            </div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="ticket-schedule-window">
-                {t("schedule.window_field_label")}
-              </label>
-              <input
-                id="ticket-schedule-window"
-                className="field-input"
-                type="text"
-                maxLength={64}
-                placeholder={t("schedule.window_field_placeholder")}
-                value={windowLabel}
-                onChange={(event) => setWindowLabel(event.target.value)}
-                disabled={busy}
-                data-testid="ticket-schedule-window-input"
-              />
-            </div>
-
-            {/* Reason is mandatory only when changing an existing
-                schedule — the backend enforces the same rule. */}
-            {isReschedule && (
-              <div className="field">
-                <label
-                  className="field-label"
-                  htmlFor="ticket-schedule-reason"
-                >
-                  {t("schedule.reason_field_label")}
-                </label>
-                <textarea
-                  id="ticket-schedule-reason"
-                  className="field-textarea"
-                  rows={3}
-                  placeholder={t("schedule.reason_field_placeholder")}
-                  value={reason}
-                  onChange={(event) => setReason(event.target.value)}
-                  disabled={busy}
-                  data-testid="ticket-schedule-reason-input"
-                  required
-                />
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-              <button
-                type="submit"
-                className="btn btn-primary btn-sm"
-                disabled={saveDisabled}
-                data-testid="ticket-schedule-save-button"
-              >
-                {busy ? t("schedule.saving") : t("schedule.save_button")}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={cancelEdit}
-                disabled={busy}
-                data-testid="ticket-schedule-cancel-button"
-              >
-                {t("schedule.cancel_button")}
-              </button>
-            </div>
-          </form>
+              {isPlanned ? (
+                <Pencil size={13} strokeWidth={2} />
+              ) : (
+                <CalendarPlus size={14} strokeWidth={2.2} />
+              )}
+              {isPlanned
+                ? t("schedule.change_button")
+                : t("schedule.set_button")}
+            </button>
+          </div>
         )}
       </div>
 
-      <ConfirmDialog
-        ref={clearRef}
-        title={t("schedule.clear_dialog_title")}
-        body={t("schedule.clear_dialog_body")}
-        confirmLabel={t("schedule.clear_confirm")}
-        busyLabel={t("schedule.clearing")}
-        onConfirm={handleClearConfirm}
-        busy={clearBusy}
-        destructive
-      />
+      {/* The transition asks for what it needs before it happens, and
+          the server enforces all three rules it asks about: a start is
+          required, an end may not precede it (`schedule_invalid`), and
+          changing an existing plan needs a reason
+          (`reschedule_reason_required`).
+
+          A plain overlay rather than a native <dialog>: this card lives
+          inside a collapsible that unmounts, and an open <dialog> torn
+          out of the DOM leaves the page inert (the Sprint 118
+          frozen-screen bug). `open` gates the whole subtree, so closed
+          means not rendered. */}
+      {open && (
+        <div
+          className="plan-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          data-testid="ticket-schedule-modal"
+        >
+          <div className="plan-modal">
+            {confirmClear ? (
+              <>
+                <h3 className="plan-modal-title">
+                  {t("schedule.clear_dialog_title")}
+                </h3>
+                <div className="plan-modal-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setConfirmClear(false)}
+                    disabled={busy}
+                    data-testid="ticket-schedule-clear-back"
+                  >
+                    {t("schedule.clear_keep")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-sm"
+                    onClick={() => void handleClear()}
+                    disabled={busy}
+                    data-testid="ticket-schedule-clear-confirm"
+                  >
+                    {busy ? t("schedule.clearing") : t("schedule.clear_confirm")}
+                  </button>
+                </div>
+                {error && (
+                  <div
+                    className="alert-error"
+                    role="alert"
+                    data-testid="ticket-schedule-modal-error"
+                  >
+                    {error}
+                  </div>
+                )}
+              </>
+            ) : (
+              <form
+                data-testid="ticket-schedule-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handleSave();
+                }}
+              >
+                <h3 className="plan-modal-title">
+                  {isPlanned
+                    ? t("schedule.change_button")
+                    : t("schedule.set_button")}
+                </h3>
+
+                {/* Rule 3 — the customer's date sits where the operator
+                    sets theirs, so there is nothing to remember and
+                    nothing to go and look up. */}
+                {renderAsked("ticket-schedule-modal-asked")}
+
+                <div className="plan-modal-grid">
+                  <div className="field">
+                    <label
+                      className="field-label"
+                      htmlFor="ticket-schedule-start-date"
+                    >
+                      {t("schedule.starts_label")}
+                    </label>
+                    <input
+                      id="ticket-schedule-start-date"
+                      className="field-input"
+                      type="date"
+                      value={startDate}
+                      onChange={(event) => setStartDate(event.target.value)}
+                      disabled={busy}
+                      data-testid="ticket-schedule-date-input"
+                      required
+                    />
+                  </div>
+                  <div className="field">
+                    <label
+                      className="field-label"
+                      htmlFor="ticket-schedule-start-time"
+                    >
+                      {t("schedule.start_time_label")}
+                    </label>
+                    <input
+                      id="ticket-schedule-start-time"
+                      className="field-input"
+                      type="time"
+                      value={startTime}
+                      onChange={(event) => setStartTime(event.target.value)}
+                      disabled={busy}
+                      data-testid="ticket-schedule-start-time-input"
+                    />
+                  </div>
+                  <div className="field">
+                    <label
+                      className="field-label"
+                      htmlFor="ticket-schedule-end-date"
+                    >
+                      {t("schedule.ends_label")}
+                    </label>
+                    <input
+                      id="ticket-schedule-end-date"
+                      className="field-input"
+                      type="date"
+                      value={endDate}
+                      min={startDate || undefined}
+                      onChange={(event) => setEndDate(event.target.value)}
+                      disabled={busy}
+                      data-testid="ticket-schedule-end-date-input"
+                    />
+                  </div>
+                  <div className="field">
+                    <label
+                      className="field-label"
+                      htmlFor="ticket-schedule-end-time"
+                    >
+                      {t("schedule.end_time_label")}
+                    </label>
+                    <input
+                      id="ticket-schedule-end-time"
+                      className="field-input"
+                      type="time"
+                      value={endTime}
+                      onChange={(event) => setEndTime(event.target.value)}
+                      disabled={busy}
+                      data-testid="ticket-schedule-end-time-input"
+                    />
+                  </div>
+                </div>
+
+                {/* P-3 §A.5 — PLAN-AFTER-DEADLINE WARNS, in plain words,
+                    the moment the chosen day passes the deadline. Nothing
+                    is blocked: the operator may know better, and the card
+                    and the detail will say "planned after the deadline". */}
+                {deadline && (endDate || startDate) > deadline && (
+                  <div
+                    className="alert-info"
+                    role="status"
+                    data-testid="ticket-schedule-deadline-warning"
+                  >
+                    {t("schedule.after_deadline_warning", {
+                      date: formatPlainDate(deadline),
+                    })}
+                  </div>
+                )}
+
+                {/* P-9 ruling 12(e) — everyone on this job moves with it,
+                    ticked by default; the sentence says what the tick
+                    does. */}
+                <label className="wp-plan-check" data-testid="ticket-schedule-apply-row">
+                  <input
+                    type="checkbox"
+                    checked={applyToSlots}
+                    onChange={(event) => setApplyToSlots(event.target.checked)}
+                    disabled={busy}
+                    data-testid="ticket-schedule-apply-to-slots"
+                  />
+                  {t("schedule.apply_to_slots_label")}
+                </label>
+
+                {isPlanned && (
+                  <div className="field">
+                    <label
+                      className="field-label"
+                      htmlFor="ticket-schedule-reason"
+                    >
+                      {t("schedule.reason_field_label")}
+                    </label>
+                    <textarea
+                      id="ticket-schedule-reason"
+                      className="field-textarea"
+                      rows={3}
+                      value={reason}
+                      onChange={(event) => setReason(event.target.value)}
+                      disabled={busy}
+                      data-testid="ticket-schedule-reason-input"
+                      required
+                    />
+                  </div>
+                )}
+
+                {error && (
+                  <div
+                    className="alert-error"
+                    role="alert"
+                    data-testid="ticket-schedule-modal-error"
+                  >
+                    {error}
+                  </div>
+                )}
+
+                <div className="plan-modal-actions">
+                  {isPlanned && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm plan-modal-clear"
+                      onClick={() => {
+                        setError(null);
+                        setConfirmClear(true);
+                      }}
+                      disabled={busy}
+                      data-testid="ticket-schedule-clear-button"
+                    >
+                      {t("schedule.clear_button")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={closeModal}
+                    disabled={busy}
+                    data-testid="ticket-schedule-cancel-button"
+                  >
+                    {t("schedule.cancel_button")}
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm"
+                    disabled={
+                      busy || !startDate || (isPlanned && !reason.trim())
+                    }
+                    data-testid="ticket-schedule-save-button"
+                  >
+                    {busy ? t("schedule.saving") : t("schedule.save_button")}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </CollapsibleCard>
   );
 }

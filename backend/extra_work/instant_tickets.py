@@ -68,6 +68,56 @@ from .pricing import resolve_price
 from .state_machine import TransitionError
 
 
+#: P-1 — every spawn path creates its ticket with THIS schedule: none.
+#:
+#: Sprint 9B seeded `scheduled_start_at` from the earliest cart-line
+#: `requested_date`, and the create serializer (W-EW1 §2) defaults that
+#: date to the day of entry when the customer states no wish. So a
+#: ticket spawned from a plain cart carried its own creation day as a
+#: SCHEDULED plan, and on crmtest 43 of 54 extra-work tickets read
+#: "Planned <creation day> — N days late" to a board that had never seen
+#: anybody plan them. The customer's wish is still on the request
+#: (`preferred_date` / the cart lines) and the ticket reads it through
+#: `extra_work_origin`; the plan is made by a person in the plan dialog
+#: (`planning.apply_plan`) or the schedule endpoint, both of which write
+#: the history row `tickets/plan_provenance.py` looks for.
+_UNPLANNED = (None, TicketScheduleStatus.UNSCHEDULED)
+
+
+def plan_seed(request: "ExtraWorkRequest"):
+    """P-11 A8 — `(scheduled_start_at, scheduled_end_at, schedule_status)`
+    for a spawned ticket.
+
+    The owner planned the REQUEST (days, people, hours), priced it,
+    started it — and the spawned ticket said "Not planned yet". Since
+    P-1 every spawn path seeded `_UNPLANNED`; nothing read the plan a
+    person had already made. So: born on the PROVIDER's plan when one
+    exists (`provider_planned_date` — a person set it, and provenance
+    holds: with no schedule-set history row `ticket_plan_provenance`
+    falls through to the request's committed window), else `_UNPLANNED`
+    exactly as before — P-1's ruling stands, the customer's wish is
+    still not a plan.
+
+    The end travels only when it is AFTER the start, and both land at
+    local midnight — mirroring `planned_date.apply_planned_date_to_
+    tickets` branch for branch, so a ticket born planned and one moved
+    later are indistinguishable.
+    """
+    from .planned_date import _local_midnight
+
+    if request.provider_planned_date is not None:
+        start = _local_midnight(request.provider_planned_date)
+        end = (
+            _local_midnight(request.provider_planned_end_date)
+            if request.provider_planned_end_date is not None
+            and request.provider_planned_end_date > request.provider_planned_date
+            else None
+        )
+        return start, end, TicketScheduleStatus.SCHEDULED
+    seed_start, seed_status = _UNPLANNED
+    return seed_start, None, seed_status
+
+
 def earliest_requested_start(ew: ExtraWorkRequest) -> Optional[datetime.datetime]:
     """
     Sprint 9B — seed a spawned ticket's `scheduled_start_at` from the
@@ -95,8 +145,8 @@ def _line_summary(item: ExtraWorkRequestItem) -> str:
     """One-line human label for a cart line. Mirrors the line's
     `__str__` shape."""
     if item.service is not None:
-        return f"{item.service.name} × {item.quantity}"
-    return f"Extra work line × {item.quantity}"
+        return item.service.name
+    return "Extra work line"
 
 
 def _build_title(request: ExtraWorkRequest, items: List[ExtraWorkRequestItem]) -> str:
@@ -217,17 +267,9 @@ def spawn_tickets_for_request(
         # the origin payload's representative service name.
         first_item = items[0] if items else None
 
-        # Sprint 9B — seed the operational schedule from the earliest
-        # cart-line requested_date. When None (no dated line) the ticket
-        # stays UNSCHEDULED. No schedule history annotation row is
-        # written at spawn time — the OPEN history row already records
-        # creation and the schedule fields carry the seed.
-        seed_start = earliest_requested_start(request)
-        seed_schedule_status = (
-            TicketScheduleStatus.SCHEDULED
-            if seed_start is not None
-            else TicketScheduleStatus.UNSCHEDULED
-        )
+        # P-11 A8 — born on the provider's plan when the request holds
+        # one; else unplanned (P-1). See `plan_seed`.
+        seed_start, seed_end, seed_schedule_status = plan_seed(request)
 
         ticket = Ticket.objects.create(
             company=request.company,
@@ -241,6 +283,7 @@ def spawn_tickets_for_request(
             extra_work_request=request,
             extra_work_request_item=first_item,
             scheduled_start_at=seed_start,
+            scheduled_end_at=seed_end,
             schedule_status=seed_schedule_status,
         )
 
@@ -253,7 +296,7 @@ def spawn_tickets_for_request(
             old_status="",
             new_status=TicketStatus.OPEN,
             changed_by=actor,
-            note="Spawned from Extra Work cart (instant route).",
+            note="Created from Extra Work cart (instant route).",
             is_override=False,
             override_reason="",
         )

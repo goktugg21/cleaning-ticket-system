@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Contact, Pencil, RefreshCw } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Contact, Pencil, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
+import {
+  createEmployeeHourlyRate,
+  deleteEmployeeHourlyRate,
+  listEmployeeHourlyRates,
+  updateEmployeeHourlyRate,
+} from "../../api/labourRates";
+import type { EmployeeHourlyRate } from "../../api/labourRates";
 import {
   bulkLinkBuildings,
   listAllBuildings,
@@ -21,12 +28,17 @@ import { useAuth } from "../../auth/AuthContext";
 import { isProviderAdmin } from "../../auth/permissions";
 import { BulkAssignDialog } from "../../components/BulkAssignDialog";
 import { ClickableRow } from "../../components/ClickableRow";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { EmployeeRatePanel } from "./EmployeeRatePanel";
+import type { NewRatePayload } from "./EmployeeRatePanel";
 import { EditModeToggle } from "../../components/EditModeToggle";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { useEditMode } from "../../lib/useEditMode";
 import { EmptyState } from "../../components/EmptyState";
 import { RoleBadge } from "../../components/RoleBadge";
 import { StatusBadge } from "../../components/StatusBadge";
+import { useToast } from "../../components/ToastProvider";
 import {
   employmentTypeLabelKey,
   roleLabelKey,
@@ -81,10 +93,41 @@ const EMPLOYMENT_TYPE_OPTIONS: EmploymentType[] = [
   "INHUUR",
 ];
 
-export function EmployeesAdminPage() {
+/** Today as an ISO date, for "what does this person cost right now". */
+function todayIso(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * The rate in force on `onDate` — the LATEST row starting on or before
+ * it, which is the identical rule the server applies when it costs an
+ * hour (`reports.labour_cost.RateBook.rate_on`).
+ *
+ * Rows arrive newest-first from the API (`Meta.ordering` is
+ * `-valid_from, -id`), so this is a find, not a sort. It is a READ of
+ * what the server will do, never a second source of truth: no cost
+ * figure on any screen is computed here.
+ */
+function rateInForce(
+  rows: EmployeeHourlyRate[],
+  onDate: string,
+): EmployeeHourlyRate | undefined {
+  return rows.find((row) => row.valid_from <= onDate);
+}
+
+/** FE-6 — `embedded`: a tab of the Mensen surface (see UsersAdminPage). */
+export function EmployeesAdminPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { me } = useAuth();
   const { t } = useTranslation("common");
+  const { push: pushToast } = useToast();
   const canEdit = isProviderAdmin(me?.role);
+  /** W-HR1 §3 — a wage is personal data. The rate column, the expander
+   *  and every rate request are for provider admins only; the endpoint
+   *  403s a BUILDING_MANAGER independently, and this page admits one. */
+  const canSeeRates = isProviderAdmin(me?.role);
 
   const [employees, setEmployees] = useState<ProviderEmployee[]>([]);
   const [count, setCount] = useState(0);
@@ -186,6 +229,20 @@ export function EmployeesAdminPage() {
     (row) => row.role === "STAFF" || row.role === "BUILDING_MANAGER",
   );
   const edit = useEditMode(linkableRows.map((row) => row.id));
+
+  // ---- W-HR1 §3: the cost of an hour, per person -------------------
+  /** Every rate row in the company filter's scope, paged exhaustively
+   *  by the API helper. ONE read for the whole table rather than one
+   *  per row: the column shows a rate for every employee, and N
+   *  requests for N rows is the pattern this codebase does not use. */
+  const [rates, setRates] = useState<EmployeeHourlyRate[]>([]);
+  const [ratesError, setRatesError] = useState("");
+  const [rateBusy, setRateBusy] = useState(false);
+  /** The employee whose rate history is expanded, or `null`. */
+  const [openRatesFor, setOpenRatesFor] = useState<number | null>(null);
+  const rateDeleteRef = useRef<ConfirmDialogHandle>(null);
+  const pendingRateDelete = useRef<EmployeeHourlyRate | null>(null);
+
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState<EmploymentType>("INTERNAL_STAFF");
   const [editBusy, setEditBusy] = useState(false);
@@ -250,6 +307,138 @@ export function EmployeesAdminPage() {
     load();
   }, [load]);
 
+  // ---- W-HR1 §3: reading and writing a rate ------------------------
+  /** The rate read, as a PROMISE returning rows — it deliberately sets
+   *  no state of its own, so the effect below and the mutation handlers
+   *  can both use it under their different rules. */
+  const fetchRates = useCallback(() => {
+    if (!canSeeRates) return Promise.resolve<EmployeeHourlyRate[]>([]);
+    return listEmployeeHourlyRates(
+      companyFilter === "" ? {} : { company: companyFilter },
+    );
+  }, [canSeeRates, companyFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    // A promise CHAIN, never an `async` helper called from the effect
+    // body: `react-hooks/set-state-in-effect` fires on the latter even
+    // when every setState in it sits after an `await`, and the ESLint
+    // baseline is frozen (CLAUDE.md §3). A setState inside a `.then`
+    // callback does not trip it, because the callback genuinely is not
+    // the effect body. Measured: the `async` version cost exactly one
+    // new error against the 42-problem baseline.
+    fetchRates()
+      .then((rows) => {
+        if (cancelled) return;
+        setRates(rows);
+        setRatesError("");
+      })
+      .catch((err) => {
+        // Non-fatal, and deliberately so: the directory's own job is
+        // the people, and a rate endpoint that refuses must not blank
+        // the table of names.
+        if (cancelled) return;
+        setRates([]);
+        setRatesError(getApiError(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchRates]);
+
+  /** Re-read after a mutation. NOT called from an effect — a save
+   *  handler awaits it — so it may set state directly, and it is a
+   *  separate function from the effect above precisely because the two
+   *  live under different rules. */
+  const reloadRates = useCallback(async () => {
+    try {
+      setRates(await fetchRates());
+      setRatesError("");
+    } catch (err) {
+      setRatesError(getApiError(err));
+    }
+  }, [fetchRates]);
+
+  const ratesByEmployee = useMemo(() => {
+    const map = new Map<number, EmployeeHourlyRate[]>();
+    for (const row of rates) {
+      const list = map.get(row.employee);
+      if (list) list.push(row);
+      else map.set(row.employee, [row]);
+    }
+    return map;
+  }, [rates]);
+
+  const today = todayIso();
+
+  /** The rate detail row spans the WHOLE table. Seven fixed columns
+   *  (name, email, phone, role, company, employment type, status) plus
+   *  the two conditional ones — the edit-mode checkbox and the rate
+   *  column itself. Counted here rather than hardcoded, so a new column
+   *  cannot leave the panel one cell short. */
+  const detailColSpan =
+    7 + (edit.editMode ? 1 : 0) + (canSeeRates ? 1 : 0);
+
+  async function createRate(employeeId: number, payload: NewRatePayload) {
+    if (companyFilter === "") {
+      setRatesError(t("labour_rates.company_required"));
+      return;
+    }
+    setRateBusy(true);
+    setRatesError("");
+    try {
+      await createEmployeeHourlyRate({
+        company: companyFilter,
+        employee: employeeId,
+        hourly_rate: payload.hourly_rate,
+        valid_from: payload.valid_from,
+        note: payload.note,
+      });
+      await reloadRates();
+      pushToast({ variant: "success", title: t("labour_rates.saved") });
+    } catch (err) {
+      setRatesError(getApiError(err));
+    } finally {
+      setRateBusy(false);
+    }
+  }
+
+  async function correctRate(row: EmployeeHourlyRate, hourlyRate: string) {
+    setRateBusy(true);
+    setRatesError("");
+    try {
+      await updateEmployeeHourlyRate(row.id, { hourly_rate: hourlyRate });
+      await reloadRates();
+      pushToast({ variant: "success", title: t("labour_rates.corrected") });
+    } catch (err) {
+      setRatesError(getApiError(err));
+    } finally {
+      setRateBusy(false);
+    }
+  }
+
+  function askDeleteRate(row: EmployeeHourlyRate) {
+    pendingRateDelete.current = row;
+    rateDeleteRef.current?.open();
+  }
+
+  async function confirmDeleteRate() {
+    const row = pendingRateDelete.current;
+    pendingRateDelete.current = null;
+    rateDeleteRef.current?.close();
+    if (!row) return;
+    setRateBusy(true);
+    try {
+      await deleteEmployeeHourlyRate(row.id);
+      await reloadRates();
+      pushToast({ variant: "success", title: t("labour_rates.deleted") });
+    } catch (err) {
+      setRatesError(getApiError(err));
+    } finally {
+      setRateBusy(false);
+    }
+  }
+
   const hasActiveFilters = Boolean(roleFilter || employmentTypeFilter);
 
   function startEdit(row: ProviderEmployee) {
@@ -279,12 +468,16 @@ export function EmployeesAdminPage() {
 
   return (
     <div data-testid="employees-admin-page">
-      <div className="page-header">
+      <div className={embedded ? "page-header page-header-embedded" : "page-header"}>
         <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
-          </div>
-          <h2 className="page-title">{t("employees.page_title")}</h2>
+          {!embedded && (
+            <>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>
+                {t("nav.admin_group")}
+              </div>
+              <h2 className="page-title">{t("employees.page_title")}</h2>
+            </>
+          )}
           <p className="page-sub">
             {loading
               ? t("employees.loading")
@@ -304,10 +497,8 @@ export function EmployeesAdminPage() {
         </div>
       </div>
 
-      <p className="section-explainer" data-testid="employees-explainer">
-        {t("employees.explainer")}
-      </p>
-
+      {/* W-T3 §3 — the explainer deleted: it described what the list
+          obviously is and pointed at controls already on screen. */}
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
           {error}
@@ -392,8 +583,11 @@ export function EmployeesAdminPage() {
               </button>
             )}
             {/* Sprint 156 §8 — the intent step, same gate as every other
-                list since Sprint 155 §4. */}
-            {linkableRows.length > 0 && (
+                list since Sprint 155 §4. P-14 (findings) — and the same
+                gate the WRITE has: `/api/buildings/bulk-link/` is
+                SA/CA-only, so a BUILDING_MANAGER reader no longer gets
+                an Edit door whose one action can only 403. */}
+            {canEdit && linkableRows.length > 0 && (
               <EditModeToggle
                 editMode={edit.editMode}
                 onToggle={edit.toggleMode}
@@ -457,6 +651,9 @@ export function EmployeesAdminPage() {
                 <th>{t("employees.col_role")}</th>
                 <th>{t("company")}</th>
                 <th>{t("employees.col_employment_type")}</th>
+                {/* W-HR1 §3 — the cost of one of this person's hours,
+                    where the person is. Provider admins only. */}
+                {canSeeRates && <th>{t("labour_rates.col_current_rate")}</th>}
                 <th>{t("status")}</th>
               </tr>
             </thead>
@@ -465,9 +662,12 @@ export function EmployeesAdminPage() {
                 const isStaff = row.role === "STAFF";
                 const isEditing = editingId === row.id;
                 const openable = canOpenAccount(me?.role, row);
+                const ownRates = ratesByEmployee.get(row.id) ?? [];
+                const currentRate = rateInForce(ownRates, today);
+                const ratesOpen = openRatesFor === row.id;
                 return (
+                  <Fragment key={row.id}>
                   <ClickableRow
-                    key={row.id}
                     to={openable ? `/admin/users/${row.id}` : undefined}
                     inert={!openable}
                     dataRole={row.role}
@@ -638,6 +838,57 @@ export function EmployeesAdminPage() {
                         </span>
                       )}
                     </td>
+                    {/* W-HR1 §3 — the rate in force TODAY, and the way
+                        into this person's rate history. "No rate set"
+                        and "costs nothing" are different claims and
+                        never render the same, so an unset rate is words
+                        and never € 0,00. */}
+                    {canSeeRates && (
+                      <td
+                        data-testid="employee-row-rate"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          {currentRate ? (
+                            <span data-testid={`employee-rate-value-${row.id}`}>
+                              {`€ ${currentRate.hourly_rate}`}
+                            </span>
+                          ) : (
+                            <span className="muted small">
+                              {t("labour_rates.no_rate")}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm icon-only"
+                            data-testid={`employee-rate-toggle-${row.id}`}
+                            aria-expanded={ratesOpen}
+                            aria-label={t("labour_rates.show_history", {
+                              n: ownRates.length,
+                            })}
+                            title={t("labour_rates.show_history", {
+                              n: ownRates.length,
+                            })}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setOpenRatesFor(ratesOpen ? null : row.id);
+                            }}
+                          >
+                            {ratesOpen ? (
+                              <ChevronDown size={13} strokeWidth={2} />
+                            ) : (
+                              <ChevronRight size={13} strokeWidth={2} />
+                            )}
+                          </button>
+                        </span>
+                      </td>
+                    )}
                     <td>
                       <StatusBadge
                         variant="cell"
@@ -651,6 +902,27 @@ export function EmployeesAdminPage() {
                       />
                     </td>
                   </ClickableRow>
+                  {canSeeRates && ratesOpen && (
+                    <tr data-testid={`employee-rate-detail-${row.id}`}>
+                      <td colSpan={detailColSpan} style={{ padding: 0 }}>
+                        <EmployeeRatePanel
+                          employeeName={row.full_name || row.email}
+                          rates={ownRates}
+                          companyBlocked={companyFilter === ""}
+                          busy={rateBusy}
+                          error={ratesError}
+                          onCreate={(payload) =>
+                            void createRate(row.id, payload)
+                          }
+                          onCorrect={(rateRow, value) =>
+                            void correctRate(rateRow, value)
+                          }
+                          onDelete={askDeleteRate}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -673,6 +945,26 @@ export function EmployeesAdminPage() {
           />
         )}
       </div>
+
+      {/* Rendered UNCONDITIONALLY and driven through the ref, at PAGE
+          level and never inside the rate panel: a native <dialog>
+          mounted behind a condition is invisible and its trigger looks
+          dead, and unmounting one that is still open can leave the page
+          inert (CLAUDE.md §3 — Sprint 118). The rate panel is exactly
+          such a conditionally-mounted subtree, so the confirmation
+          lives out here. */}
+      <ConfirmDialog
+        ref={rateDeleteRef}
+        title={t("labour_rates.delete_confirm_title")}
+        body={t("labour_rates.delete_confirm_body")}
+        confirmLabel={t("labour_rates.delete_button")}
+        onConfirm={confirmDeleteRate}
+        onCancel={() => {
+          pendingRateDelete.current = null;
+        }}
+        busy={rateBusy}
+        destructive
+      />
 
       {/* Sprint 156 §8 — the same dialog Sprint 154 built for the other
           direction, with the same mandatory "N will be assigned to M"

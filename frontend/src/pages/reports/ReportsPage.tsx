@@ -13,10 +13,13 @@ import {
   TicketReportView,
 } from "./EmployeeHoursViews";
 import { WorkerHoursCardTiles } from "./charts/WorkerHoursCardTiles";
-import { listAllBuildings, listAllCompanies } from "../../api/admin";
+import { listAllBuildings } from "../../api/admin";
+import { useCompanyScope } from "../../lib/useCompanyScope";
+import { CompanyScopeSelect } from "../../components/guide/CompanyScopeSelect";
 import { api } from "../../api/client";
 import type { ReportFilters } from "../../api/reports";
-import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
+import type { BuildingAdmin } from "../../api/types";
+import { formatDate } from "../../lib/intl";
 import { useAuth } from "../../auth/AuthContext";
 import { useReportsFilters } from "../../hooks/useReportsFilters";
 import { AgeBucketsChart } from "./charts/AgeBucketsChart";
@@ -256,8 +259,19 @@ export function ReportsPage() {
   const { filters, setFilter, setRangePreset } = useReportsFilters();
 
   const [refreshKey, setRefreshKey] = useState(0);
+  // FE-7 (§D.6.4) — the custom date pair unfolds on request (or when a
+  // custom range is already in force); the three presets are the bar.
+  const [customOpen, setCustomOpen] = useState(false);
+  const showCustomDates = customOpen || filters.preset === "custom";
 
-  const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
+  // FE-7 — the dashboard links here with an anchor ("#per-gebouw");
+  // the router does not scroll to hashes on its own.
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!id) return;
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
+  }, []);
+
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
   const [buildingsLoaded, setBuildingsLoaded] = useState(false);
 
@@ -265,18 +279,39 @@ export function ReportsPage() {
   const isCompanyAdmin = me?.role === "COMPANY_ADMIN";
   const isBuildingManager = me?.role === "BUILDING_MANAGER";
 
-  // Companies dropdown is only meaningful for SUPER_ADMIN. Fetch lazily.
+  // P-12 §D.24.2 — one company at a time. The selector sits top right,
+  // the session remembers the choice across the Finance pages, and
+  // there is no "all companies" mix any more. The URL stays the truth
+  // (a deep link's ?company= wins and is adopted into the session);
+  // when the URL says nothing, the session's company — else the lowest
+  // id — is written into it.
+  const companyScope = useCompanyScope(isSuperAdmin);
+  const { companies, companyId: scopedCompanyId, chooseCompany } = companyScope;
   useEffect(() => {
-    if (!isSuperAdmin) return;
-    let cancelled = false;
-    listAllCompanies().then((response) => {
-      if (cancelled) return;
-      setCompanies(response);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isSuperAdmin]);
+    if (!isSuperAdmin || !companyScope.ready) return;
+    if (filters.company !== undefined) {
+      if (
+        scopedCompanyId !== filters.company &&
+        companies.some((c) => c.id === filters.company)
+      ) {
+        chooseCompany(filters.company);
+      }
+      return;
+    }
+    const fallback =
+      scopedCompanyId !== ""
+        ? scopedCompanyId
+        : [...companies].sort((a, b) => a.id - b.id)[0]?.id;
+    if (fallback != null) setFilter("company", fallback);
+  }, [
+    isSuperAdmin,
+    companyScope.ready,
+    filters.company,
+    scopedCompanyId,
+    companies,
+    chooseCompany,
+    setFilter,
+  ]);
 
   // Buildings dropdown:
   //   SUPER_ADMIN: only when a specific company is selected.
@@ -382,6 +417,17 @@ export function ReportsPage() {
           <p className="page-sub">{t("subtitle")}</p>
         </div>
         <div className="page-header-actions">
+          {isSuperAdmin && (
+            <CompanyScopeSelect
+              companies={companies}
+              companyId={filters.company ?? ""}
+              onChange={(id) => {
+                chooseCompany(id);
+                setFilter("company", id);
+              }}
+              testId="filter-company"
+            />
+          )}
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -424,16 +470,21 @@ export function ReportsPage() {
                   </button>
                 );
               })}
-              <span
+              <button
+                type="button"
                 className={`btn btn-sm ${filters.preset === "custom" ? "btn-primary" : "btn-secondary"}`}
-                style={{ cursor: "default" }}
                 aria-pressed={filters.preset === "custom"}
+                aria-expanded={showCustomDates}
+                onClick={() => setCustomOpen((v) => !v)}
+                data-testid="range-preset-custom"
               >
                 {t("preset_custom")}
-              </span>
+              </button>
             </div>
           </div>
 
+          {showCustomDates && (
+          <>
           <div className="filter-field">
             <span className="filter-label">{t("filter_from")}</span>
             <input
@@ -452,27 +503,7 @@ export function ReportsPage() {
               onChange={(event) => setFilter("to", event.target.value)}
             />
           </div>
-
-          {isSuperAdmin && (
-            <div className="filter-field">
-              <span className="filter-label">{t("filter_company")}</span>
-              <select
-                className="filter-control"
-                data-testid="filter-company"
-                value={filters.company === undefined ? "" : String(filters.company)}
-                onChange={(event) => {
-                  const v = event.target.value;
-                  setFilter("company", v === "" ? undefined : Number(v));
-                }}
-              >
-                <option value="">{t("filter_all_companies")}</option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+          </>
           )}
 
           {(isSuperAdmin && filters.company !== undefined) || isCompanyAdmin || isBuildingManager ? (
@@ -548,7 +579,7 @@ export function ReportsPage() {
                 onClick={() => setComparisonOpen(false)}
                 data-testid="hours-comparison-close"
               >
-                {t("common:cancel")}
+                {t("close_report")}
               </button>
             </div>
             <HoursComparisonView />
@@ -597,7 +628,7 @@ export function ReportsPage() {
                 onClick={() => setWorkerHoursOpen(false)}
                 data-testid="worker-hours-close"
               >
-                {t("common:cancel")}
+                {t("close_report")}
               </button>
             </div>
             <WorkerHoursView />
@@ -608,6 +639,9 @@ export function ReportsPage() {
       {/* Extra Work revenue is its own report (SoT §7.2), not a generic
           ticket count — render it FIRST and full-width, above the grid of
           ticket-count charts. */}
+      <h3 className="section-title" style={{ marginBottom: 10 }}>
+        {t("section_meerwerk")}
+      </h3>
       <ExtraWorkRevenueChart filters={apiFilters} refreshKey={refreshKey} />
 
       {/* Extra Work by building / by customer — origin="EXTRA_WORK" narrows
@@ -637,6 +671,18 @@ export function ReportsPage() {
         />
       </div>
 
+      {/* FE-7 — the tickets-list panels FE-6 removed point here: a named
+          section with an anchor, per building first. */}
+      <h3
+        className="section-title"
+        id="per-gebouw"
+        style={{ marginBottom: 2, scrollMarginTop: 16 }}
+      >
+        {t("section_tickets")}
+      </h3>
+      <p className="muted small" style={{ marginBottom: 10 }}>
+        {t("section_tickets_sub")}
+      </p>
       <div
         // Sprint 20 follow-up: the previous template `minmax(420px, 1fr)`
         // forced every card to be at least 420px wide, which on a
@@ -653,6 +699,7 @@ export function ReportsPage() {
           gap: 16,
         }}
       >
+        <TicketsByBuildingChart filters={apiFilters} refreshKey={refreshKey} />
         <StatusDistributionChart filters={apiFilters} refreshKey={refreshKey} />
         <TicketsOverTimeChart filters={apiFilters} refreshKey={refreshKey} />
         <ManagerThroughputChart filters={apiFilters} refreshKey={refreshKey} />
@@ -662,7 +709,20 @@ export function ReportsPage() {
         <TicketsByTypeChart filters={apiFilters} refreshKey={refreshKey} />
         <TicketsByOriginChart filters={apiFilters} refreshKey={refreshKey} />
         <TicketsByCustomerChart filters={apiFilters} refreshKey={refreshKey} />
-        <TicketsByBuildingChart filters={apiFilters} refreshKey={refreshKey} />
+      </div>
+
+      <h3 className="section-title" style={{ margin: "16px 0 10px" }}>
+        {t("section_hours")}
+      </h3>
+      <div
+        className="reports-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns:
+            "repeat(auto-fit, minmax(min(420px, 100%), 1fr))",
+          gap: 16,
+        }}
+      >
         <HoursComparisonChart
           refreshKey={refreshKey}
           onOpen={() => setComparisonOpen(true)}
@@ -750,9 +810,13 @@ export function ReportsPage() {
               </div>
               {summaries && (
                 <p className="muted small" style={{ marginBottom: 4 }}>
+                  {/* W7 §4 — through `formatDate`, not raw ISO. The
+                      period a card's four numbers cover is the thing the
+                      owner could not read off them, so it must not be
+                      the one line on the card printed in wire format. */}
                   {t("card_period", {
-                    from: summaries.from,
-                    to: summaries.to,
+                    from: formatDate(summaries.from),
+                    to: formatDate(summaries.to),
                   })}
                 </p>
               )}
@@ -768,6 +832,19 @@ export function ReportsPage() {
                   style={{ marginTop: 0 }}
                 >
                   {t(card.emptyKey)}
+                  {filters.preset !== "last_90" && (
+                    <>
+                      {" "}
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setRangePreset("last_90")}
+                        data-testid={`widen-${card.testId}`}
+                      >
+                        {t("widen_period")}
+                      </button>
+                    </>
+                  )}
                 </p>
               )}
               <div style={{ marginTop: 10 }}>
@@ -841,7 +918,7 @@ export function ReportsPage() {
                   onClick={() => setOpenReport(null)}
                   data-testid={`${card.testId}-close`}
                 >
-                  {t("common:cancel")}
+                  {t("close_report")}
                 </button>
               </div>
               {/* Sprint 180 §1 — the page's own company, building and

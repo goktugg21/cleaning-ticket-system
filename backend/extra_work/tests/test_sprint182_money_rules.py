@@ -404,12 +404,13 @@ class BilledToAndProviderDateTests(_Fixture):
                 "department": self._seeded_department().id,
                 "work_type": self._seeded_work_type().id,
                 "title": "No billing target chosen",
+                # P-16 repin - P-15 intent rule (provider cart).
+                "request_intent": "AUTO_START_AFTER_PRICING",
                 "description": "d",
                 "line_items": [
                     {
                         "custom_description": "ad-hoc",
                         "quantity": "1.00",
-                        "requested_date": str(date(2026, 5, 1)),
                     }
                 ],
             },
@@ -435,13 +436,14 @@ class BilledToAndProviderDateTests(_Fixture):
                 "department": self._seeded_department().id,
                 "work_type": self._seeded_work_type().id,
                 "title": "Explicit null",
+                # P-16 repin - P-15 intent rule (provider cart).
+                "request_intent": "AUTO_START_AFTER_PRICING",
                 "description": "d",
                 "billed_to": None,
                 "line_items": [
                     {
                         "custom_description": "ad-hoc",
                         "quantity": "1.00",
-                        "requested_date": str(date(2026, 5, 1)),
                     }
                 ],
             },
@@ -462,13 +464,14 @@ class BilledToAndProviderDateTests(_Fixture):
                 "department": self._seeded_department().id,
                 "work_type": self._seeded_work_type().id,
                 "title": "Planned by the provider",
+                # P-16 repin - P-15 intent rule (provider cart).
+                "request_intent": "AUTO_START_AFTER_PRICING",
                 "description": "d",
                 "provider_planned_date": "2026-06-15",
                 "line_items": [
                     {
                         "custom_description": "ad-hoc",
                         "quantity": "1.00",
-                        "requested_date": str(date(2026, 5, 1)),
                     }
                 ],
             },

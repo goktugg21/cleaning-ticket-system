@@ -16,8 +16,9 @@ import { loginAs } from "./fixtures/login";
  *      seeded baseline.
  *   3. CUSTOMER_USER cannot PATCH access_role (403).
  *   4. Cross-company COMPANY_ADMIN cannot PATCH (403).
- *   5. CustomerFormPage exposes the new <select> with a `change`
- *      event wired to the PATCH endpoint.
+ *   5. The customer's Permissions page (its permissions matrix, behind
+ *      the collapsed Advanced card) exposes the access-role <select>
+ *      with a `change` event wired to the PATCH endpoint.
  *
  * Each test that mutates demo state restores the original value in
  * the same test body so the run is order-independent.
@@ -368,8 +369,8 @@ test.describe("Sprint 23C → role change widens ticket visibility", () => {
 // UI surface — role <select> is rendered on the customer form
 // =====================================================================
 
-test.describe("Sprint 23C → CustomerFormPage role editor renders", () => {
-  test("COMPANY_ADMIN sees a role <select> on each access pill", async ({
+test.describe("Sprint 23C → Permissions page role editor renders", () => {
+  test("COMPANY_ADMIN sees a role <select> on each access row", async ({
     page,
     baseURL,
   }) => {
@@ -378,7 +379,15 @@ test.describe("Sprint 23C → CustomerFormPage role editor renders", () => {
     await sa.dispose();
 
     await loginAs(page, DEMO_USERS.companyAdmin);
-    await page.goto(`/admin/customers/${customerId}`);
+    // Sprint 29.2 / RF-8 — the per-access editor is canonical on the
+    // Permissions page, inside the collapsed Advanced card.
+    await page.goto(`/admin/customers/${customerId}/permissions`);
+    await expect(
+      page.locator('[data-testid="customer-permissions-page"]'),
+    ).toBeVisible({ timeout: 15_000 });
+    await page
+      .locator('[data-testid="customer-permissions-advanced-toggle"]')
+      .click();
     // Wait for the access-row select element to render.
     const select = page
       .locator('[data-testid="customer-access-role-select"]')
@@ -396,10 +405,13 @@ test.describe("Sprint 23C → CustomerFormPage role editor renders", () => {
         /Location manager|Locatiebeheerder/i.test(o),
       ),
     ).toBe(true);
+    // SoT Addendum A.1 — Customer Company Admin is company-wide
+    // (`is_company_admin` via the company-admin endpoint), never a
+    // per-building access role, so it is NOT an option here.
     expect(
       options.some((o) =>
-        /Company admin|Bedrijfsbeheerder/i.test(o),
+        /Company admin|Bedrijfsbeheerder|Klantbeheerder/i.test(o),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 });

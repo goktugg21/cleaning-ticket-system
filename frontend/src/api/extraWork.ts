@@ -11,9 +11,18 @@ import type {
   ExtraWorkAssignment,
   ExtraWorkAssignmentRole,
   ExtraWorkBulkAssignResult,
+  ExtraWorkBulkPlanContext,
+  ExtraWorkGroupDetail,
+  ExtraWorkGroupMemberEdit,
+  ExtraWorkGroupSummary,
+  ExtraWorkSlot,
+  ExtraWorkBulkPlanPayload,
+  ExtraWorkBulkPlanResult,
   EwMessageRecipient,
   EwMessageType,
   EwMessageVisibility,
+  ExtraWorkPlanPayload,
+  ExtraWorkPlanResult,
   ExtraWorkPreviewPayload,
   ExtraWorkPreviewResponse,
   ExtraWorkPricingLineItem,
@@ -83,6 +92,57 @@ export async function listExtraWorkCategoryOptions(): Promise<ExtraWorkCategoryO
   return response.data;
 }
 
+// W1-C — the money strip (`docs/planning/ew-gap-closing-plan.md` §2.4).
+//
+// FOUR figures and only four, computed server-side because they are a
+// roll-up over every Extra Work in scope, not over the page the list
+// happens to be holding. Amounts are decimal STRINGS, as every money
+// field on this API is: they go straight into `formatMoney` and are
+// never turned into a float to be added up again here — the server has
+// already applied the one billing rule.
+export interface ExtraWorkFinancialFigure {
+  /** How many Extra Works are behind the figure. */
+  count: number;
+  /** How many of those `count` rows nobody has priced yet. Zero is a
+   *  LEGAL price, so this is the ONLY way to tell "this costs nothing"
+   *  from "nobody has said what this costs". */
+  unpriced_count: number;
+  subtotal: string;
+  vat: string;
+  total: string;
+}
+
+export type ExtraWorkFinancialFigureKey =
+  | "quoted_not_started"
+  | "in_progress"
+  | "done_this_period"
+  | "invoiced_this_period";
+
+export interface ExtraWorkFinancialSummary {
+  /** The billing month the two period figures cover, `YYYY-MM`. */
+  period: string;
+  figures: Record<ExtraWorkFinancialFigureKey, ExtraWorkFinancialFigure>;
+}
+
+export interface FinancialSummaryParams {
+  billing_period?: string;
+  customer?: number;
+  building?: number;
+}
+
+/** Provider management only — the backend answers 403 for a STAFF or
+ *  CUSTOMER_USER caller, so gate the call on `isProviderManagementRole`
+ *  rather than letting the console fill with refusals. */
+export async function getExtraWorkFinancialSummary(
+  params: FinancialSummaryParams = {},
+): Promise<ExtraWorkFinancialSummary> {
+  const response = await api.get<ExtraWorkFinancialSummary>(
+    "/extra-work/financial-summary/",
+    { params },
+  );
+  return response.data;
+}
+
 export async function listExtraWork(
   params: ListExtraWorkParams = {},
 ): Promise<PaginatedResponse<ExtraWorkRequestList>> {
@@ -111,6 +171,42 @@ export async function listAllExtraWork(
     page += 1;
   }
   return all;
+}
+
+// FE-2 (§D.4) — the folded requester timeline: machine event keys the
+// UI translates, one chronological story over the request AND its
+// spawned ticket. Read-only.
+export type ExtraWorkTimelineEvent =
+  | "requested"
+  | "price_in_preparation"
+  | "quote_sent"
+  | "approved"
+  | "quote_rejected"
+  | "work_created"
+  | "work_started"
+  | "work_done"
+  | "work_reopened"
+  | "completion_submitted"
+  | "completion_approved"
+  | "completion_rejected"
+  | "invoiced"
+  | "cancelled";
+
+export interface ExtraWorkTimelineEntry {
+  at: string | null;
+  event: ExtraWorkTimelineEvent;
+  actor: string;
+  source: "MEERWERK" | "TICKET";
+}
+
+export async function getExtraWorkTimeline(
+  id: number | string,
+): Promise<{ entries: ExtraWorkTimelineEntry[]; count: number }> {
+  const response = await api.get<{
+    entries: ExtraWorkTimelineEntry[];
+    count: number;
+  }>(`/extra-work/${id}/timeline/`);
+  return response.data;
 }
 
 export async function getExtraWork(
@@ -246,6 +342,147 @@ export async function bulkSetExtraWorkDates(payload: {
   return response.data;
 }
 
+// ---------------------------------------------------------------------------
+// W5-B — day-by-day (multi-date) Extra Work.
+//
+// Both writes are pinned to DRF's `JSONParser` server-side and answer
+// 415 to form data, for the same reason the plan endpoints are: DRF
+// reads a boolean ABSENT from form input as `false`, so a form-encoded
+// write could silently clear a completion flag across a whole series.
+// These functions therefore hand axios a plain object, never a
+// FormData. Do not "fix" a 415 here by switching.
+//
+// NOTE WHAT IS NOT HERE. There is no group-status call and no
+// group-delete call, because those endpoints do not exist: a status
+// change is a workflow transition and goes through the state machine
+// one work at a time, and cancelling a work is a per-work action.
+// Planning a series goes through `bulkPlanExtraWork`, which since W4-O
+// already takes per-work values. See `views_groups.py` for what the
+// reference system's equivalents cost it.
+// ---------------------------------------------------------------------------
+
+/** Create one Extra Work per picked slot, sharing everything else.
+ *
+ *  `shared` is an ordinary create payload — the same shape the single
+ *  form posts — and every member is built from it by the same
+ *  serializer. All-or-nothing: if any member is invalid nothing is
+ *  written, not even a group row. */
+export async function batchCreateExtraWork(
+  shared: Record<string, unknown>,
+  slots: ExtraWorkSlot[],
+  /** W-FIX1 D3 (audit F28) — one key per FORM SUBMISSION, generated by
+   *  the page when the form is prepared and reused on a retry, so a
+   *  double-click or a resend is answered with the series already made
+   *  (`deduplicated: true`) instead of a second one. */
+  idempotencyKey?: string,
+): Promise<{
+  group: ExtraWorkGroupSummary & { customer: number; building: number };
+  created: number;
+  members: number[];
+  deduplicated?: boolean;
+}> {
+  const response = await api.post("/extra-work/batch/", {
+    ...shared,
+    slots,
+    ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+  });
+  return response.data;
+}
+
+/** The series and its members, for the group editor. */
+export async function getExtraWorkGroup(
+  id: number,
+): Promise<ExtraWorkGroupDetail> {
+  const response = await api.get<ExtraWorkGroupDetail>(
+    `/extra-work/groups/${id}/`,
+  );
+  return response.data;
+}
+
+/** Title / time / condition, per member, all or nothing.
+ *
+ *  Deliberately narrow. Date, budget hours and assigned people are NOT
+ *  editable through here — they go through the planning and assignment
+ *  endpoints that already exist and already take per-work values. */
+export async function updateExtraWorkGroupMembers(
+  id: number,
+  members: ExtraWorkGroupMemberEdit[],
+): Promise<{ group: ExtraWorkGroupSummary; updated: number }> {
+  const response = await api.patch(`/extra-work/groups/${id}/members/`, {
+    members,
+  });
+  return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// W2-D planning layer — W3-F consumes it.
+//
+// BOTH endpoints are pinned to DRF's `JSONParser` and answer 415 to form
+// data. That is deliberate on the server's side and it is why these two
+// functions hand axios a plain OBJECT (serialised as JSON) and never a
+// FormData: DRF reads a boolean that is absent from form input as
+// `false`, so a form-encoded plan that never mentioned
+// `file_upload_required` would write it to false on every work it
+// touched. Do not "fix" a 415 here by switching to FormData.
+//
+// The payload is read by KEY PRESENCE end to end, so a field the caller
+// did not collect must be OMITTED, not sent as null or false.
+// ---------------------------------------------------------------------------
+
+/** Plan one work. P-8R A2 — starts it ONLY when the payload says
+ *  `start: true`; every caller in this repo sends the key explicitly.
+ *  Returns the refreshed detail with a `plan` result block attached. */
+export async function planExtraWork(
+  id: number,
+  payload: ExtraWorkPlanPayload,
+): Promise<ExtraWorkRequestDetail & { plan?: ExtraWorkPlanResult }> {
+  const response = await api.post<
+    ExtraWorkRequestDetail & { plan?: ExtraWorkPlanResult }
+  >(`/extra-work/${id}/plan/`, payload);
+  return response.data;
+}
+
+/** W4-O — what the selected works plan RIGHT NOW, in one request.
+ *
+ *  Seeds the per-work table. Without it every row opens blank and a
+ *  save reads as a wipe: the list payload carries none of the planning
+ *  fields (provider-only detail fields) and none of the crew, so the
+ *  alternative is one detail fetch per selected work.
+ *
+ *  Ids go as a comma list rather than repeated keys purely because it
+ *  is the shorter URL; the server accepts both spellings, which is
+ *  pinned by a test — a client that sent the other one and silently got
+ *  a context for one work would be very hard to notice. */
+export async function getBulkPlanContext(
+  ids: number[],
+): Promise<ExtraWorkBulkPlanContext> {
+  const response = await api.get<ExtraWorkBulkPlanContext>(
+    "/extra-work/bulk-plan/",
+    { params: { requests: ids.join(",") } },
+  );
+  return response.data;
+}
+
+/** Plan a selection, all or nothing — one unresolvable id rejects the
+ *  batch with zero writes.
+ *
+ *  W4-O: takes EITHER spelling. `{items: [...]}` gives each work its own
+ *  budget, its own window, its own completion flags and its own
+ *  per-person hours in a single atomic call; `{requests: [...], ...}`
+ *  is the older shorthand for "the same values on all of them" and the
+ *  server normalises it into exactly that per-work list. Never both at
+ *  once — the union type above makes the mixture unspellable, and the
+ *  server refuses it rather than inventing a precedence rule. */
+export async function bulkPlanExtraWork(
+  payload: ExtraWorkBulkPlanPayload,
+): Promise<ExtraWorkBulkPlanResult> {
+  const response = await api.post<ExtraWorkBulkPlanResult>(
+    "/extra-work/bulk-plan/",
+    payload,
+  );
+  return response.data;
+}
+
 // Sprint 8A — provider-only entry of actual hours on hourly Extra Work
 // lines. `actual_hours` is a decimal string (DRF parses it server-side).
 // All-or-nothing: any invalid line 400s the whole batch. Returns the EW
@@ -255,6 +492,37 @@ export async function bulkSetExtraWorkDates(payload: {
 export interface ActualHoursLineInput {
   line_id: number;
   actual_hours: string;
+}
+
+/** P-11 B3 — the job's timesheet: the TimeEntry job lines on this
+ *  request and its spawned tickets, per person, per day, per hour
+ *  type. Read by the Money tab's "Hours worked, to bill" panel to
+ *  pre-fill the billable hours from what the crew already reported.
+ *  Provider-only server-side. */
+export interface ExtraWorkTimesheetEntry {
+  employee: number;
+  employee_name: string;
+  date: string;
+  hours: string;
+  hour_type: number;
+  hour_type_name: string;
+  hour_type_multiplier: string;
+  source_type: string;
+  source_id: number | null;
+}
+
+export interface ExtraWorkTimesheetHours {
+  entries: ExtraWorkTimesheetEntry[];
+  total_hours: string;
+}
+
+export async function getExtraWorkTimesheetHours(
+  id: number,
+): Promise<ExtraWorkTimesheetHours> {
+  const response = await api.get<ExtraWorkTimesheetHours>(
+    `/extra-work/${id}/timesheet-hours/`,
+  );
+  return response.data;
 }
 
 export async function submitActualHours(

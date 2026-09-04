@@ -1,5 +1,12 @@
 from django.urls import path
 
+from .views_extra_work_hours import ExtraWorkHoursView
+from .views_planned_vs_actual import ExtraWorkPlannedVsActualView
+from .views_week_assignments import WeekAssignmentsView
+from .views_labour_rates import (
+    EmployeeHourlyRateDetailView,
+    EmployeeHourlyRateListCreateView,
+)
 from .views import (
     EmployeeHoursByBuildingView,
     EmployeeHoursByExtraWorkView,
@@ -48,6 +55,16 @@ urlpatterns = [
         "hour-sources/",
         HourSourceOptionsView.as_view(),
         name="report-hour-sources",
+    ),
+    # hours2 Part 3 — the admin week grid's row proposal: per person,
+    # the buildings they may enter and the jobs they are on this week.
+    # The per-person, per-week sibling of `hour-sources/`; a literal
+    # path, before the report routes, in keeping with the ordering rule
+    # below.
+    path(
+        "week-assignments/",
+        WeekAssignmentsView.as_view(),
+        name="report-week-assignments",
     ),
     # Sprint 180 §2 — the four report CARDS, in one request. A literal
     # path, before the report routes, in keeping with the ordering rule
@@ -257,6 +274,40 @@ urlpatterns = [
         "extra-work-revenue-by-building/export.pdf",
         ExtraWorkRevenueByBuildingPDFView.as_view(),
         name="reports-extra-work-revenue-by-building-pdf",
+    ),
+    # ---- W4-R: the per-person hourly rate. SA / CA only, at the door
+    # and again in the queryset — a wage is personal data and a
+    # BUILDING_MANAGER is refused here even though they are admitted to
+    # every other reports surface. Literal segment BEFORE the detail
+    # route, the ordering this repo keeps. ------------------------------
+    path(
+        "employee-hourly-rates/",
+        EmployeeHourlyRateListCreateView.as_view(),
+        name="reports-employee-hourly-rates",
+    ),
+    path(
+        "employee-hourly-rates/<int:pk>/",
+        EmployeeHourlyRateDetailView.as_view(),
+        name="reports-employee-hourly-rate-detail",
+    ),
+    # ---- W3-H: the hours booked to ONE extra work, with the roll-up of
+    # budget / entered / cost. Read by the panel on the Extra Work detail
+    # page; the cost half is computed in `reports/labour_cost.py`, which
+    # is the one place it may be. ----------------------------------------
+    path(
+        "extra-work/<int:extra_work_id>/hours/",
+        ExtraWorkHoursView.as_view(),
+        name="reports-extra-work-hours",
+    ),
+    # ---- W7: planned hours beside worked hours, per person, for one
+    # job. Read by the panel on the operational ticket. No money in the
+    # response, which is what lets STAFF read their own line here while
+    # the hours endpoint above refuses them. Distinct literal segment,
+    # so neither route can swallow the other. --------------------------
+    path(
+        "extra-work/<int:extra_work_id>/planned-vs-actual/",
+        ExtraWorkPlannedVsActualView.as_view(),
+        name="reports-extra-work-planned-vs-actual",
     ),
     # ---- Sprint 131: Extra Work revenue grouped Building -> Department ->
     # Work Type ----------------------------------------------------------

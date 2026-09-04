@@ -1,7 +1,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
+import { useParams } from "react-router-dom";
+import { Tag } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
@@ -38,6 +38,9 @@ import type {
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { EmptyState } from "../../components/EmptyState";
+import { readApiErrorDetail } from "../../lib/apiFieldErrors";
+import { formatMoney } from "../../lib/intl";
 import { ManagedUnitPicker } from "../../components/ManagedUnitPicker";
 import { CategoryGroupedPicker } from "../../components/CategoryGroupedPicker";
 import { buildPickerGroups } from "../../lib/pickerGroups";
@@ -45,6 +48,9 @@ import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { useToast } from "../../components/ToastProvider";
 import { previewAdjustedPrice } from "../../utils/bulkAdjust";
 import { Toggle } from "../../components/Toggle";
+import { CustomerSubPageHeader } from "./customer/CustomerSubPageHeader";
+import { BoundedList } from "../../components/BoundedList";
+import { OverflowMenu } from "../../components/OverflowMenu";
 
 /**
  * Sprint 28 Batch 5 — Per-customer contract pricing.
@@ -77,6 +83,11 @@ import { Toggle } from "../../components/Toggle";
  */
 const CUSTOM_SERVICE_SENTINEL = "__custom__" as const;
 
+/** FE-6 — the folder select's "make a new one" option. Creating a
+ *  folder lives INSIDE the add/edit flow now: pick it, name it, save. */
+const NEW_FOLDER_SENTINEL = "__new_folder__" as const;
+type FolderSelection = number | "" | typeof NEW_FOLDER_SENTINEL;
+
 type ServiceSelection = number | "" | typeof CUSTOM_SERVICE_SENTINEL;
 
 /**
@@ -97,6 +108,9 @@ interface PriceFormState {
   valid_from: string;
   valid_to: string; // empty string = open-ended
   is_active: boolean;
+  /** FE-6 — the folder the row files under; "" = no folder. */
+  folder: FolderSelection;
+  new_folder_name: string;
 }
 
 /**
@@ -154,7 +168,33 @@ function buildEmptyForm(): PriceFormState {
     valid_from: todayISO(),
     valid_to: "",
     is_active: true,
+    folder: "",
+    new_folder_name: "",
   };
+}
+
+/** P-6 V3 — the add/edit form's fields in screen order, so the first
+ *  refused one is the one scrolled to (the ContractFormDialog recipe). */
+const FIELD_ORDER = [
+  "service",
+  "custom_name",
+  "unit_type",
+  "custom_unit_label",
+  "folder",
+  "new_folder_name",
+  "unit_price",
+  "vat_pct",
+  "valid_from",
+  "valid_to",
+];
+
+function scrollToFirstField(errors: Record<string, string>): void {
+  const first = FIELD_ORDER.find((key) => errors[key]);
+  if (!first) return;
+  const el = document.querySelector<HTMLElement>(
+    `[data-testid="customer-pricing-modal"] [data-price-field="${first}"]`,
+  );
+  el?.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 // The unit-type constants mirror ServicesAdminPage; kept local here to
@@ -176,8 +216,10 @@ const UNIT_TYPE_I18N_KEY: Record<ServiceUnitType, string> = {
 };
 
 
+/** P-6 V3 (§D.6 rule 15) — both date helpers return "" for an unset
+ *  value; the caller says "not set" in a word, never a dash. */
 function formatDate(value: string, locale: string): string {
-  if (!value) return "—";
+  if (!value) return "";
   try {
     return new Date(value).toLocaleString(locale, {
       day: "2-digit",
@@ -192,7 +234,7 @@ function formatDate(value: string, locale: string): string {
 }
 
 function formatDateOnly(value: string, locale: string): string {
-  if (!value) return "—";
+  if (!value) return "";
   try {
     return new Date(value).toLocaleDateString(locale, {
       year: "numeric",
@@ -240,6 +282,8 @@ export function CustomerPricingPage() {
   // Sprint 137 item 2 — off by default: a deleted (soft-archived) price
   // must not come back unasked. Flipping it refetches both price lists.
   const [showArchived, setShowArchived] = useState(false);
+  // FE-6 — the rows are searchable; the folder chips narrow them.
+  const [search, setSearch] = useState("");
 
   // RF-2 — one selection / modal / delete-dialog for both price kinds.
   const [selected, setSelected] = useState<PricingRow | null>(null);
@@ -248,6 +292,9 @@ export function CustomerPricingPage() {
   const [form, setForm] = useState<PriceFormState>(buildEmptyForm);
   const [formError, setFormError] = useState("");
   const [formBusy, setFormBusy] = useState(false);
+  // P-6 V3 — what the server (or the form's own checks) refused, AT the
+  // field (the ContractFormDialog recipe, P-4 Part B).
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const [deleteTarget, setDeleteTarget] = useState<PricingRow | null>(null);
@@ -438,8 +485,11 @@ export function CustomerPricingPage() {
       service: first ? first.id : "",
       unit_price: first ? first.default_unit_price : "0.00",
       vat_pct: first ? first.default_vat_pct : "21.00",
+      // The folder chip that is on is what the operator meant.
+      folder: typeof activeCategory === "number" ? activeCategory : "",
     });
     setFormError("");
+    setFieldErrors({});
   }
 
   function openEditModal(entry: PricingRow) {
@@ -458,6 +508,7 @@ export function CustomerPricingPage() {
         valid_from: price.valid_from,
         valid_to: price.valid_to ?? "",
         is_active: price.is_active,
+        folder: price.folder ?? "",
       });
     } else {
       const price = entry.row;
@@ -469,65 +520,83 @@ export function CustomerPricingPage() {
         valid_from: price.valid_from,
         valid_to: price.valid_to ?? "",
         is_active: price.is_active,
+        folder: price.folder ?? "",
       });
     }
     setFormError("");
+    setFieldErrors({});
   }
 
   function closeFormModal() {
     setMode(null);
     setForm(buildEmptyForm());
     setFormError("");
+    setFieldErrors({});
   }
 
   async function handleSubmitForm(event: FormEvent) {
     event.preventDefault();
     if (numericId === null) return;
+    // The form's own checks: the sentence stays in the banner (where it
+    // always was) AND lands at the field it is about, scrolled into view.
+    const refuse = (field: string, message: string) => {
+      setFormError(message);
+      setFieldErrors({ [field]: message });
+      scrollToFirstField({ [field]: message });
+    };
     if (form.service === "") {
-      setFormError(t("customer_pricing.error_service_required"));
+      refuse("service", t("customer_pricing.error_service_required"));
       return;
     }
     const isCustom = form.service === CUSTOM_SERVICE_SENTINEL;
     if (isCustom) {
       if (!form.custom_name.trim()) {
-        setFormError(t("customer_custom_pricing.error_name_required"));
+        refuse("custom_name", t("customer_custom_pricing.error_name_required"));
         return;
       }
       if (!form.unit_type) {
-        setFormError(t("customer_custom_pricing.error_unit_type_required"));
+        refuse("unit_type", t("customer_custom_pricing.error_unit_type_required"));
         return;
       }
       // A bare "Other" unit renders as nothing on the price line, so the
       // label is required exactly when OTHER is chosen. The backend
       // blanks it for every other unit type, so it is not sent then.
       if (form.unit_type === "OTHER" && !form.custom_unit_label.trim()) {
-        setFormError(t("customer_custom_pricing.error_unit_label_required"));
+        refuse("unit_type", t("customer_custom_pricing.error_unit_label_required"));
         return;
       }
     }
     const priceNumber = Number(form.unit_price);
     if (!Number.isFinite(priceNumber) || priceNumber < 0) {
-      setFormError(t("customer_pricing.error_price_invalid"));
+      refuse("unit_price", t("customer_pricing.error_price_invalid"));
       return;
     }
     const vatNumber = Number(form.vat_pct);
     if (!Number.isFinite(vatNumber) || vatNumber < 0) {
-      setFormError(t("customer_pricing.error_vat_invalid"));
+      refuse("vat_pct", t("customer_pricing.error_vat_invalid"));
       return;
     }
     if (!form.valid_from) {
-      setFormError(t("customer_pricing.error_valid_from_required"));
+      refuse("valid_from", t("customer_pricing.error_valid_from_required"));
       return;
     }
     // Client-side check matches the backend validator: valid_to (when
     // provided) must be >= valid_from. The backend still owns the
     // hard rule — this only short-circuits the round-trip.
     if (form.valid_to && form.valid_to < form.valid_from) {
-      setFormError(t("customer_pricing.error_valid_to_before_valid_from"));
+      refuse("valid_to", t("customer_pricing.error_valid_to_before_valid_from"));
+      return;
+    }
+    if (
+      form.folder === NEW_FOLDER_SENTINEL &&
+      !form.new_folder_name.trim()
+    ) {
+      refuse("folder", t("customer_pricing.folder_error_name_required"));
       return;
     }
     setFormBusy(true);
     setFormError("");
+    setFieldErrors({});
     // Shared across both payload shapes — these fields were already
     // identical in the two flows this form replaces.
     const shared = {
@@ -537,13 +606,19 @@ export function CustomerPricingPage() {
       valid_to: form.valid_to === "" ? null : form.valid_to,
       is_active: form.is_active,
     };
-    // Sprint 143 §3 — the folder a NEW row lands in: the one the
-    // operator is currently inside, or none when they are on the index
-    // or in a sentinel bucket (folderless / custom / unknown), where
-    // "no folder" is the honest answer.
-    const creatingInFolderId =
-      typeof activeCategory === "number" ? activeCategory : null;
     try {
+      // FE-6 — the folder the row files under, from the form itself:
+      // an existing one, none, or a NEW one made right here. The folder
+      // is created first; if that fails nothing else is written.
+      let folderId: number | null =
+        typeof form.folder === "number" ? form.folder : null;
+      if (form.folder === NEW_FOLDER_SENTINEL) {
+        const created = await createCustomerPriceFolder(numericId, {
+          name: form.new_folder_name.trim(),
+        });
+        folderId = created.id;
+      }
+      const creatingInFolderId = folderId;
       if (isCustom) {
         const payload: CustomerCustomPriceCreatePayload = {
           ...shared,
@@ -570,7 +645,7 @@ export function CustomerPricingPage() {
           const updated = await updateCustomerCustomPrice(
             numericId,
             selected.row.id,
-            payload,
+            { ...payload, folder: folderId },
           );
           await refreshPricingRows(numericId);
           setSelected({ kind: "custom", row: updated });
@@ -592,7 +667,7 @@ export function CustomerPricingPage() {
           const updated = await updateCustomerPrice(
             numericId,
             selected.row.id,
-            payload,
+            { ...payload, folder: folderId },
           );
           await refreshPricingRows(numericId);
           setSelected({ kind: "contract", row: updated });
@@ -600,11 +675,36 @@ export function CustomerPricingPage() {
         }
       }
     } catch (err) {
-      setFormError(getApiError(err));
+      // DRF per-field entries land at their fields; the banner shows
+      // the generic sentence only when the server named no field.
+      const detail = readApiErrorDetail(err);
+      const serverErrors: Record<string, string> = {};
+      for (const name of Object.keys(detail.fields)) {
+        serverErrors[name] = t("admin_list.field_rejected");
+      }
+      setFieldErrors(serverErrors);
+      if (Object.keys(serverErrors).length > 0) {
+        setFormError("");
+        scrollToFirstField(serverErrors);
+      } else {
+        setFormError(getApiError(err));
+      }
     } finally {
       setFormBusy(false);
     }
   }
+
+  const bind = (key: string) => ({ "data-price-field": key });
+  const fieldError = (key: string) =>
+    fieldErrors[key] ? (
+      <span
+        className="field-error"
+        role="alert"
+        data-testid={`customer-pricing-field-error-${key}`}
+      >
+        {fieldErrors[key]}
+      </span>
+    ) : null;
 
   /**
    * Sprint 140 §4 — re-read BOTH price lists after any mutation,
@@ -1040,7 +1140,7 @@ export function CustomerPricingPage() {
    * unit from the catalog service (archived services still resolve via
    * the full `serviceById` map).
    */
-  function resolveUnitLabel(entry: PricingRow): string {
+  function resolveUnitLabel(entry: PricingRow): string | null {
     if (entry.kind === "custom") {
       if (entry.row.unit_type === "OTHER" && entry.row.custom_unit_label) {
         return entry.row.custom_unit_label;
@@ -1048,7 +1148,33 @@ export function CustomerPricingPage() {
       return t(UNIT_TYPE_I18N_KEY[entry.row.unit_type]);
     }
     const unitType = serviceById.get(entry.row.service)?.unit_type;
-    return unitType ? t(UNIT_TYPE_I18N_KEY[unitType]) : "—";
+    return unitType ? t(UNIT_TYPE_I18N_KEY[unitType]) : null;
+  }
+
+  // P-6 V3 (§D.6 rule 15) — the unit, the money, the percentage and the
+  // dates as a reader says them; a missing one as a WORD, never "—".
+  function unitCell(entry: PricingRow) {
+    const label = resolveUnitLabel(entry);
+    return label ?? (
+      <span className="muted-empty">{t("customer_pricing.unit_unknown")}</span>
+    );
+  }
+  const moneyCell = (value: string) => formatMoney(value, { locale: dateLocale });
+  const percentCell = (value: string) =>
+    t("customer_pricing.percent", { value });
+  function dateCell(value: string, withTime = false) {
+    const text = withTime
+      ? formatDate(value, dateLocale)
+      : formatDateOnly(value, dateLocale);
+    return text || (
+      <span className="muted-empty">{t("admin_list.not_set")}</span>
+    );
+  }
+  /** The catalog's reference price for a contract row; a custom row has
+   *  none, and neither has a row whose service left the catalog. */
+  function defaultPriceOf(entry: PricingRow): string | null {
+    if (entry.kind === "custom") return null;
+    return serviceById.get(entry.row.service)?.default_unit_price ?? null;
   }
 
   // RF-2 — the single list backing the unified table. Contract rows
@@ -1170,8 +1296,18 @@ export function CustomerPricingPage() {
   // emptied out (e.g. the archived rows were just hidden again)
   // degrades to an empty category page with a working breadcrumb
   // rather than a crash or a silent bounce back to the index.
-  const visibleRows =
-    activeCategory === null ? [] : (rowsByCategory.get(activeCategory) ?? []);
+  // FE-6 — the list opens on EVERY row; a chip narrows to one folder
+  // (or one sentinel bucket), the search box narrows by name. No
+  // category door: the rows are the page.
+  const searchTerm = search.trim().toLowerCase();
+  const visibleRows = (
+    activeCategory === null
+      ? unifiedRows
+      : (rowsByCategory.get(activeCategory) ?? [])
+  ).filter(
+    (entry) =>
+      !searchTerm || resolveRowName(entry).toLowerCase().includes(searchTerm),
+  );
 
   // Sprint 138 §3 — the rows edit mode may act on. Archived price rows
   // are read-only records, so they are excluded from selection entirely
@@ -1244,14 +1380,6 @@ export function CustomerPricingPage() {
       !copyFilterTerm || service.name.toLowerCase().includes(copyFilterTerm),
     fallbackName: t("customer_pricing.category_unknown"),
   });
-
-  const activeCategoryLabel =
-    activeCategory === null
-      ? ""
-      : (categoryCards.find((card) => card.key === activeCategory)?.label ??
-        (typeof activeCategory === "number"
-          ? (folders.find((f) => f.id === activeCategory)?.name ?? "")
-          : ""));
 
   // Navigating between the index and a category clears the row detail
   // panel — a selected row from another category must not linger under
@@ -1506,79 +1634,101 @@ export function CustomerPricingPage() {
 
   const customerName = customer?.name ?? "";
 
+  // §D.6 rule 14 — every action that is off says why: the prices are
+  // still loading, or the route carries no customer at all.
+  const actionLock = loading
+    ? t("customer_pricing.action_wait_loading")
+    : numericId === null
+      ? t("customer_pricing.action_no_customer")
+      : undefined;
+  const actionsLocked = actionLock !== undefined;
+
+  // §D.6 rule 13 — the catalog's reference price is a column only when a
+  // visible row has one (a page of custom rows would be a column of
+  // "not in the catalog").
+  const anyDefaultPrice = visibleRows.some((entry) => defaultPriceOf(entry) !== null);
+
   return (
     <div data-testid="customer-pricing-page">
-      <Link
-        to={`/admin/customers/${numericId ?? ""}`}
-        className="link-back"
-        data-testid="customer-pricing-back"
-      >
-        <ChevronLeft size={14} strokeWidth={2.5} />
-        {t("customer_form.back")}
-      </Link>
-
-      <div className="page-header">
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
-          </div>
-          <h2 className="page-title">
-            {customerName
-              ? `${customerName} · ${t("customer_pricing.page_title")}`
-              : t("customer_pricing.page_title")}
-          </h2>
-        </div>
-        <div className="page-header-actions">
-          <button
-            type="button"
-            className={
-              showArchived ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm"
-            }
-            data-testid="customer-pricing-show-archived-toggle"
-            aria-pressed={showArchived}
-            onClick={() => setShowArchived((current) => !current)}
-            disabled={loading || numericId === null}
-          >
-            {/* Sprint 138 §4 — the label reflects STATE. It used to
-                read "Show archived" whether or not archived rows were
-                already showing, so hiding them meant pressing a button
-                that said "show". */}
-            {showArchived
-              ? t("customer_pricing.hide_archived_toggle")
-              : t("customer_pricing.show_archived_toggle")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            data-testid="customer-pricing-copy-default-button"
-            onClick={openCopyDefault}
-            disabled={loading || numericId === null}
-          >
-            {t("customer_pricing.copy_from_default_button")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            data-testid="customer-pricing-bulk-raise-button"
-            onClick={openBulkRaise}
-            disabled={loading || numericId === null}
-          >
-            {t("customer_pricing.bulk_raise_button")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            data-testid="customer-pricing-add-button"
-            onClick={openCreateModal}
-            // RF-2 — no longer gated on the catalog having services: the
-            // "Other / Custom…" option is always available, so an empty
-            // catalog must not block adding a custom price line.
-            disabled={loading || numericId === null}
-          >
-            {t("customer_pricing.add_button")}
-          </button>
-        </div>
-      </div>
+      <CustomerSubPageHeader
+        customerName={customerName}
+        isActive={customer?.is_active ?? true}
+        tab="pricing"
+        actions={
+          <>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              data-testid="customer-pricing-add-button"
+              onClick={openCreateModal}
+              disabled={actionsLocked}
+              title={actionLock}
+            >
+              {t("customer_pricing.add_button")}
+            </button>
+            {/* Rule 3: everything that is not THE action folds. */}
+            <OverflowMenu
+              label={t("customer_pricing.more_actions")}
+              testIdPrefix="customer-pricing"
+              items={[
+                {
+                  key: "copy-default",
+                  label: t("customer_pricing.copy_from_default_button"),
+                  onClick: openCopyDefault,
+                  disabled: actionsLocked,
+                  title: actionLock,
+                },
+                {
+                  key: "from-category",
+                  label: t("customer_pricing.folder_from_category_button"),
+                  onClick: openFromCategory,
+                  disabled: actionsLocked,
+                  title: actionLock,
+                },
+                {
+                  key: "adjust",
+                  label: t("customer_pricing.bulk_raise_button"),
+                  onClick: openBulkRaise,
+                  disabled: actionsLocked,
+                  title: actionLock,
+                },
+                {
+                  key: "new-folder",
+                  label: t("customer_pricing.folder_new_button"),
+                  onClick: openCreateFolder,
+                  disabled: actionsLocked,
+                  title: actionLock,
+                },
+                ...(activeFolder
+                  ? [
+                      {
+                        key: "rename-folder",
+                        label: t("customer_pricing.folder_rename_button"),
+                        onClick: () => openRenameFolder(activeFolder),
+                      },
+                      {
+                        key: "delete-folder",
+                        label: t("customer_pricing.folder_delete_button"),
+                        onClick: () => setFolderDeleteTarget(activeFolder),
+                        destructive: true,
+                      },
+                    ]
+                  : []),
+                {
+                  key: "archived",
+                  label: showArchived
+                    ? t("customer_pricing.hide_archived_toggle")
+                    : t("customer_pricing.show_archived_toggle"),
+                  onClick: () => setShowArchived((current) => !current),
+                  pressed: showArchived,
+                  disabled: actionsLocked,
+                  title: actionLock,
+                },
+              ]}
+            />
+          </>
+        }
+      />
 
       {loadError && (
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>
@@ -1592,186 +1742,73 @@ export function CustomerPricingPage() {
         </div>
       ) : (
         <>
-          {/* Sprint 137 item 4 — category index. The flat one-table
-              page became unreadable at real contract sizes; this
-              mirrors the shape of the owner's reference tool: pick a
-              category, drill in, breadcrumb back. */}
-          {activeCategory === null && (
-            <div className="card" data-testid="customer-pricing-categories">
-              {/* Sprint 143 §3 — the two ways to create a folder. Always
-                  offered, including on a brand-new customer's empty page,
-                  which is where they matter most: a new customer opens
-                  with no folders and no prices (there is no fallback to
-                  company defaults — `resolve_price` has none), so these
-                  buttons are the whole starting point. */}
-              <div
-                className="page-header-actions"
-                style={{ padding: "14px 20px 0", justifyContent: "flex-end" }}
-              >
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  data-testid="customer-pricing-new-folder"
-                  onClick={openCreateFolder}
-                >
-                  {t("customer_pricing.folder_new_button")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  data-testid="customer-pricing-folder-from-category"
-                  onClick={openFromCategory}
-                >
-                  {t("customer_pricing.folder_from_category_button")}
-                </button>
-              </div>
-              {categoryCards.length === 0 ? (
-                <div
-                  style={{ padding: "32px 24px", textAlign: "center" }}
-                  data-testid="customer-pricing-empty"
-                >
-                  <h3 className="empty-title" style={{ marginBottom: 8 }}>
-                    {t("customer_pricing.empty_title")}
-                  </h3>
-                  <p className="muted" style={{ margin: 0 }}>
-                    {t("customer_pricing.empty_description")}
-                  </p>
-                </div>
-              ) : (
-                <div style={{ padding: "18px 20px" }}>
-                  <div className="muted small" style={{ marginBottom: 12 }}>
-                    {t("customer_pricing.folders_helper")}
-                  </div>
-                  <div className="pricing-category-grid">
-                    {categoryCards.map((card) => (
-                      <button
-                        type="button"
-                        key={String(card.key)}
-                        className="pricing-category-card"
-                        data-testid="customer-pricing-category-card"
-                        data-category-key={String(card.key)}
-                        data-category-count={card.count}
-                        onClick={() => openCategory(card.key)}
-                      >
-                        <span className="pricing-category-card-name">
-                          {card.label}
-                          {!card.isActive && (
-                            <span
-                              className="badge badge-muted"
-                              style={{ marginLeft: 8 }}
-                            >
-                              {t("admin.status_inactive")}
-                            </span>
-                          )}
-                        </span>
-                        {/* Sprint 154 §L.2 — the count is the card's
-                            headline figure now, not a muted sub-line. */}
-                        <span className="pricing-category-card-count">
-                          {card.count}
-                        </span>
-                        <span className="pricing-category-card-count-label">
-                          {card.count === 0
-                            ? t("customer_pricing.category_card_empty")
-                            : t("customer_pricing.category_card_count", {
-                                count: card.count,
-                              })}
-                        </span>
-                      </button>
-                    ))}
-                    {/* Sprint 154 §L.2 — a large "+" tile at the end of
-                        the grid, opening the EXISTING create-folder flow.
-                        Styled as a card so the grid reads as one row of
-                        tiles rather than a row plus a stray button. */}
-                    <button
-                      type="button"
-                      className="pricing-category-card pricing-category-card-add"
-                      data-testid="customer-pricing-category-add-card"
-                      onClick={openCreateFolder}
-                    >
-                      <span
-                        className="pricing-category-card-add-plus"
-                        aria-hidden="true"
-                      >
-                        +
-                      </span>
-                      <span className="pricing-category-card-name">
-                        {t("customer_pricing.folder_new_button")}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeCategory !== null && (
           <div className="card" data-testid="customer-pricing-list">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "14px 20px",
-                borderBottom: "1px solid var(--border)",
-              }}
-            >
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                data-testid="customer-pricing-category-back"
-                onClick={backToCategories}
+            {/* FE-6 — the toolbar: the folder chips (the customer's own
+                folders, then the buckets that hold rows), the search
+                box, and Edit. The rows below are always on screen. */}
+            <div className="pricing-toolbar">
+              <div
+                className="pricing-toolbar-chips"
+                role="group"
+                aria-label={t("customer_pricing.folders_helper")}
+                data-testid="customer-pricing-folder-chips"
               >
-                <ChevronLeft size={14} strokeWidth={2.5} />
-                {t("customer_pricing.breadcrumb_all")}
-              </button>
-              <span
-                className="section-title"
-                style={{ margin: 0 }}
-                data-testid="customer-pricing-category-title"
-              >
-                {activeCategoryLabel}
-              </span>
-              {/* Sprint 143 §3 — a real folder can be renamed or
-                  deleted; the sentinel buckets (folderless / custom /
-                  unknown) are not folders and get neither. */}
-              {activeFolder && (
-                <>
+                <button
+                  type="button"
+                  className={
+                    activeCategory === null
+                      ? "btn btn-primary btn-sm"
+                      : "btn btn-secondary btn-sm"
+                  }
+                  aria-pressed={activeCategory === null}
+                  onClick={backToCategories}
+                  data-testid="customer-pricing-chip-all"
+                >
+                  {t("customer_pricing.filter_all")}
+                  <span className="pricing-chip-count">{unifiedRows.length}</span>
+                </button>
+                {categoryCards.map((card) => (
                   <button
                     type="button"
-                    className="btn btn-ghost btn-sm"
-                    style={{ marginLeft: "auto" }}
-                    data-testid="customer-pricing-folder-rename"
-                    onClick={() => openRenameFolder(activeFolder)}
+                    key={String(card.key)}
+                    className={
+                      activeCategory === card.key
+                        ? "btn btn-primary btn-sm"
+                        : "btn btn-secondary btn-sm"
+                    }
+                    aria-pressed={activeCategory === card.key}
+                    data-testid="customer-pricing-category-card"
+                    data-category-key={String(card.key)}
+                    data-category-count={card.count}
+                    onClick={() =>
+                      activeCategory === card.key
+                        ? backToCategories()
+                        : openCategory(card.key)
+                    }
                   >
-                    {t("customer_pricing.folder_rename_button")}
+                    {card.label}
+                    {!card.isActive && (
+                      <span className="badge badge-muted" style={{ marginLeft: 6 }}>
+                        {t("admin.status_inactive")}
+                      </span>
+                    )}
+                    <span className="pricing-chip-count">{card.count}</span>
                   </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    data-testid="customer-pricing-folder-delete"
-                    onClick={() => setFolderDeleteTarget(activeFolder)}
-                  >
-                    {t("customer_pricing.folder_delete_button")}
-                  </button>
-                </>
-              )}
-              {/* Sprint 137 item 7 — Edit / Done. Outside edit mode the
-                  table below looks exactly as it did before.
-
-                  Sprint 143 §7 — HIDDEN, not disabled, when there is
-                  nothing it could act on. Sprint 142 fixed the GATE
-                  (`selectableRows`, not `visibleRows` — the latter
-                  includes archived rows, which are read-only and carry
-                  no checkbox) but left the button on screen greyed out
-                  with a tooltip. The running theme of Sprints 138-141 is
-                  that a control which cannot work should not be offered
-                  at all: a disabled button still asks the operator to
-                  hover it to find out why. */}
+                ))}
+              </div>
+              <input
+                type="search"
+                className="field-input pricing-toolbar-search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("customer_pricing.search_placeholder")}
+                aria-label={t("customer_pricing.search_placeholder")}
+                data-testid="customer-pricing-search"
+              />
               {selectableRows.length > 0 && (
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
-                  style={activeFolder ? undefined : { marginLeft: "auto" }}
                   data-testid="customer-pricing-edit-mode-toggle"
                   aria-pressed={editMode}
                   onClick={() =>
@@ -1887,16 +1924,39 @@ export function CustomerPricingPage() {
               </div>
             )}
 
-            {visibleRows.length === 0 ? (
-              <div
-                style={{ padding: "32px 24px", textAlign: "center" }}
-                data-testid="customer-pricing-category-empty"
-              >
-                <p className="muted" style={{ margin: 0 }}>
-                  {t("customer_pricing.category_drill_empty")}
-                </p>
-              </div>
+            {unifiedRows.length === 0 ? (
+              /* The shared empty state, with the one obvious action. */
+              <EmptyState
+                icon={Tag}
+                title={t("customer_pricing.empty_title")}
+                description={t("customer_pricing.empty_description")}
+                action={
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    data-testid="customer-pricing-empty-add"
+                    onClick={openCreateModal}
+                    disabled={actionsLocked}
+                    title={actionLock}
+                  >
+                    {t("customer_pricing.add_button")}
+                  </button>
+                }
+                testId="customer-pricing-empty"
+              />
+            ) : visibleRows.length === 0 ? (
+              <EmptyState
+                title={t("customer_pricing.no_match")}
+                compact
+                testId="customer-pricing-category-empty"
+              />
             ) : (
+              <BoundedList
+                size="lg"
+                count={visibleRows.length}
+                ariaLabel={t("customer_pricing.rows_label")}
+                testIdPrefix="customer-pricing-rows"
+              >
               <div className="table-wrap">
                 <table className="data-table">
                   <thead>
@@ -1911,7 +1971,9 @@ export function CustomerPricingPage() {
                       <th>{t("customer_pricing.col_service")}</th>
                       <th>{t("customer_pricing.col_unit")}</th>
                       <th>{t("customer_pricing.col_unit_price")}</th>
-                      <th>{t("customer_pricing.col_default_price")}</th>
+                      {anyDefaultPrice && (
+                        <th>{t("customer_pricing.col_default_price")}</th>
+                      )}
                       <th>{t("customer_pricing.col_vat_pct")}</th>
                       <th>{t("customer_pricing.col_valid_from")}</th>
                       <th>{t("customer_pricing.col_valid_to")}</th>
@@ -1996,22 +2058,25 @@ export function CustomerPricingPage() {
                             </span>
                           )}
                         </td>
-                        <td>{resolveUnitLabel(entry)}</td>
-                        <td>{entry.row.unit_price}</td>
-                        <td>
-                          {entry.kind === "custom"
-                            ? "—"
-                            : (serviceById.get(entry.row.service)
-                                ?.default_unit_price ?? "—")}
-                        </td>
-                        <td>{entry.row.vat_pct}</td>
-                        <td>
-                          {formatDateOnly(entry.row.valid_from, dateLocale)}
-                        </td>
+                        <td>{unitCell(entry)}</td>
+                        <td>{moneyCell(entry.row.unit_price)}</td>
+                        {anyDefaultPrice && (
+                          <td>
+                            {defaultPriceOf(entry) === null ? (
+                              <span className="muted-empty">
+                                {t("customer_pricing.default_price_none")}
+                              </span>
+                            ) : (
+                              moneyCell(defaultPriceOf(entry) ?? "")
+                            )}
+                          </td>
+                        )}
+                        <td>{percentCell(entry.row.vat_pct)}</td>
+                        <td>{dateCell(entry.row.valid_from)}</td>
                         <td>
                           {entry.row.valid_to === null
                             ? t("customer_pricing.valid_to_open_ended")
-                            : formatDateOnly(entry.row.valid_to, dateLocale)}
+                            : dateCell(entry.row.valid_to)}
                         </td>
                         <td>
                           {entry.row.is_active
@@ -2023,9 +2088,9 @@ export function CustomerPricingPage() {
                   </tbody>
                 </table>
               </div>
+              </BoundedList>
             )}
           </div>
-          )}
 
           {selected && (
             <section
@@ -2103,7 +2168,7 @@ export function CustomerPricingPage() {
                     className="detail-kv-val"
                     data-testid="customer-pricing-detail-unit"
                   >
-                    {resolveUnitLabel(selected)}
+                    {unitCell(selected)}
                   </span>
                 </div>
                 <div className="detail-kv-row">
@@ -2114,21 +2179,21 @@ export function CustomerPricingPage() {
                     className="detail-kv-val"
                     data-testid="customer-pricing-detail-unit-price"
                   >
-                    {selected.row.unit_price}
+                    {moneyCell(selected.row.unit_price)}
                   </span>
                 </div>
                 <div className="detail-kv-row">
                   <span className="detail-kv-label">
                     {t("customer_pricing.col_vat_pct")}
                   </span>
-                  <span className="detail-kv-val">{selected.row.vat_pct}</span>
+                  <span className="detail-kv-val">{percentCell(selected.row.vat_pct)}</span>
                 </div>
                 <div className="detail-kv-row">
                   <span className="detail-kv-label">
                     {t("customer_pricing.col_valid_from")}
                   </span>
                   <span className="detail-kv-val">
-                    {formatDateOnly(selected.row.valid_from, dateLocale)}
+                    {dateCell(selected.row.valid_from)}
                   </span>
                 </div>
                 <div className="detail-kv-row">
@@ -2138,7 +2203,7 @@ export function CustomerPricingPage() {
                   <span className="detail-kv-val">
                     {selected.row.valid_to === null
                       ? t("customer_pricing.valid_to_open_ended")
-                      : formatDateOnly(selected.row.valid_to, dateLocale)}
+                      : dateCell(selected.row.valid_to)}
                   </span>
                 </div>
                 <div className="detail-kv-row">
@@ -2156,7 +2221,7 @@ export function CustomerPricingPage() {
                     {t("customer_pricing.field_created_at")}
                   </span>
                   <span className="detail-kv-val">
-                    {formatDate(selected.row.created_at, dateLocale)}
+                    {dateCell(selected.row.created_at, true)}
                   </span>
                 </div>
                 <div className="detail-kv-row">
@@ -2164,7 +2229,7 @@ export function CustomerPricingPage() {
                     {t("customer_pricing.field_updated_at")}
                   </span>
                   <span className="detail-kv-val">
-                    {formatDate(selected.row.updated_at, dateLocale)}
+                    {dateCell(selected.row.updated_at, true)}
                   </span>
                 </div>
               </div>
@@ -2182,16 +2247,7 @@ export function CustomerPricingPage() {
           role="dialog"
           aria-modal="true"
           aria-label={formModalTitle}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <form
             onSubmit={handleSubmitForm}
@@ -2223,7 +2279,17 @@ export function CustomerPricingPage() {
               </div>
             )}
 
-            <div className="field">
+            {/* P-6 V3 — THREE STAGES, one thing at a time (the
+                ContractFormDialog shape): which service, the price,
+                when it applies. Every field, value and endpoint is what
+                it was; only the order, the numbering and where an error
+                lands changed. */}
+            <div className="form-section" data-testid="customer-pricing-stage-service">
+              <div className="form-section-title">
+                <span className="ew-plan-step">1</span>
+                {t("customer_pricing.stage_service")}
+              </div>
+            <div className="field" {...bind("service")}>
               <label className="field-label" htmlFor="price-service">
                 {t("customer_pricing.field_service")} *
               </label>
@@ -2270,7 +2336,7 @@ export function CustomerPricingPage() {
                 </option>
                 {activeServices.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name} — {s.default_unit_price}
+                    {s.name} — {moneyCell(s.default_unit_price)}
                   </option>
                 ))}
                 {/* RF-2 — always last: the escape hatch for work that is
@@ -2279,6 +2345,7 @@ export function CustomerPricingPage() {
                   {t("customer_pricing.option_custom")}
                 </option>
               </select>
+              {fieldError("service")}
               {mode === "edit" && (
                 <div className="muted small" style={{ marginTop: 4 }}>
                   {t("customer_pricing.field_service_locked_hint")}
@@ -2291,7 +2358,7 @@ export function CustomerPricingPage() {
                 catalog path is unchanged. */}
             {isCustomForm && (
               <>
-                <div className="field">
+                <div className="field" {...bind("custom_name")}>
                   <label className="field-label" htmlFor="price-custom-name">
                     {t("customer_custom_pricing.field_name")} *
                   </label>
@@ -2314,9 +2381,10 @@ export function CustomerPricingPage() {
                     required
                     disabled={formBusy}
                   />
+                  {fieldError("custom_name")}
                 </div>
 
-                <div className="field">
+                <div className="field" {...bind("unit_type")}>
                   <label className="field-label" htmlFor="price-unit-type">
                     {t("services.field_unit_type")} *
                   </label>
@@ -2340,6 +2408,8 @@ export function CustomerPricingPage() {
                       </option>
                     ))}
                   </select>
+                  {fieldError("unit_type")}
+                  {fieldError("custom_unit_label")}
                 </div>
 
                 {/* Sprint 123 — "Other" is an opaque unit backed by the
@@ -2369,8 +2439,73 @@ export function CustomerPricingPage() {
               </>
             )}
 
+            {/* FE-6 — the folder, chosen (or made) right here. */}
+            <div className="field" {...bind("folder")}>
+              <label className="field-label" htmlFor="price-folder">
+                {t("customer_pricing.field_folder")}
+              </label>
+              <select
+                id="price-folder"
+                className="field-select"
+                value={form.folder === "" ? "" : String(form.folder)}
+                onChange={(event) => {
+                  const v = event.target.value;
+                  setForm((prev) => ({
+                    ...prev,
+                    folder:
+                      v === ""
+                        ? ""
+                        : v === NEW_FOLDER_SENTINEL
+                          ? NEW_FOLDER_SENTINEL
+                          : Number(v),
+                  }));
+                }}
+                data-testid="customer-pricing-input-folder"
+                disabled={formBusy}
+              >
+                <option value="">{t("customer_pricing.folder_none")}</option>
+                {folders
+                  .filter((f) => f.is_active || f.id === form.folder)
+                  .map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                <option value={NEW_FOLDER_SENTINEL}>
+                  {t("customer_pricing.field_folder_new")}
+                </option>
+              </select>
+              {form.folder === NEW_FOLDER_SENTINEL && (
+                <input
+                  className="field-input"
+                  style={{ marginTop: 6 }}
+                  value={form.new_folder_name}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      new_folder_name: event.target.value,
+                    }))
+                  }
+                  placeholder={t("customer_pricing.field_folder_new_name")}
+                  aria-label={t("customer_pricing.field_folder_new_name")}
+                  data-testid="customer-pricing-input-new-folder-name"
+                  autoFocus
+                  disabled={formBusy}
+                />
+              )}
+              {fieldError("folder")}
+              {fieldError("new_folder_name")}
+            </div>
+
+            </div>
+
+            <div className="form-section" data-testid="customer-pricing-stage-price">
+              <div className="form-section-title">
+                <span className="ew-plan-step">2</span>
+                {t("customer_pricing.stage_price")}
+              </div>
             <div className="form-2col">
-              <div className="field">
+              <div className="field" {...bind("unit_price")}>
                 <label className="field-label" htmlFor="price-unit-price">
                   {t("customer_pricing.field_unit_price")} *
                 </label>
@@ -2391,8 +2526,9 @@ export function CustomerPricingPage() {
                   required
                   disabled={formBusy}
                 />
+                {fieldError("unit_price")}
               </div>
-              <div className="field">
+              <div className="field" {...bind("vat_pct")}>
                 <label className="field-label" htmlFor="price-vat-pct">
                   {t("customer_pricing.field_vat_pct")} *
                 </label>
@@ -2413,11 +2549,18 @@ export function CustomerPricingPage() {
                   required
                   disabled={formBusy}
                 />
+                {fieldError("vat_pct")}
               </div>
             </div>
+            </div>
 
+            <div className="form-section" data-testid="customer-pricing-stage-when">
+              <div className="form-section-title">
+                <span className="ew-plan-step">3</span>
+                {t("customer_pricing.stage_when")}
+              </div>
             <div className="form-2col">
-              <div className="field">
+              <div className="field" {...bind("valid_from")}>
                 <label className="field-label" htmlFor="price-valid-from">
                   {t("customer_pricing.field_valid_from")} *
                 </label>
@@ -2436,8 +2579,9 @@ export function CustomerPricingPage() {
                   required
                   disabled={formBusy}
                 />
+                {fieldError("valid_from")}
               </div>
-              <div className="field">
+              <div className="field" {...bind("valid_to")}>
                 <label className="field-label" htmlFor="price-valid-to">
                   {t("customer_pricing.field_valid_to")}
                 </label>
@@ -2455,6 +2599,7 @@ export function CustomerPricingPage() {
                   data-testid="customer-pricing-input-valid-to"
                   disabled={formBusy}
                 />
+                {fieldError("valid_to")}
                 <div className="muted small" style={{ marginTop: 4 }}>
                   {t("customer_pricing.field_valid_to_hint")}
                 </div>
@@ -2479,15 +2624,27 @@ export function CustomerPricingPage() {
                 <span>{t("customer_pricing.field_is_active")}</span>
               </label>
             </div>
+            </div>
 
             <div
               style={{
                 display: "flex",
                 justifyContent: "flex-end",
+                alignItems: "center",
                 gap: 8,
                 marginTop: 12,
               }}
             >
+              {Object.keys(fieldErrors).length > 0 && (
+                <span
+                  className="form-error"
+                  role="alert"
+                  style={{ marginRight: "auto" }}
+                  data-testid="customer-pricing-form-summary-error"
+                >
+                  {t("admin_list.fix_marked", { count: Object.keys(fieldErrors).length })}
+                </span>
+              )}
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -2501,6 +2658,7 @@ export function CustomerPricingPage() {
                 type="submit"
                 className="btn btn-primary btn-sm"
                 disabled={formBusy}
+                title={formBusy ? t("admin_list.saving_wait") : undefined}
                 data-testid="customer-pricing-modal-save"
               >
                 {formBusy
@@ -2519,26 +2677,11 @@ export function CustomerPricingPage() {
           role="dialog"
           aria-modal="true"
           aria-label={t("customer_pricing.bulk_raise_button")}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <div
-            className="card"
-            style={{
-              maxWidth: 600,
-              width: "100%",
-              padding: 24,
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
+            className="card pricing-panel"
+            style={{ maxWidth: 600 }}
           >
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.bulk_raise_button")}
@@ -2559,6 +2702,12 @@ export function CustomerPricingPage() {
               </div>
             )}
 
+            {/* P-7 S9 — staged like the add/edit form: which prices,
+                then how much. */}
+            <div className="form-section-title" data-testid="customer-pricing-bulk-stage-which">
+              <span className="ew-plan-step">1</span>
+              {t("customer_pricing.bulk_stage_which")}
+            </div>
             {activePrices.length === 0 ? (
               <div className="muted" style={{ marginBottom: 16 }}>
                 {t("customer_pricing.bulk_raise_empty")}
@@ -2585,7 +2734,7 @@ export function CustomerPricingPage() {
                   getId={(price) => price.id}
                   renderItem={(price) => (
                     <>
-                      {resolveServiceName(price)} — {price.unit_price}
+                      {resolveServiceName(price)} — {moneyCell(price.unit_price)}
                       {/* #108 Part C — live effect preview. Backend
                           HALF_UP is authoritative; a result at or below
                           zero shows red (the server rejects the whole
@@ -2633,6 +2782,10 @@ export function CustomerPricingPage() {
               </>
             )}
 
+            <div className="form-section-title pricing-panel-stage" data-testid="customer-pricing-bulk-stage-how">
+              <span className="ew-plan-step">2</span>
+              {t("customer_pricing.bulk_stage_how")}
+            </div>
             <div className="form-2col">
               <div className="field">
                 <label
@@ -2770,20 +2923,11 @@ export function CustomerPricingPage() {
               ? t("customer_pricing.folder_rename_title")
               : t("customer_pricing.folder_new_title")
           }
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <form
-            className="card"
-            style={{ maxWidth: 460, width: "100%", padding: 24 }}
+            className="card pricing-panel"
+            style={{ maxWidth: 460 }}
             onSubmit={submitFolder}
           >
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
@@ -2852,20 +2996,11 @@ export function CustomerPricingPage() {
           aria-label={t("customer_pricing.folder_delete_title", {
             name: folderDeleteTarget.name,
           })}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <div
-            className="card"
-            style={{ maxWidth: 520, width: "100%", padding: 24 }}
+            className="card pricing-panel"
+            style={{ maxWidth: 520 }}
           >
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.folder_delete_title", {
@@ -2925,26 +3060,11 @@ export function CustomerPricingPage() {
           role="dialog"
           aria-modal="true"
           aria-label={t("customer_pricing.folder_from_category_title")}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <form
-            className="card"
-            style={{
-              maxWidth: 620,
-              width: "100%",
-              padding: 24,
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
+            className="card pricing-panel"
+            style={{ maxWidth: 620 }}
             onSubmit={submitFromCategory}
           >
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
@@ -3094,20 +3214,11 @@ export function CustomerPricingPage() {
           aria-label={t("customer_pricing.folder_move_title", {
             count: activeBulkSelection.length,
           })}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <div
-            className="card"
-            style={{ maxWidth: 460, width: "100%", padding: 24 }}
+            className="card pricing-panel"
+            style={{ maxWidth: 460 }}
           >
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.folder_move_title", {
@@ -3182,26 +3293,11 @@ export function CustomerPricingPage() {
           role="dialog"
           aria-modal="true"
           aria-label={t("customer_pricing.copy_from_default_title")}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <div
-            className="card"
-            style={{
-              maxWidth: 600,
-              width: "100%",
-              padding: 24,
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
+            className="card pricing-panel"
+            style={{ maxWidth: 600 }}
           >
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.copy_from_default_title")}
@@ -3284,7 +3380,7 @@ export function CustomerPricingPage() {
                   groups={copyGroups}
                   getId={(service) => service.id}
                   renderItem={(service) =>
-                    `${service.name} — ${service.default_unit_price}`
+                    `${service.name} — ${moneyCell(service.default_unit_price)}`
                   }
                   selectedIds={copySelectedServiceIds}
                   onToggleItem={toggleCopyService}

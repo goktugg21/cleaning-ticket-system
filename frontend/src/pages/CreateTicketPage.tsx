@@ -1,12 +1,21 @@
+/**
+ * FE-5 (Addendum D §D.7 "Ticket create (provider)") — the provider's
+ * ticket form, trimmed.
+ *
+ * Voor wie (customer + building), ONE description (its first line is
+ * the title — the same `titleFrom` mapping the customer's melding form
+ * uses; the endpoint is unchanged), the priority cards (providers live
+ * by SLA), photos and files. Type, room/zone and the customer's wished
+ * date fold under "Meer details". The side column keeps three lines
+ * that earn their place and nothing else.
+ */
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowRight,
-  ChevronLeft,
   CircleCheck,
-  Clock,
   Info,
   TriangleAlert,
   UploadCloud,
@@ -15,39 +24,24 @@ import {
 import { useTranslation } from "react-i18next";
 import { listAllBuildings, listAllCustomers } from "../api/admin";
 import { api, getApiError } from "../api/client";
-import type { Building, Customer, WorkCategory } from "../api/types";
-import { listWorkCategories } from "../api/tickets";
+import type { Building, Customer, TicketCategory } from "../api/types";
+import { listTicketCategories } from "../api/tickets";
 import { useAuth } from "../auth/AuthContext";
-import { isCustomerUser } from "../auth/permissions";
+import { PageHeader } from "../components/PageHeader";
+import { titleFrom } from "../lib/meldingTitle";
 
 interface CreateTicketForm {
-  title: string;
   description: string;
   room_label: string;
-  type: string;
   priority: string;
   building: string;
   customer: string;
   /** Sprint 184 §3 — the date the CUSTOMER would like this done. A WISH,
-   *  never a deadline: a deadline is a provider commitment and stays
-   *  provider-only, because the overdue rules read deadlines. Carried
-   *  into `ExtraWorkRequest.preferred_date` if this melding is later
-   *  converted, so a date somebody typed does not vanish. */
+   *  never a deadline. */
   customer_wanted_date: string;
-  /** Sprint 185 E §1 — the kind of WORK, from the company's own catalog.
-   *  A string because it is a `<select>` value; "" means "not yet
-   *  classified", which is a legitimate answer at intake. */
+  /** W13 — THE classification; "" means "not yet classified". */
   category: string;
 }
-
-type TicketTypeValue =
-  | "REPORT"
-  | "COMPLAINT"
-  | "REQUEST"
-  | "SUGGESTION"
-  | "QUOTE_REQUEST"
-  // Sprint 143 §2 — the catch-all operators asked for.
-  | "OTHER";
 
 type PriorityValue = "NORMAL" | "HIGH" | "URGENT";
 
@@ -57,24 +51,6 @@ interface PriorityCard {
   helperKey: string;
   icon: typeof Info;
 }
-
-const TICKET_TYPE_VALUES: TicketTypeValue[] = [
-  "REPORT",
-  "COMPLAINT",
-  "REQUEST",
-  "SUGGESTION",
-  "QUOTE_REQUEST",
-  "OTHER",
-];
-
-const TICKET_TYPE_KEYS: Record<TicketTypeValue, string> = {
-  REPORT: "type_report",
-  COMPLAINT: "type_complaint",
-  REQUEST: "type_request",
-  SUGGESTION: "type_suggestion",
-  QUOTE_REQUEST: "type_quote_request",
-  OTHER: "type_other",
-};
 
 const PRIORITY_CARDS: PriorityCard[] = [
   {
@@ -98,10 +74,8 @@ const PRIORITY_CARDS: PriorityCard[] = [
 ];
 
 const EMPTY_FORM: CreateTicketForm = {
-  title: "",
   description: "",
   room_label: "",
-  type: "REPORT",
   priority: "NORMAL",
   building: "",
   customer: "",
@@ -111,25 +85,25 @@ const EMPTY_FORM: CreateTicketForm = {
 
 // Mirrors the backend per-file cap in
 // `tickets/serializers.py::TicketAttachmentSerializer.validate_file`.
-// The endpoint takes ONE file per request, so several attachments are
-// N sequential POSTs (the SlotCompletionDialog pattern) — this is a
-// per-file limit, never a total across the staged set.
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 const ATTACHMENT_ACCEPT = ".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
 
-// Identity for de-duplicating the staged list. The File object itself is
-// a fresh reference on every pick, so picking the same photo twice would
-// otherwise stage (and upload) it twice.
 function fileKey(file: File): string {
   return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+const TIP_KEYS = ["tip_1", "tip_2", "tip_3"] as const;
+
+/** W13 — what `/new` already asked, as a category SLUG in the URL. */
+function readCategoryParam(): string | null {
+  return new URLSearchParams(window.location.search).get("category");
 }
 
 export function CreateTicketPage() {
   const navigate = useNavigate();
   const { t } = useTranslation(["create_ticket", "common"]);
   const { me } = useAuth();
-  const isCustomer = isCustomerUser(me?.role);
 
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -137,15 +111,17 @@ export function CreateTicketPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState<CreateTicketForm>(EMPTY_FORM);
-  /** Sprint 185 E §1 — the company's kinds of work, for the picker.
-   *  Only the ACTIVE ones: an archived category stays on the meldingen
-   *  that carry it and is not offerable for new ones. */
-  const [workCategories, setWorkCategories] = useState<WorkCategory[]>([]);
+  /** W13 — the company's categories, ACTIVE and AVAILABLE AT INTAKE. */
+  const [categories, setCategories] = useState<TicketCategory[]>([]);
+  /** W13 — what `/new` already asked, as a category SLUG; applied once
+   *  the catalog has loaded. */
+  const preselectSlug = useRef(readCategoryParam());
+  /** The "Meer details" fold opens by itself when the door already
+   *  answered the Type question, so the answer is on screen. */
+  const [detailsOpen, setDetailsOpen] = useState(
+    () => readCategoryParam() !== null,
+  );
   const [stagedAttachments, setStagedAttachments] = useState<File[]>([]);
-  // Set only when the ticket was created but one or more attachments
-  // failed to upload. The ticket is never rolled back, so we hold the id
-  // and the failed filenames and stop the form from being submitted
-  // again (re-submitting would create a SECOND ticket).
   const [partialUpload, setPartialUpload] = useState<{
     ticketId: number;
     failed: string[];
@@ -153,63 +129,33 @@ export function CreateTicketPage() {
 
   useEffect(() => {
     let cancelled = false;
-
     async function loadOptions() {
       try {
         const [buildingResponse, customerResponse] = await Promise.all([
           listAllBuildings(),
           listAllCustomers(),
         ]);
-
         if (cancelled) return;
-
         setBuildings(buildingResponse);
         setCustomers(customerResponse);
-        // #112 follow-up — do NOT auto-select the first building on load.
-        // Auto-selecting a building immediately cross-filtered the customer
-        // dropdown (filteredCustomers) down to just that building's
-        // customer(s), so the form looked locked to a single customer even
-        // though the backend returns them all (e.g. City Office Rotterdam
-        // was hidden behind an auto-picked "B Amsterdam"). Leave building +
-        // customer empty (the form starts at EMPTY_FORM); the operator
-        // narrows the customer list by picking a building, and the
-        // single-match auto-select effect below still saves the click once
-        // they do.
       } catch (err) {
         if (!cancelled) setError(getApiError(err));
       } finally {
         if (!cancelled) setLoadingOptions(false);
       }
     }
-
     loadOptions();
-
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Sprint 14 hotfix — match a customer to a selected building via
-  // EITHER the legacy customer.building anchor OR the M:N
-  // linked_building_ids list returned by the customer serializer.
-  // This makes consolidated customers (Customer.building=NULL but
-  // linked to multiple buildings via CustomerBuildingMembership)
-  // appear in the dropdown when the operator picks a linked building.
-  // Backend ticket-create still validates per-(customer, building)
-  // user access on submit; this helper is convenience only.
   const customerMatchesBuilding = (
     customer: Customer,
     buildingId: number,
   ): boolean =>
     customer.building === buildingId ||
     (customer.linked_building_ids?.includes(buildingId) ?? false);
-
-  // Customer is the MASTER dropdown: it ALWAYS lists all customers. Picking a
-  // building filters only the BUILDING options (filteredBuildings below), never
-  // the customer list — so the operator can always switch to a different
-  // customer after choosing a building (removes the old bidirectional-filter
-  // deadlock). Backend still validates per-(customer, building) access on submit.
-  const filteredCustomers = customers;
 
   const filteredBuildings = useMemo(() => {
     if (!form.customer) return buildings;
@@ -218,89 +164,97 @@ export function CreateTicketPage() {
     return buildings.filter((b) => customerMatchesBuilding(c, b.id));
   }, [buildings, customers, form.customer]);
 
-  // If a building is selected, the customer is unset, and exactly
-  // one valid customer matches → auto-select it. Saves a click in the
-  // common case where one building → one customer (e.g. Amanda's
-  // B3 → B Amsterdam). Multiple matches keep the user picking
-  // explicitly.
-  useEffect(() => {
-    if (!form.building) return;
-    if (form.customer) return;
-    // Derive the single match from the customers linked to THIS building
-    // directly (local computation) — filteredCustomers is now the full list,
-    // so the pick-a-building-first auto-fill still works without collapsing the
-    // customer dropdown. Only auto-fill when exactly one customer maps.
-    const buildingId = Number(form.building);
-    const matches = customers.filter(
-      (customer) =>
-        customer.building === buildingId ||
-        (customer.linked_building_ids?.includes(buildingId) ?? false),
-    );
-    if (matches.length === 1) {
-      setForm((current) => ({
-        ...current,
-        customer: String(matches[0].id),
-      }));
-    }
-  }, [form.building, form.customer, customers]);
+  // A building chosen before the customer changed may not belong to
+  // the new customer; it collapses to "" at the point of use (no
+  // resync effect — CLAUDE.md's setState-in-effect rule).
+  const effectiveBuilding = filteredBuildings.some(
+    (b) => String(b.id) === form.building,
+  )
+    ? form.building
+    : "";
 
-  // Sprint 185 E §1 — the pickable categories, loaded once for provider
-  // operators. Non-fatal: a catalog that would not load must never stop
-  // somebody opening a melding.
+  /** Building picked first with exactly one customer on it: fill the
+   *  customer, save the click. In the change handler, not an effect. */
+  function pickBuilding(value: string) {
+    setForm((current) => {
+      if (current.customer || !value) return { ...current, building: value };
+      const buildingId = Number(value);
+      const matches = customers.filter((c) =>
+        customerMatchesBuilding(c, buildingId),
+      );
+      return {
+        ...current,
+        building: value,
+        customer: matches.length === 1 ? String(matches[0].id) : "",
+      };
+    });
+  }
+
+  // W14 §1 — the categories of THE company this ticket will belong to,
+  // resolved from the building, else the customer's building, else the
+  // author's own single company. No company, no list — never every
+  // tenant's.
+  const intakeCompanyId = useMemo(() => {
+    if (effectiveBuilding) {
+      const fromBuilding = buildings.find(
+        (b) => b.id === Number(effectiveBuilding),
+      )?.company;
+      if (fromBuilding) return fromBuilding;
+    }
+    if (form.customer) {
+      const customer = customers.find((c) => String(c.id) === form.customer);
+      const fromCustomer = customer
+        ? buildings.find((b) => customerMatchesBuilding(customer, b.id))
+            ?.company
+        : undefined;
+      if (fromCustomer) return fromCustomer;
+    }
+    if (me?.company_ids?.length === 1) return me.company_ids[0];
+    return undefined;
+  }, [buildings, customers, effectiveBuilding, form.customer, me]);
+
   useEffect(() => {
-    if (isCustomer) return;
     let cancelled = false;
-    listWorkCategories({ is_active: "true" })
+    if (!intakeCompanyId) return;
+    listTicketCategories({
+      is_active: "true",
+      available_at_intake: "true",
+      company: intakeCompanyId,
+    })
       .then((rows) => {
-        if (!cancelled) setWorkCategories(rows);
+        if (cancelled) return;
+        setCategories(rows);
+        const slug = preselectSlug.current;
+        preselectSlug.current = null;
+        if (!slug) return;
+        const match = rows.find((row) => row.slug === slug);
+        if (match) {
+          setForm((current) =>
+            current.category === ""
+              ? { ...current, category: String(match.id) }
+              : current,
+          );
+        }
       })
       .catch(() => {
-        /* non-fatal: the melding can be opened uncategorised */
+        /* non-fatal: the ticket can be opened uncategorised */
       });
     return () => {
       cancelled = true;
     };
-  }, [isCustomer]);
+  }, [intakeCompanyId]);
 
-  useEffect(() => {
-    if (!form.customer) return;
-    // Defensive only: reset the customer if it is no longer in the LOADED list
-    // (e.g. the customer set reloaded). This checks the full customer list, so
-    // it never invalidates the customer based on the selected building — that
-    // bidirectional filter (the deadlock) is gone.
-    const stillValid = customers.some(
-      (customer) => String(customer.id) === form.customer,
-    );
-    if (!stillValid) {
-      setForm((current) => ({
-        ...current,
-        customer: customers[0] ? String(customers[0].id) : "",
-      }));
-    }
-  }, [customers, form.customer]);
-
-  useEffect(() => {
-    if (!form.building) return;
-    const stillValid = filteredBuildings.some(
-      (b) => String(b.id) === form.building,
-    );
-    if (!stillValid) {
-      setForm((current) => ({
-        ...current,
-        building: filteredBuildings[0]
-          ? String(filteredBuildings[0].id)
-          : "",
-      }));
-    }
-  }, [filteredBuildings, form.building]);
-
-  const selectedBuilding = useMemo(
-    () => buildings.find((b) => String(b.id) === form.building),
-    [buildings, form.building],
+  const categoryOptions = useMemo(
+    () =>
+      intakeCompanyId
+        ? categories.filter((row) => row.company === intakeCompanyId)
+        : [],
+    [categories, intakeCompanyId],
   );
-  const selectedCustomer = useMemo(
-    () => customers.find((c) => String(c.id) === form.customer),
-    [customers, form.customer],
+  const selectedCategory = useMemo(
+    () =>
+      categoryOptions.find((row) => String(row.id) === form.category) ?? null,
+    [categoryOptions, form.category],
   );
 
   function update<K extends keyof CreateTicketForm>(
@@ -313,53 +267,36 @@ export function CreateTicketPage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError("");
-
-    if (!form.title.trim()) {
-      setError(t("validation_title_required"));
-      return;
-    }
-    if (!form.description.trim()) {
+    const text = form.description.trim();
+    if (!text) {
       setError(t("validation_description_required"));
-      return;
-    }
-    if (!form.building) {
-      setError(t("validation_location_required"));
       return;
     }
     if (!form.customer) {
       setError(t("validation_customer_required"));
       return;
     }
+    if (!effectiveBuilding) {
+      setError(t("validation_location_required"));
+      return;
+    }
 
     setSubmitting(true);
-
     try {
       const response = await api.post<{ id: number }>("/tickets/", {
-        title: form.title.trim(),
-        description: form.description.trim(),
+        title: titleFrom(text),
+        description: text,
         room_label: form.room_label.trim(),
-        type: form.type,
         priority: form.priority,
-        building: Number(form.building),
+        building: Number(effectiveBuilding),
         customer: Number(form.customer),
-        // Empty means "the customer did not say", which has to stay
-        // distinguishable from a date they chose — so it is sent as
-        // null rather than "".
         customer_wanted_date: form.customer_wanted_date || null,
-        // Sprint 185 E §1 — omitted entirely when unset: the serializer
-        // treats absence as "no category", and sending null would be the
-        // same thing said less clearly.
-        ...(form.category ? { category: Number(form.category) } : {}),
+        ...(selectedCategory ? { category: selectedCategory.id } : {}),
       });
-
       const newId = response.data.id;
 
-      // The endpoint accepts ONE file per request, so this is N
-      // sequential POSTs. Sequential (not Promise.all) so a per-file
-      // backend error surfaces against the right file — same rationale
-      // as SlotCompletionDialog. A failure does NOT abort the loop: the
-      // remaining files still upload, and the ticket is NEVER rolled
-      // back, so a partial run keeps everything that did succeed.
+      // ONE file per request; sequential so a failure names its file.
+      // The ticket is never rolled back.
       const failed: string[] = [];
       for (const file of stagedAttachments) {
         try {
@@ -372,16 +309,11 @@ export function CreateTicketPage() {
           failed.push(file.name);
         }
       }
-
       if (failed.length > 0) {
-        // Do not navigate: the operator has to see which files did not
-        // make it. The ticket exists, so the form is locked behind
-        // `partialUpload` to rule out a duplicate submission.
         setPartialUpload({ ticketId: newId, failed });
         setError("");
         return;
       }
-
       navigate(`/tickets/${newId}`);
     } catch (err) {
       setError(getApiError(err));
@@ -393,38 +325,26 @@ export function CreateTicketPage() {
   const noOptions =
     !loadingOptions && (buildings.length === 0 || customers.length === 0);
 
+  const detailsSummary = [
+    selectedCategory?.label,
+    form.room_label.trim(),
+    form.customer_wanted_date,
+  ].filter(Boolean) as string[];
+
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <Link to="/" className="link-back">
-            <ChevronLeft size={14} strokeWidth={2.5} />
-            {t("back_to_tickets")}
-          </Link>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t(isCustomer ? "melding_eyebrow" : "eyebrow")}
-          </div>
-          <h2 className="page-title">
-            {t(isCustomer ? "melding_title" : "title")}
-          </h2>
-          <p className="page-sub">
-            {t(isCustomer ? "melding_subtitle" : "subtitle")}
-          </p>
-          <p
-            className="page-sub"
-            style={{ marginTop: 4, opacity: 0.78, fontSize: 13 }}
-          >
-            {t("required_fields_hint")}
-          </p>
-        </div>
-      </div>
+    <div data-testid="create-ticket-page">
+      <PageHeader
+        eyebrow={t("eyebrow")}
+        title={t("title")}
+        subtitle={t("subtitle")}
+        backLink={{ to: "/tickets", label: t("back_to_tickets") }}
+      />
 
       {loadingOptions && (
         <div className="loading-bar">
           <div className="loading-bar-fill" />
         </div>
       )}
-
       {noOptions && !error && (
         <div className="alert-error" style={{ marginBottom: 16 }}>
           {t("no_access_message")}
@@ -433,10 +353,9 @@ export function CreateTicketPage() {
 
       <form className="create-layout" onSubmit={handleSubmit}>
         <div className="card create-main">
+          {/* Voor wie */}
           <div className="form-section">
-            <div className="form-section-title">
-              {t("section_issue_title")}
-            </div>
+            <div className="form-section-title">{t("section_who")}</div>
             <div className="form-2col">
               <div className="field">
                 <label className="field-label" htmlFor="f-customer">
@@ -447,15 +366,16 @@ export function CreateTicketPage() {
                   className="field-select"
                   value={form.customer}
                   onChange={(event) => update("customer", event.target.value)}
-                  disabled={filteredCustomers.length === 0}
+                  disabled={customers.length === 0}
                   required
+                  data-testid="create-ticket-customer"
                 >
                   <option value="" disabled>
-                    {filteredCustomers.length === 0
+                    {customers.length === 0
                       ? t("field_customer_no_options")
                       : t("field_customer_placeholder")}
                   </option>
-                  {filteredCustomers.map((customer) => (
+                  {customers.map((customer) => (
                     <option key={customer.id} value={customer.id}>
                       {customer.name}
                     </option>
@@ -469,10 +389,11 @@ export function CreateTicketPage() {
                 <select
                   id="f-building"
                   className="field-select"
-                  value={form.building}
-                  onChange={(event) => update("building", event.target.value)}
+                  value={effectiveBuilding}
+                  onChange={(event) => pickBuilding(event.target.value)}
                   disabled={filteredBuildings.length === 0}
                   required
+                  data-testid="create-ticket-building"
                 >
                   <option value="" disabled>
                     {t("field_location_placeholder")}
@@ -485,115 +406,11 @@ export function CreateTicketPage() {
                 </select>
               </div>
             </div>
-            <div className="form-2col">
-              {!isCustomer && (
-                <div className="field">
-                  <label className="field-label" htmlFor="f-type">
-                    {t("field_category_label")}
-                  </label>
-                  <select
-                    id="f-type"
-                    className="field-select"
-                    value={form.type}
-                    onChange={(event) => update("type", event.target.value)}
-                  >
-                    {TICKET_TYPE_VALUES.map((value) => (
-                      <option key={value} value={value}>
-                        {t(TICKET_TYPE_KEYS[value])}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {/* Sprint 185 E §1 — WHAT KIND OF WORK, beside the field
-                  above it that says what kind of MESSAGE this is. Two
-                  classifications, two questions; the label above reads
-                  "category" and holds the message type, which is exactly
-                  the confusion this catalog exists to end.
+          </div>
 
-                  Provider-side only: a customer describing the problem
-                  should not have to know which trade it belongs to, and
-                  the category feeds a provider-side report. Optional
-                  everywhere — a melding often arrives before anyone
-                  knows the trade, and forcing a guess at intake would
-                  fill the report with noise. */}
-              {!isCustomer && workCategories.length > 0 && (
-                <div className="field">
-                  <label className="field-label" htmlFor="f-category">
-                    {t("common:work_categories.field_label")}
-                  </label>
-                  <select
-                    id="f-category"
-                    className="field-select"
-                    value={form.category}
-                    onChange={(event) => update("category", event.target.value)}
-                    data-testid="create-ticket-category"
-                  >
-                    <option value="">
-                      {t("common:work_categories.none")}
-                    </option>
-                    {workCategories.map((row) => (
-                      <option key={row.id} value={row.id}>
-                        {row.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              <div className="field">
-                <label className="field-label" htmlFor="f-room">
-                  {t("field_room_label")}
-                </label>
-                <input
-                  id="f-room"
-                  className="field-input"
-                  type="text"
-                  placeholder={t("field_room_placeholder")}
-                  value={form.room_label}
-                  onChange={(event) => update("room_label", event.target.value)}
-                />
-              </div>
-              {/* Sprint 184 §3 — the customer's WANTED DATE.
-                  Deliberately labelled as a wish, not a deadline: a
-                  deadline is the provider's commitment and the overdue
-                  rules read it, so letting a customer type one would let
-                  them set a commitment on the provider's behalf. The
-                  helper says so in the customer's own words rather than
-                  leaving them to guess what the field promises. */}
-              <div className="field">
-                <label className="field-label" htmlFor="f-wanted-date">
-                  {t("field_wanted_date_label")}
-                </label>
-                <input
-                  id="f-wanted-date"
-                  className="field-input"
-                  type="date"
-                  value={form.customer_wanted_date}
-                  onChange={(event) =>
-                    update("customer_wanted_date", event.target.value)
-                  }
-                  data-testid="create-ticket-wanted-date"
-                />
-                <span className="muted small">
-                  {t("field_wanted_date_helper")}
-                </span>
-              </div>
-            </div>
-            <div className="field">
-              <label className="field-label" htmlFor="f-title">
-                {t("field_title_label")}
-              </label>
-              <input
-                id="f-title"
-                className="field-input"
-                type="text"
-                placeholder={t("field_title_placeholder")}
-                maxLength={255}
-                value={form.title}
-                onChange={(event) => update("title", event.target.value)}
-                required
-              />
-            </div>
+          {/* Wat is er aan de hand — the one description */}
+          <div className="form-section">
+            <div className="form-section-title">{t("section_what")}</div>
             <div className="field">
               <label className="field-label" htmlFor="f-desc">
                 {t("field_description_label")}
@@ -601,14 +418,93 @@ export function CreateTicketPage() {
               <textarea
                 id="f-desc"
                 className="field-textarea"
+                rows={5}
                 placeholder={t("field_description_placeholder")}
                 value={form.description}
                 onChange={(event) => update("description", event.target.value)}
                 required
+                data-testid="create-ticket-description"
               />
             </div>
+
+            <details
+              className="form-fold"
+              open={detailsOpen}
+              onToggle={(event) =>
+                setDetailsOpen((event.target as HTMLDetailsElement).open)
+              }
+              data-testid="create-ticket-fold-details"
+            >
+              <summary className="form-fold-summary">
+                {t("fold_details")}
+                <span className="form-fold-summary-value">
+                  {detailsSummary.length > 0
+                    ? detailsSummary.join(" · ")
+                    : t("fold_details_empty")}
+                </span>
+              </summary>
+              <div className="form-fold-body">
+                <div className="form-2col">
+                  {categoryOptions.length > 0 && (
+                    <div className="field">
+                      <label className="field-label" htmlFor="f-category">
+                        {t("field_category_label")}
+                      </label>
+                      <select
+                        id="f-category"
+                        className="field-select"
+                        value={selectedCategory === null ? "" : form.category}
+                        onChange={(event) => update("category", event.target.value)}
+                        data-testid="create-ticket-category"
+                      >
+                        <option value="">
+                          {t("common:ticket_categories.none")}
+                        </option>
+                        {categoryOptions.map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div className="field">
+                    <label className="field-label" htmlFor="f-room">
+                      {t("field_room_label")}
+                    </label>
+                    <input
+                      id="f-room"
+                      className="field-input"
+                      type="text"
+                      placeholder={t("field_room_placeholder")}
+                      value={form.room_label}
+                      onChange={(event) => update("room_label", event.target.value)}
+                    />
+                  </div>
+                  <div className="field">
+                    <label className="field-label" htmlFor="f-wanted-date">
+                      {t("field_wanted_date_label")}
+                    </label>
+                    <input
+                      id="f-wanted-date"
+                      className="field-input"
+                      type="date"
+                      value={form.customer_wanted_date}
+                      onChange={(event) =>
+                        update("customer_wanted_date", event.target.value)
+                      }
+                      data-testid="create-ticket-wanted-date"
+                    />
+                    <span className="muted small">
+                      {t("field_wanted_date_helper")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
 
+          {/* Prioriteit */}
           <div className="form-section">
             <div className="form-section-title">
               {t("section_priority_title")}
@@ -643,40 +539,23 @@ export function CreateTicketPage() {
             </div>
           </div>
 
+          {/* Foto's en bestanden */}
           <div className="form-section">
             <div className="form-section-title">
               {t("section_attachments_title")}
             </div>
-            <div className="form-section-helper">
-              {t("section_attachments_helper")}
-            </div>
             <label className="upload-zone">
-              <UploadCloud
-                className="upload-icon"
-                size={22}
-                strokeWidth={2}
-              />
-              <span className="upload-title">
-                {t("attachment_drop_hint")}
-              </span>
-              <span className="upload-hint">
-                {t("attachment_size_hint")}
-              </span>
+              <UploadCloud className="upload-icon" size={22} strokeWidth={2} />
+              <span className="upload-title">{t("attachment_drop_hint")}</span>
+              <span className="upload-hint">{t("attachment_size_hint")}</span>
               <input
                 type="file"
                 accept={ATTACHMENT_ACCEPT}
                 multiple
                 onChange={(event) => {
                   const picked = Array.from(event.target.files ?? []);
-                  // Reset immediately so removing a file and picking the
-                  // SAME one again still fires onChange.
                   event.target.value = "";
-                  if (picked.length === 0) {
-                    return;
-                  }
-                  // Reject only the oversized files by name and keep the
-                  // rest — rejecting the whole pick would make the
-                  // operator re-select everything.
+                  if (picked.length === 0) return;
                   const tooLarge = picked.filter(
                     (file) => file.size > MAX_ATTACHMENT_BYTES,
                   );
@@ -695,9 +574,7 @@ export function CreateTicketPage() {
                       const seen = new Set(current.map(fileKey));
                       return [
                         ...current,
-                        ...accepted.filter(
-                          (file) => !seen.has(fileKey(file)),
-                        ),
+                        ...accepted.filter((file) => !seen.has(fileKey(file))),
                       ];
                     });
                   }
@@ -707,13 +584,8 @@ export function CreateTicketPage() {
             {stagedAttachments.length > 0 && (
               <ul className="staged-attachment-list">
                 {stagedAttachments.map((file) => (
-                  <li
-                    key={fileKey(file)}
-                    className="staged-attachment-row"
-                  >
-                    <span className="staged-attachment-name">
-                      {file.name}
-                    </span>
+                  <li key={fileKey(file)} className="staged-attachment-row">
+                    <span className="staged-attachment-name">{file.name}</span>
                     <span className="staged-attachment-size">
                       {(file.size / 1024 / 1024).toFixed(2)} MB
                     </span>
@@ -723,8 +595,7 @@ export function CreateTicketPage() {
                       onClick={() =>
                         setStagedAttachments((current) =>
                           current.filter(
-                            (candidate) =>
-                              fileKey(candidate) !== fileKey(file),
+                            (candidate) => fileKey(candidate) !== fileKey(file),
                           ),
                         )
                       }
@@ -743,6 +614,7 @@ export function CreateTicketPage() {
               className="alert-error"
               style={{ margin: "0 22px 18px" }}
               role="alert"
+              data-testid="create-ticket-error"
             >
               {error}
             </div>
@@ -769,12 +641,10 @@ export function CreateTicketPage() {
           )}
 
           <div className="form-actions">
-            <Link to="/" className="btn btn-secondary">
+            <Link to="/tickets" className="btn btn-secondary">
               {t("cancel")}
             </Link>
             {partialUpload ? (
-              // The ticket already exists — the only forward action is to
-              // open it. Submitting again would create a second ticket.
               <Link
                 to={`/tickets/${partialUpload.ticketId}`}
                 className="btn btn-primary"
@@ -788,131 +658,33 @@ export function CreateTicketPage() {
                 type="submit"
                 className="btn btn-primary"
                 disabled={submitting || loadingOptions || noOptions}
+                data-testid="create-ticket-submit"
               >
-                {submitting
-                  ? t("creating")
-                  : t(isCustomer ? "melding_submit" : "submit")}
+                {submitting ? t("creating") : t("submit")}
                 <ArrowRight size={14} strokeWidth={2.5} />
               </button>
             )}
           </div>
         </div>
 
+        {/* The side column: three lines that earn their place. */}
         <aside className="create-side">
           <div className="card">
             <div className="section-head">
-              <div className="section-head-title">{t("summary_title")}</div>
-            </div>
-            <div className="side-card-body">
-              <div className="preview-list">
-                <div className="preview-row">
-                  <span className="preview-key">{t("summary_location")}</span>
-                  <span className="preview-val">
-                    {selectedBuilding?.name || "—"}
-                  </span>
-                </div>
-                <div className="preview-row">
-                  <span className="preview-key">{t("summary_customer")}</span>
-                  <span className="preview-val">
-                    {selectedCustomer?.name || "—"}
-                  </span>
-                </div>
-                <div className="preview-row">
-                  <span className="preview-key">{t("summary_category")}</span>
-                  <span className="preview-val">
-                    {t(
-                      TICKET_TYPE_KEYS[form.type as TicketTypeValue] ??
-                        "type_report",
-                    )}
-                  </span>
-                </div>
-                <div className="preview-row">
-                  <span className="preview-key">{t("summary_priority")}</span>
-                  <span className="preview-val">
-                    {t(`common:priority.${form.priority.toLowerCase()}`)}
-                  </span>
-                </div>
-                <div className="preview-row">
-                  <span className="preview-key">{t("summary_attachment")}</span>
-                  <span className="preview-val">
-                    {stagedAttachments.length === 0
-                      ? t("summary_none")
-                      : t("summary_attachment_count", {
-                          count: stagedAttachments.length,
-                        })}
-                  </span>
-                </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <Info size={16} strokeWidth={2} color="var(--green-2)" />
+                <div className="section-head-title">{t("tips_title")}</div>
               </div>
             </div>
-          </div>
-
-          <div className="card">
-            <div className="section-head">
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 9,
-                }}
-              >
-                <Info
-                  size={16}
-                  strokeWidth={2}
-                  color="var(--green-2)"
-                />
-                <div className="section-head-title">
-                  {t("guidelines_title")}
-                </div>
-              </div>
-            </div>
-            <div style={{ padding: "14px 16px 16px" }}>
+            <div className="create-side-tips">
               <ul className="guideline-list">
-                <li className="guideline-item">
-                  <CircleCheck size={14} strokeWidth={2.5} />
-                  <span>{t("guideline_1")}</span>
-                </li>
-                <li className="guideline-item">
-                  <CircleCheck size={14} strokeWidth={2.5} />
-                  <span>{t("guideline_2")}</span>
-                </li>
-                <li className="guideline-item">
-                  <CircleCheck size={14} strokeWidth={2.5} />
-                  <span>{t("guideline_3")}</span>
-                </li>
+                {TIP_KEYS.map((key) => (
+                  <li key={key} className="guideline-item">
+                    <CircleCheck size={14} strokeWidth={2.5} />
+                    <span>{t(key)}</span>
+                  </li>
+                ))}
               </ul>
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="section-head">
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 9,
-                }}
-              >
-                <Clock size={16} strokeWidth={2} color="var(--green-2)" />
-                <div className="section-head-title">
-                  {t("response_slas_title")}
-                </div>
-              </div>
-            </div>
-            <div style={{ padding: "6px 16px 12px" }}>
-              <div className="sla-list">
-                <div className="sla-list-item" data-prio="NORMAL">
-                  <span className="sla-list-name">{t("sla_medium_name")}</span>
-                  <span className="sla-list-time">{t("sla_medium_time")}</span>
-                </div>
-                <div className="sla-list-item" data-prio="HIGH">
-                  <span className="sla-list-name">{t("sla_high_name")}</span>
-                  <span className="sla-list-time">{t("sla_high_time")}</span>
-                </div>
-                <div className="sla-list-item" data-prio="URGENT">
-                  <span className="sla-list-name">{t("sla_urgent_name")}</span>
-                  <span className="sla-list-time">{t("sla_urgent_time")}</span>
-                </div>
-              </div>
             </div>
           </div>
         </aside>

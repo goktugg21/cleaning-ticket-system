@@ -51,6 +51,10 @@ SHARED_ORIGIN_KEYS = {
     "planned_end_date",
     "deadline",
     "provider_planned_date",
+    # W12 §2 — the provider window's END travels with its start. Added
+    # deliberately (the set stays exact rather than becoming a subset
+    # check, per this set's own comment above).
+    "provider_planned_end_date",
 }
 
 

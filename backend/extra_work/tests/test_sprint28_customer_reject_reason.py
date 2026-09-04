@@ -41,6 +41,7 @@ from extra_work.models import (
     ExtraWorkStatus,
     ExtraWorkStatusHistory,
 )
+from .plan_gate_fixture import make_plan_complete
 
 
 User = get_user_model()
@@ -116,6 +117,9 @@ class CustomerRejectReasonFixtureMixin:
             category=ExtraWorkCategory.DEEP_CLEANING,
             status=ExtraWorkStatus.UNDER_REVIEW,
         )
+        # W-PLAN — pricing is gated on a complete plan; this
+        # module tests pricing surfaces, not the gate.
+        make_plan_complete(ew)
         ExtraWorkPricingLineItem.objects.create(
             extra_work=ew,
             description="Crew",

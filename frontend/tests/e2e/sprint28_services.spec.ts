@@ -8,9 +8,11 @@ import { loginAs } from "./fixtures/login";
  * Sprint 28 Batch 5 — Provider-wide service catalog admin page.
  *
  * Coverage:
- *   1. Top-level sidebar shows the "Services" link for SUPER_ADMIN.
- *   2. `/admin/services` renders the real page; the Services tab is
- *      the default-active tab.
+ *   1. Top-level sidebar shows the "Services & catalogs" link for
+ *      SUPER_ADMIN (FE-6: one entry for both).
+ *   2. `/admin/services` redirects to
+ *      `/admin/services-catalogs/services`, which renders the real
+ *      page; the Services tab is the default-active tab.
  *   3. Adding a category via the modal makes it appear on the
  *      Categories tab.
  *   4. Adding a service via the modal makes it appear on the
@@ -67,6 +69,38 @@ async function apiAs(
   throw new Error(`apiAs(${email}) exhausted attempts`);
 }
 
+
+/**
+ * Sprint 142 — a catalog row is per provider COMPANY, and `company` is
+ * REQUIRED on create as soon as more than one company exists (the dev
+ * database now holds four). Seed everything under "Osius Demo".
+ */
+async function resolveOsiusCompanyId(api: APIRequestContext): Promise<number> {
+  const response = await api.get("/api/companies/?page_size=50");
+  expect(response.status()).toBe(200);
+  const body = (await response.json()) as {
+    results: Array<{ id: number; name: string }>;
+  };
+  const match = body.results.find((c) => c.name === "Osius Demo");
+  expect(match, 'company "Osius Demo" present').toBeTruthy();
+  return match!.id;
+}
+
+/** P-16 repin — Sprint 149/150 made the SA catalog ONE company at a
+ *  time, opening on the remembered / lowest-id company. These specs
+ *  seed under "Osius Demo", so they pick it the way an operator does
+ *  (the selector only renders when more than one company exists). */
+async function pickCatalogCompany(
+  page: import("@playwright/test").Page,
+  companyId: number,
+): Promise<void> {
+  const selector = page.locator('[data-testid="catalog-company-selector"]');
+  if (await selector.isVisible().catch(() => false)) {
+    await selector.selectOption(String(companyId));
+    await page.waitForLoadState("networkidle");
+  }
+}
+
 interface CategoryRow {
   id: number;
   name: string;
@@ -114,7 +148,7 @@ async function deleteServiceById(
   expect([204, 404]).toContain(response.status());
 }
 
-test("Sprint 28 B5 — Top-level sidebar shows Services entry for SUPER_ADMIN", async ({
+test("Sprint 28 B5 — Top-level sidebar shows the Services & catalogs entry for SUPER_ADMIN", async ({
   page,
 }) => {
   await loginAs(page, DEMO_USERS.super);
@@ -122,9 +156,10 @@ test("Sprint 28 B5 — Top-level sidebar shows Services entry for SUPER_ADMIN", 
   await page.goto("/");
   await page.waitForLoadState("networkidle");
 
-  await expect(page.locator("[data-testid='sidebar-services']")).toBeVisible({
-    timeout: 10_000,
-  });
+  // FE-6 — services and catalogs share ONE sidebar entry.
+  await expect(
+    page.locator("[data-testid='sidebar-services-catalogs']"),
+  ).toBeVisible({ timeout: 10_000 });
 });
 
 test("Sprint 28 B5 — /admin/services renders, Services tab is the default", async ({
@@ -132,6 +167,9 @@ test("Sprint 28 B5 — /admin/services renders, Services tab is the default", as
 }) => {
   await loginAs(page, DEMO_USERS.super);
   await page.goto("/admin/services");
+  await page.waitForURL(/\/admin\/services-catalogs\/services$/, {
+    timeout: 10_000,
+  });
   await page.waitForLoadState("networkidle");
 
   await expect(
@@ -195,12 +233,13 @@ test("Sprint 28 B5 — Add service modal: save shows row on Services tab", async
   baseURL,
 }) => {
   const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
+  const companyId = await resolveOsiusCompanyId(sa);
 
   // Make sure at least one category exists; create one for the
   // test so the spec is self-contained.
   const categoryName = `Cat For Service ${Date.now()}`;
   const createCatResponse = await sa.post("/api/services/categories/", {
-    data: { name: categoryName, description: "", is_active: true },
+    data: { company: companyId, name: categoryName, description: "", is_active: true },
   });
   expect(createCatResponse.status()).toBe(201);
   const createdCat = (await createCatResponse.json()) as { id: number };
@@ -211,6 +250,7 @@ test("Sprint 28 B5 — Add service modal: save shows row on Services tab", async
     await loginAs(page, DEMO_USERS.super);
     await page.goto("/admin/services");
     await page.waitForLoadState("networkidle");
+    await pickCatalogCompany(page, companyId);
 
     await page.locator("[data-testid='services-add-service-button']").click();
 
@@ -257,11 +297,12 @@ test("Sprint 28 B5 — Edit service: change name, list reflects new name", async
   baseURL,
 }) => {
   const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
+  const companyId = await resolveOsiusCompanyId(sa);
 
   // Seed via API so the test does not depend on prior test ordering.
   const categoryName = `Cat Edit ${Date.now()}`;
   const createCatResponse = await sa.post("/api/services/categories/", {
-    data: { name: categoryName, description: "", is_active: true },
+    data: { company: companyId, name: categoryName, description: "", is_active: true },
   });
   expect(createCatResponse.status()).toBe(201);
   const createdCat = (await createCatResponse.json()) as { id: number };
@@ -269,6 +310,7 @@ test("Sprint 28 B5 — Edit service: change name, list reflects new name", async
   const initialName = `Svc Edit Init ${Date.now()}`;
   const createSvcResponse = await sa.post("/api/services/", {
     data: {
+      company: companyId,
       category: createdCat.id,
       name: initialName,
       description: "",
@@ -287,6 +329,7 @@ test("Sprint 28 B5 — Edit service: change name, list reflects new name", async
     await loginAs(page, DEMO_USERS.super);
     await page.goto("/admin/services");
     await page.waitForLoadState("networkidle");
+    await pickCatalogCompany(page, companyId);
 
     const row = page
       .locator("[data-testid='services-service-row']", {
@@ -335,10 +378,11 @@ test("Sprint 28 B5 — Deleting a category with services attached fails graceful
   baseURL,
 }) => {
   const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
+  const companyId = await resolveOsiusCompanyId(sa);
 
   const categoryName = `Cat Protected ${Date.now()}`;
   const createCatResponse = await sa.post("/api/services/categories/", {
-    data: { name: categoryName, description: "", is_active: true },
+    data: { company: companyId, name: categoryName, description: "", is_active: true },
   });
   expect(createCatResponse.status()).toBe(201);
   const createdCat = (await createCatResponse.json()) as { id: number };
@@ -347,6 +391,7 @@ test("Sprint 28 B5 — Deleting a category with services attached fails graceful
   const serviceName = `Svc Protect ${Date.now()}`;
   const createSvcResponse = await sa.post("/api/services/", {
     data: {
+      company: companyId,
       category: createdCat.id,
       name: serviceName,
       description: "",
@@ -363,6 +408,7 @@ test("Sprint 28 B5 — Deleting a category with services attached fails graceful
     await loginAs(page, DEMO_USERS.super);
     await page.goto("/admin/services");
     await page.waitForLoadState("networkidle");
+    await pickCatalogCompany(page, companyId);
 
     await page.locator("[data-testid='services-tab-categories']").click();
 
@@ -377,21 +423,25 @@ test("Sprint 28 B5 — Deleting a category with services attached fails graceful
     const detail = page.locator("[data-testid='services-category-detail']");
     await expect(detail).toBeVisible({ timeout: 5_000 });
 
-    await detail
-      .locator("[data-testid='services-category-delete-button']")
-      .click();
+    // P-16 REPIN — Sprint 138 §2c: `Service.category` is PROTECT, so
+    // the Delete button only renders on an EMPTY category. "Fails
+    // gracefully" became STRUCTURAL: the UI never offers the press
+    // that would 400 (the control-that-lies class, removed).
+    await expect(
+      detail.locator("[data-testid='services-category-delete-button']"),
+    ).toHaveCount(0);
 
-    // The ConfirmDialog is a native <dialog>. Confirm via the button
-    // whose text matches the "Delete" label.
-    const confirmDialog = page.locator("dialog");
-    await expect(confirmDialog).toBeVisible({ timeout: 5_000 });
-    await confirmDialog.locator(".btn-primary").click();
+    // The server floor still refuses a direct delete — the half of
+    // the old pin that survives belongs to the API.
+    const apiDelete = await sa.delete(
+      `/api/services/categories/${createdCat.id}/`,
+    );
+    expect([400, 409]).toContain(apiDelete.status());
 
-    // After the failed delete, the category should still be present.
-    // The dialog closes regardless (the page surfaces the error via
-    // an alert banner). Reload to take the cleanest read.
+    // And the category is still present.
     await page.reload();
     await page.waitForLoadState("networkidle");
+    await pickCatalogCompany(page, companyId);
     await page.locator("[data-testid='services-tab-categories']").click();
     await expect(
       page

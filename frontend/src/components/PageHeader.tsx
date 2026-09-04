@@ -23,6 +23,8 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 
+import { useBackLink } from "../hooks/useBackLink";
+
 export interface PageHeaderBreadcrumb {
   label: string;
   to?: string;
@@ -47,6 +49,32 @@ export interface PageHeaderProps {
   testId?: string;
 }
 
+/**
+ * W14 §3 — the header's back link goes BACK when the page behind it is
+ * the page it names.
+ *
+ * Its own component because `useBackLink` is a hook and `backLink` is
+ * optional; calling it conditionally inside `PageHeader` would break
+ * the rules of hooks. Every page that mounts a `PageHeader` with a
+ * `backLink` gets the behaviour without changing a line — including
+ * `ExtraWorkDetailPage`, whose two back links (lines 1593 and 2171)
+ * both pushed `/extra-work` onto the history so that the browser's own
+ * Back then went forwards, into the detail just left.
+ *
+ * The href is unchanged and still the truth: on a deep link, a fresh
+ * tab, or arrival from somewhere else, this is an ordinary `<Link>` to
+ * the named page.
+ */
+function BackLink({ to, label }: { to: string; label: string }) {
+  const back = useBackLink(to);
+  return (
+    <Link {...back} className="link-back">
+      <ChevronLeft size={14} strokeWidth={2.5} />
+      {label}
+    </Link>
+  );
+}
+
 export function PageHeader({
   title,
   subtitle,
@@ -61,12 +89,7 @@ export function PageHeader({
   return (
     <div className="page-header" data-testid={testId}>
       <div className="page-header-text">
-        {backLink && (
-          <Link to={backLink.to} className="link-back">
-            <ChevronLeft size={14} strokeWidth={2.5} />
-            {backLink.label}
-          </Link>
-        )}
+        {backLink && <BackLink {...backLink} />}
         {breadcrumbs && breadcrumbs.length > 0 && (
           <nav className="breadcrumb" aria-label="Breadcrumb">
             {breadcrumbs.map((crumb, i) => {

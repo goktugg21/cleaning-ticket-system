@@ -12,6 +12,8 @@ import type { ReportFilters } from "../../../api/reports";
 import { fetchTicketsByType } from "../../../api/reports";
 import { useReport } from "../../../hooks/useReport";
 import { ExportButtons } from "./ExportButtons";
+import { ChartSkeleton } from "./ChartSkeleton";
+import { BoundedList } from "../../../components/BoundedList";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -44,9 +46,7 @@ export function TicketsByTypeChart({ filters, refreshKey }: ChartProps) {
       </p>
 
       {loading && (
-        <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-          <div className="loading-bar-fill" />
-        </div>
+        <ChartSkeleton />
       )}
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 12 }}>
@@ -76,6 +76,7 @@ export function TicketsByTypeChart({ filters, refreshKey }: ChartProps) {
             {t("tickets_by_type_empty")}
           </div>
         ) : (
+          <BoundedList size="lg" count={chartData.length} ariaLabel={t("tickets_by_type_title")} testIdPrefix="tickets-by-type">
           <ResponsiveContainer
             width="100%"
             height={Math.max(160, chartData.length * 36)}
@@ -96,9 +97,10 @@ export function TicketsByTypeChart({ filters, refreshKey }: ChartProps) {
               <Tooltip
                 formatter={(value: number) => [value, t("tickets_by_type_tooltip_label")]}
               />
-              <Bar dataKey="count" fill="#3b82f6" />
+              <Bar isAnimationActive={false} dataKey="count" fill="#3b82f6" />
             </BarChart>
           </ResponsiveContainer>
+          </BoundedList>
         )
       )}
       {!loading && !error && data && (

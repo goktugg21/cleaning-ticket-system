@@ -96,6 +96,9 @@ export interface TimeEntry {
   note: string;
   /** True when this entry's week is closed — the UI disables its actions. */
   is_locked: boolean;
+  /** P-16 — dated after today by the SERVER's clock. A flag, never a
+   *  block: the surfaces mark it amber and let the person decide. */
+  is_future: boolean;
   created_by: number;
   created_at: string;
   updated_at: string;
@@ -242,4 +245,47 @@ export interface TimesheetSummary {
   by_employee: TimesheetSummaryEmployeeBucket[];
   by_building: TimesheetSummaryBuildingBucket[];
   by_week: TimesheetSummaryWeekBucket[];
+}
+
+/**
+ * W12 §5 — the WEEKLY PATTERN half of a standing agreement.
+ *
+ * Deliberately not the whole `ContractHours` row: **My hours** reads it
+ * for exactly one purpose — which weekdays this person is scheduled to
+ * work — and typing the rest here would invite a second screen to grow
+ * out of the same call. The admin tab that edits the full row keeps its
+ * own untyped read; this is the worker-side slice.
+ */
+export interface ContractHoursPattern {
+  id: number;
+  employee: number;
+  monday: string;
+  tuesday: string;
+  wednesday: string;
+  thursday: string;
+  friday: string;
+  saturday: string;
+  sunday: string;
+}
+
+/** P-9 D3 — one week of a year that holds saved hours
+ *  (`GET /api/timesheets/weeks/with-hours/`). `hours` is the summed
+ *  decimal as a string, the module's convention for every amount. */
+export interface WeekWithHours {
+  iso_year: number;
+  iso_week: number;
+  hours: string;
+  entries: number;
+  /** P-11 B1 — the "Earlier weeks" table's three extra facts: how many
+   *  people hold hours in the week, and the lock (by whom, when; the
+   *  lock facts are null when the read spans more than one company). */
+  people: number;
+  is_closed: boolean;
+  closed_by_name: string | null;
+  closed_at: string | null;
+}
+
+export interface WeeksWithHours {
+  iso_year: number;
+  weeks: WeekWithHours[];
 }

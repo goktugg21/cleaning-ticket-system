@@ -290,6 +290,12 @@ class SubTaskCrudTests(SubTaskFixture):
 class SubTaskPlacementTests(SubTaskFixture):
     def test_create_slot_inside_sub_task(self):
         st = SubTask.objects.create(ticket=self.ticket_a, title="A")
+        # W26.3 (c) — parts divide the people already on the job, so the
+        # base slot comes first. Sprint 4 could file a first slot straight
+        # into a part; that is now 400 `staff_not_on_job` and is pinned in
+        # `test_w26_3_parts_divide_the_job.py`. What this test is about --
+        # that the slot lands IN the sub-task -- is unchanged.
+        self._mk_slot(self.ticket_a)
         resp = self._api(self.admin_a).post(
             self._slot_list_url(self.ticket_a),
             {"user_id": self.staff_a.id, "sub_task": st.id},
@@ -340,6 +346,11 @@ class SubTaskPlacementTests(SubTaskFixture):
         # before/after (sub_task is a tracked slot field).
         st1 = SubTask.objects.create(ticket=self.ticket_a, title="A")
         st2 = SubTask.objects.create(ticket=self.ticket_a, title="B")
+        # W26.3 (c) — a re-file now goes through the same chokepoint a
+        # create does, so the slot's owner must be on the job for the move
+        # to be legal. Without this base slot the PATCH is refused
+        # `staff_not_on_job` and the audit row under test never happens.
+        self._mk_slot(self.ticket_a)
         slot = self._mk_slot(self.ticket_a, sub_task=st1, slot_status=ASSIGNED)
         before = AuditLog.objects.filter(
             target_model="tickets.TicketStaffAssignment",

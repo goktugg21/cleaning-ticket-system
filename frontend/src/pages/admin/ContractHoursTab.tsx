@@ -1,29 +1,44 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Plus } from "lucide-react";
+import { Plus, SlidersHorizontal } from "lucide-react";
 
 import { api, getApiError } from "../../api/client";
+import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
-import { EditModeToggle } from "../../components/EditModeToggle";
 import { ContractHoursBulkDialog } from "../../components/timesheets/ContractHoursBulkDialog";
 import type { HourType, TimesheetEmployee } from "../../api/timesheets.types";
 import type { BuildingAdmin } from "../../api/types";
-import { useEditMode } from "../../lib/useEditMode";
+import { hourTypeLabelFrom } from "../../lib/hourTypeLabel";
+import { PATTERN_DAYS, patternLabel } from "../../lib/patternLabel";
+import type { PatternDay } from "../../lib/patternLabel";
 import { workTypeLabel } from "../../lib/workTypeLabel";
 
-const DAYS = [
-  "monday",
-  "tuesday",
-  "wednesday",
-  "thursday",
-  "friday",
-  "saturday",
-  "sunday",
-] as const;
+type Day = PatternDay;
+type Status = "DRAFT" | "SAVED" | "APPROVED";
 
-type Day = (typeof DAYS)[number];
+/**
+ * W-HR1 §2 — the moves the server accepts, per current state.
+ *
+ * The rules live in `timesheets.models.ContractHours` and are enforced
+ * by `POST /timesheets/contract-hours/<id>/status/`; this table only
+ * OFFERS what will be accepted:
+ *
+ *   DRAFT    -> SAVED     submit for review
+ *   SAVED    -> APPROVED  agreed
+ *   SAVED    -> DRAFT     send back for a correction
+ *   APPROVED -> SAVED     reopen (clears the approval)
+ *
+ * P-15 4.3 — §D.22: ONE button per row. The primary move is the row's
+ * button; every other move (send back, delete, editing the days, the
+ * fill flag) lives in the row's opened editor.
+ */
+const PRIMARY_ACTION: Record<Status, { to: Status; labelKey: string }> = {
+  DRAFT: { to: "SAVED", labelKey: "contract_hours.action_submit" },
+  SAVED: { to: "APPROVED", labelKey: "contract_hours.action_approve" },
+  APPROVED: { to: "SAVED", labelKey: "contract_hours.action_reopen" },
+};
 
 interface ContractHoursRow {
   id: number;
@@ -38,8 +53,12 @@ interface ContractHoursRow {
   work_type_standard_slot: string | null;
   valid_from: string;
   valid_to: string | null;
-  status: "DRAFT" | "SAVED" | "APPROVED";
+  status: Status;
   is_locked: boolean;
+  /** W12 — fill this person's weekly sheet from this agreement, every
+   *  week inside the validity window (P-15 §0.2: only once APPROVED).
+   *  Writable on the row's own PATCH; refused on an APPROVED row. */
+  auto_fill: boolean;
   weekly_total: string;
   monday: string;
   tuesday: string;
@@ -51,21 +70,21 @@ interface ContractHoursRow {
 }
 
 /**
- * Sprint 167 §3 — the Contract hours tab.
+ * P-15 4.3 — the Agreed hours table, on the §D.22 list standard.
  *
- * The counterpart to Entries: Entries records hours WORKED, this
- * records the standing agreement — this worker is contracted for N
- * hours at this building, per weekday, from a date.
+ * The P-14 walk called the old shape "the old page in a tab": sixteen
+ * columns (the STATUS column scrolled off-screen right at 1440 — the
+ * S2 finding), seven of them DEAD inputs that accepted nothing until a
+ * small Edit toggle was found, and five permanently unfolded filters.
  *
- * The whole table is inline-editable behind ONE Edit gate with ONE
- * Save, the pattern the Entries tab already uses, rather than a row of
- * per-row save buttons.
- *
- * **An APPROVED row is not editable**, and the UI says so rather than
- * letting the operator type into a cell the server will refuse: the
- * inputs are disabled and the status chip explains why. Changing an
- * approved agreement is a NEW row from a new valid-from — the same
- * discipline the contract revisions use.
+ * Now: SIX fact columns — Person · Building · Pattern (the seven days
+ * compressed into words, "Mon–Fri · 8 h") · Total/week · Status ·
+ * Valid — plus ONE button per row (the status road's next step).
+ * The filters fold behind Filter. Opening a row (click) unfolds its
+ * EDITOR: the seven day fields (live, no page-wide edit gate — a
+ * field you can see is a field you can type in), the fill flag, and
+ * the secondary moves (send back / delete). An APPROVED row's editor
+ * states the immutability rule instead of offering dead controls.
  */
 export function ContractHoursTab({
   companyId,
@@ -82,9 +101,20 @@ export function ContractHoursTab({
   employees: TimesheetEmployee[];
   hourTypes: HourType[];
 }) {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
+  const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
+  const formatDay = (value: string) =>
+    new Date(`${value}T00:00:00`).toLocaleDateString(dateLocale, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  const formatHours = (value: number) =>
+    new Intl.NumberFormat(i18n.language, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(value);
   const [rows, setRows] = useState<ContractHoursRow[]>([]);
-  const [edits, setEdits] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -95,6 +125,11 @@ export function ContractHoursTab({
   const [bulkOpen, setBulkOpen] = useState(false);
   const [rowToDelete, setRowToDelete] = useState<ContractHoursRow | null>(null);
   const deleteRef = useRef<ConfirmDialogHandle>(null);
+
+  /** P-15 4.3 — the one opened row, and its typed day values. Keyed by
+   *  row id so paging or a reload can never write another row's days. */
+  const [openRowId, setOpenRowId] = useState<number | null>(null);
+  const [dayEdits, setDayEdits] = useState<Record<Day, string> | null>(null);
 
   const [building, setBuilding] = useState<number | "">("");
   const [employee, setEmployee] = useState<number | "">("");
@@ -113,6 +148,13 @@ export function ContractHoursTab({
     }),
     [companyId, building, employee, hourType, workTypeFilter, validOn],
   );
+  const activeFilterCount = [
+    building,
+    employee,
+    hourType,
+    workTypeFilter,
+    validOn,
+  ].filter((value) => value !== "" && value !== undefined).length;
 
   const requestKey = `${JSON.stringify(filters)}:${reloadKey}`;
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
@@ -138,7 +180,7 @@ export function ContractHoursTab({
     };
   }, [filters, requestKey]);
 
-  // The work-type catalog for the column, the filter and the bulk
+  // The kind-of-work catalog for the fact line, the filter and the bulk
   // dialog. Its own read, not folded into the rows request: a catalog
   // changes when someone edits the catalog, not when a filter moves.
   useEffect(() => {
@@ -162,8 +204,8 @@ export function ContractHoursTab({
       })
       .catch(() => {
         // A missing catalog is not an error the operator can act on —
-        // the picker simply offers "no work type", which is a legal
-        // value. Failing the whole tab over it would be worse.
+        // the fact line simply says "no kind of work", which is a
+        // legal value. Failing the whole tab over it would be worse.
         if (!cancelled) setWorkTypes([]);
       });
     return () => {
@@ -171,62 +213,74 @@ export function ContractHoursTab({
     };
   }, [companyId, reloadKey]);
 
-  // Only the rows that MAY be edited are selectable — an approved row
-  // is not one of them, so it never enters a selection that a bulk
-  // action would then fail on.
-  const edit = useEditMode<number>(
-    rows.filter((row) => !row.is_locked).map((row) => row.id),
-  );
+  function toggleRow(row: ContractHoursRow) {
+    if (openRowId === row.id) {
+      setOpenRowId(null);
+      setDayEdits(null);
+      return;
+    }
+    setOpenRowId(row.id);
+    setDayEdits({
+      monday: row.monday,
+      tuesday: row.tuesday,
+      wednesday: row.wednesday,
+      thursday: row.thursday,
+      friday: row.friday,
+      saturday: row.saturday,
+      sunday: row.sunday,
+    });
+  }
 
-  const cellKey = (id: number, day: Day) => `${id}:${day}`;
-  const value = (row: ContractHoursRow, day: Day) =>
-    edits[cellKey(row.id, day)] ?? row[day];
-
-  const setCell = (row: ContractHoursRow, day: Day, next: string) =>
-    setEdits((current) => ({ ...current, [cellKey(row.id, day)]: next }));
-
-  const rowTotal = (row: ContractHoursRow) =>
-    DAYS.reduce((sum, day) => sum + (Number(value(row, day)) || 0), 0);
-
-  const tiles = [
-    {
-      key: "hours",
-      label: t("contract_hours.tile_weekly"),
-      value: rows.reduce((sum, row) => sum + rowTotal(row), 0).toFixed(2),
-    },
-    {
-      key: "workers",
-      label: t("contract_hours.tile_workers"),
-      value: String(new Set(rows.map((r) => r.employee)).size),
-    },
-    {
-      key: "buildings",
-      label: t("contract_hours.tile_buildings"),
-      value: String(new Set(rows.map((r) => r.building)).size),
-    },
-    {
-      key: "rows",
-      label: t("contract_hours.tile_rows"),
-      value: String(rows.length),
-    },
-  ];
-
-  async function save() {
+  /**
+   * W-HR1 §2 — move ONE row between the three states.
+   *
+   * The dedicated status endpoint, not a PATCH: the transition rules
+   * live there, and it is also how an APPROVED row can be reopened
+   * while staying immutable in every other respect.
+   */
+  async function moveStatus(row: ContractHoursRow, to: Status) {
     setBusy(true);
     setError("");
     try {
-      const touched = new Set(
-        Object.keys(edits).map((key) => Number(key.split(":")[0])),
-      );
-      for (const id of touched) {
-        const row = rows.find((r) => r.id === id);
-        if (!row || row.is_locked) continue;
-        const payload: Record<string, string> = {};
-        for (const day of DAYS) payload[day] = String(value(row, day));
-        await api.patch(`/timesheets/contract-hours/${id}/`, payload);
-      }
-      setEdits({});
-      edit.exit();
+      await api.post(`/timesheets/contract-hours/${row.id}/status/`, {
+        status: to,
+      });
+      setReloadKey((n) => n + 1);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** The fill flag, written on its own, immediately: it is a switch,
+   *  not a typed value. */
+  async function toggleAutoFill(row: ContractHoursRow) {
+    setBusy(true);
+    setError("");
+    try {
+      await api.patch(`/timesheets/contract-hours/${row.id}/`, {
+        auto_fill: !row.auto_fill,
+      });
+      setReloadKey((n) => n + 1);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** P-15 4.3 — save the opened row's days. One row, one PATCH. */
+  async function savePattern(row: ContractHoursRow) {
+    if (!dayEdits) return;
+    setBusy(true);
+    setError("");
+    try {
+      const payload: Record<string, string> = {};
+      for (const day of PATTERN_DAYS) payload[day] = String(dayEdits[day]);
+      await api.patch(`/timesheets/contract-hours/${row.id}/`, payload);
+      setOpenRowId(null);
+      setDayEdits(null);
       setReloadKey((n) => n + 1);
     } catch (err) {
       setError(getApiError(err));
@@ -241,6 +295,8 @@ export function ContractHoursTab({
     try {
       await api.delete(`/timesheets/contract-hours/${row.id}/`);
       setRowToDelete(null);
+      setOpenRowId(null);
+      setDayEdits(null);
       setReloadKey((n) => n + 1);
     } catch (err) {
       setError(getApiError(err));
@@ -255,6 +311,13 @@ export function ContractHoursTab({
       : row.status === "SAVED"
         ? "cell-tag-normal"
         : "cell-tag-muted";
+
+  const patternWords = (row: ContractHoursRow) =>
+    patternLabel(
+      row,
+      (day) => t(`contract_hours.day_${day}`),
+      (hours) => t("contract_hours.pattern_hours", { hours: formatHours(hours) }),
+    );
 
   return (
     <div data-testid="contract-hours-tab">
@@ -273,11 +336,6 @@ export function ContractHoursTab({
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <EditModeToggle
-            editMode={edit.editModeRequested}
-            onToggle={edit.toggleMode}
-            testId="contract-hours-edit-toggle"
-          />
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -290,21 +348,6 @@ export function ContractHoursTab({
         </div>
       </div>
 
-      <div
-        className="hours-tile-row"
-        data-testid="contract-hours-tiles"
-        style={{
-          gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))`,
-        }}
-      >
-        {tiles.map((tile) => (
-          <div key={tile.key} className="hours-tile">
-            <span className="hours-tile-label">{tile.label}</span>
-            <span className="hours-tile-value">{tile.value}</span>
-          </div>
-        ))}
-      </div>
-
       {/* Sprint 169 §2 — said, not left blank. */}
       {workTypes.length === 0 && (
         <p className="muted small" data-testid="contract-hours-no-work-types">
@@ -312,7 +355,26 @@ export function ContractHoursTab({
         </p>
       )}
 
-      <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
+      {/* P-15 4.3 — the five filters fold behind Filter (§D.22); the
+          summary counts what is on so a narrowed list never looks
+          like the whole one. */}
+      <details
+        className="filter-fold"
+        open={activeFilterCount > 0}
+        data-testid="contract-hours-filter-fold"
+      >
+        <summary className="filter-fold-summary" data-testid="contract-hours-filter-toggle">
+          <SlidersHorizontal size={14} strokeWidth={2.4} aria-hidden="true" />
+          {t("contract_hours.filter_fold")}
+          {activeFilterCount > 0 && (
+            <span className="filter-fold-count">
+              {t("contract_hours.filter_fold_active", {
+                count: activeFilterCount,
+              })}
+            </span>
+          )}
+        </summary>
+        <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
         <div className="filter-field">
           <span className="filter-label">{t("building")}</span>
           <select
@@ -397,36 +459,63 @@ export function ContractHoursTab({
             data-testid="contract-hours-filter-valid-on"
           />
         </div>
-      </form>
+        </form>
+      </details>
 
       {loading && (
-        <div className="loading-bar" style={{ margin: 0 }}>
-          <div className="loading-bar-fill" />
+        <div
+          className="skeleton-table"
+          aria-hidden="true"
+          data-testid="contract-hours-skeleton"
+        >
+          {[0, 1, 2, 3].map((row) => (
+            <div className="skeleton-row" key={row}>
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+            </div>
+          ))}
         </div>
       )}
 
+      <BoundedList
+        size="lg"
+        count={Math.max(1, rows.length)}
+        ariaLabel={t("contract_hours.tab")}
+        testIdPrefix="contract-hours"
+      >
       <div className="table-wrap admin-list-wrap">
-        <table className="data-table data-table-dense hours-week-grid-table">
+        <table className="data-table data-table-dense data-table-fit">
           <thead>
+            {/* P-15 4.3 — six facts and one button. STATUS sits beside
+                VALID on every width (the S2 finding: it was column 14
+                of 16, off-screen right at 1440). */}
             <tr>
-              <th>{t("building")}</th>
               <th>{t("contract_hours.employee")}</th>
-              <th>{t("contract_hours.validity")}</th>
-              <th>{t("contract_hours.hour_type")}</th>
-              <th>{t("contract_hours.work_type")}</th>
-              {DAYS.map((day) => (
-                <th key={day} className="contract-num">
-                  {t(`contract_hours.day_${day}`)}
-                </th>
-              ))}
-              <th className="contract-num">{t("contract_hours.total")}</th>
+              <th>{t("building")}</th>
+              <th>{t("contract_hours.pattern")}</th>
+              <th className="contract-num">{t("contract_hours.total_week")}</th>
               <th>{t("status")}</th>
+              <th>{t("contract_hours.validity")}</th>
               <th>{t("contract_hours.actions")}</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} data-testid={`contract-hours-row-${row.id}`}>
+            {rows.map((row) => {
+              const opened = openRowId === row.id;
+              const primary = PRIMARY_ACTION[row.status];
+              return (
+              <Fragment key={row.id}>
+              <tr
+                data-testid={`contract-hours-row-${row.id}`}
+                onClick={() => toggleRow(row)}
+                style={{ cursor: "pointer" }}
+                aria-expanded={opened}
+              >
+                <td className="td-subject">{row.employee_name}</td>
                 <td>
                   {row.building_name ?? (
                     <span className="muted-empty">
@@ -434,89 +523,207 @@ export function ContractHoursTab({
                     </span>
                   )}
                 </td>
-                <td className="td-subject">{row.employee_name}</td>
-                <td className="td-date">
-                  {row.valid_from} → {row.valid_to ?? "…"}
-                </td>
                 <td>
-                  <span className="cell-tag cell-tag-normal">
-                    {row.hour_type_name}
+                  <span data-testid={`contract-hours-pattern-${row.id}`}>
+                    {patternWords(row) ?? (
+                      <span className="muted-empty">
+                        {t("contract_hours.no_days")}
+                      </span>
+                    )}
                   </span>
-                </td>
-                <td>
-                  {row.work_type_name ? (
-                    workTypeLabel(
-                      row.work_type_name,
-                      row.work_type_standard_slot,
+                  {/* The row's remaining facts, one muted line: what
+                      the hours are OF, the report label, and whether
+                      the pattern fills Enter hours. */}
+                  <div className="muted small">
+                    {hourTypeLabelFrom(
+                      row.hour_type_name,
+                      hourTypes.find((type) => type.id === row.hour_type)
+                        ?.standard_slot,
                       t,
-                    )
-                  ) : (
-                    <span className="muted-empty">
-                      {t("contract_hours.no_work_type")}
-                    </span>
-                  )}
+                    )}
+                    {row.work_type_name
+                      ? ` · ${workTypeLabel(row.work_type_name, row.work_type_standard_slot, t)}`
+                      : ""}
+                    {row.auto_fill
+                      ? ` · ${t("contract_hours.auto_fill_column")}`
+                      : ""}
+                  </div>
                 </td>
-                {DAYS.map((day) => (
-                  <td key={day} className="contract-num">
-                    <input
-                      className="field-input hours-week-grid-cell"
-                      type="text"
-                      inputMode="decimal"
-                      value={value(row, day)}
-                      onChange={(e) => setCell(row, day, e.target.value)}
-                      /* An approved row is not editable — disabled here
-                         rather than letting the server refuse a change
-                         the operator has already typed. */
-                      disabled={!edit.editMode || row.is_locked || busy}
-                      aria-label={`${row.employee_name} ${day}`}
-                      data-testid={`contract-hours-cell-${row.id}-${day}`}
-                    />
-                  </td>
-                ))}
                 <td className="contract-num">
-                  <strong>{rowTotal(row).toFixed(2)}</strong>
+                  <strong>{formatHours(Number(row.weekly_total) || 0)}</strong>
                 </td>
                 <td>
-                  <span className={`cell-tag ${statusTag(row)}`}>
+                  <span
+                    className={`cell-tag ${statusTag(row)}`}
+                    data-testid={`contract-hours-status-${row.id}`}
+                  >
                     {t(`contract_hours.status_${row.status}`)}
                   </span>
                 </td>
-                <td>
-                  {/* An APPROVED agreement is not deleted from here.
-                      Correcting one writes a NEW row from a date — the
-                      validity-window rule — because deleting it would
-                      rewrite what last month's comparison said. */}
-                  {row.is_locked ? (
-                    <span className="muted-empty">
-                      {t("contract_hours.locked_hint")}
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => {
-                        setRowToDelete(row);
-                        deleteRef.current?.open();
-                      }}
-                      disabled={busy}
-                      data-testid={`contract-hours-delete-${row.id}`}
-                    >
-                      {t("contract_hours.delete")}
-                    </button>
-                  )}
+                <td className="td-date">
+                  {row.valid_to
+                    ? t("contract_hours.validity_range", {
+                        from: formatDay(row.valid_from),
+                        to: formatDay(row.valid_to),
+                      })
+                    : t("contract_hours.validity_open", {
+                        from: formatDay(row.valid_from),
+                      })}
+                </td>
+                <td onClick={(event) => event.stopPropagation()}>
+                  {/* §D.22 — ONE button: the road's next step. */}
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => void moveStatus(row, primary.to)}
+                    disabled={busy}
+                    data-testid={`contract-hours-move-${row.id}-${primary.to}`}
+                  >
+                    {t(primary.labelKey)}
+                  </button>
                 </td>
               </tr>
-            ))}
+              {opened && (
+                <tr
+                  key={`${row.id}-editor`}
+                  data-testid={`contract-hours-editor-${row.id}`}
+                >
+                  <td colSpan={7} onClick={(event) => event.stopPropagation()}>
+                    {row.is_locked ? (
+                      /* An APPROVED row is immutable server-side
+                         (`contract_hours_approved_immutable`); the
+                         editor says the rule instead of offering
+                         controls that 400. */
+                      <p className="muted small" style={{ margin: "8px 0" }}>
+                        {t("contract_hours.locked_note")}
+                      </p>
+                    ) : (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: 10,
+                          alignItems: "flex-end",
+                          padding: "8px 0",
+                        }}
+                      >
+                        {PATTERN_DAYS.map((day) => (
+                          <label key={day} className="muted small" style={{ display: "grid", gap: 4 }}>
+                            {t(`contract_hours.day_${day}`)}
+                            <input
+                              className="field-input hours-week-grid-cell"
+                              type="text"
+                              inputMode="decimal"
+                              value={dayEdits?.[day] ?? row[day]}
+                              onChange={(event) =>
+                                setDayEdits((current) => ({
+                                  ...(current ?? {
+                                    monday: row.monday,
+                                    tuesday: row.tuesday,
+                                    wednesday: row.wednesday,
+                                    thursday: row.thursday,
+                                    friday: row.friday,
+                                    saturday: row.saturday,
+                                    sunday: row.sunday,
+                                  }),
+                                  [day]: event.target.value,
+                                }))
+                              }
+                              disabled={busy}
+                              aria-label={`${row.employee_name} ${t(`contract_hours.day_${day}`)}`}
+                              data-testid={`contract-hours-cell-${row.id}-${day}`}
+                            />
+                          </label>
+                        ))}
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => void savePattern(row)}
+                          disabled={busy}
+                          data-testid={`contract-hours-save-${row.id}`}
+                        >
+                          {t("contract_hours.save_pattern")}
+                        </button>
+                      </div>
+                    )}
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 12,
+                        alignItems: "center",
+                      }}
+                    >
+                      <label className="muted small" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={row.auto_fill}
+                          disabled={row.is_locked || busy}
+                          onChange={() => void toggleAutoFill(row)}
+                          data-testid={`contract-hours-auto-fill-${row.id}`}
+                        />
+                        {t("contract_hours.auto_fill_label")}
+                      </label>
+                      <span className="muted small">
+                        {t("contract_hours.auto_fill_hint")}
+                      </span>
+                      {row.status === "SAVED" && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => void moveStatus(row, "DRAFT")}
+                          disabled={busy}
+                          data-testid={`contract-hours-move-${row.id}-DRAFT`}
+                        >
+                          {t("contract_hours.action_send_back")}
+                        </button>
+                      )}
+                      {/* An APPROVED agreement is not deleted from
+                          here. Correcting one writes a NEW row from a
+                          date; Reopen (the row's button) is the way
+                          back. */}
+                      {!row.is_locked && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => {
+                            setRowToDelete(row);
+                            deleteRef.current?.open();
+                          }}
+                          disabled={busy}
+                          data-testid={`contract-hours-delete-${row.id}`}
+                        >
+                          {t("contract_hours.delete")}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </Fragment>
+              );
+            })}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={15} className="muted">
-                  {t("contract_hours.empty")}
+                <td colSpan={7}>
+                  <div className="empty-state" data-testid="contract-hours-empty">
+                    <div className="empty-title">{t("contract_hours.empty")}</div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setBulkOpen(true)}
+                      data-testid="contract-hours-empty-bulk-open"
+                    >
+                      {t("contract_hours.bulk_open")}
+                    </button>
+                  </div>
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+      </BoundedList>
 
       {bulkOpen && (
         <ContractHoursBulkDialog
@@ -547,20 +754,6 @@ export function ContractHoursTab({
           if (rowToDelete) void remove(rowToDelete);
         }}
       />
-
-      {edit.editMode && (
-        <div className="filter-actions" style={{ justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => void save()}
-            disabled={busy || Object.keys(edits).length === 0}
-            data-testid="contract-hours-save"
-          >
-            {busy ? t("admin_form.saving") : t("hours_week_grid.save")}
-          </button>
-        </div>
-      )}
     </div>
   );
 }

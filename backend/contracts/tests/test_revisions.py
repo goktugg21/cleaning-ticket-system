@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
@@ -132,8 +133,42 @@ class RevisionLockingTests(TestCase):
         cls.customer = Customer.objects.create(
             company=cls.company, name="Customer"
         )
+        # `Invoice.created_by` is NOT NULL, so a locking test that bills
+        # a period needs somebody to have billed it.
+        cls.locker = get_user_model().objects.create_user(
+            email="locker-160@example.com",
+            password="StrongerTestPassword160!",
+            full_name="Locker",
+        )
+
+    def _bill_a_period(self, contract, revision, day):
+        """The generator's own two writes: an invoice and the claim that
+        this contract's period produced it. W11 made that claim the thing
+        the lock keys off, so a locking test has to make it."""
+        from invoicing.models import Invoice
+
+        from contracts.models import ContractInvoice
+
+        invoice = Invoice.objects.create(
+            company=contract.company,
+            customer=contract.customer,
+            status=Invoice.Status.DRAFT,
+            period_year=day.year,
+            period_month=day.month,
+            created_by=self.locker,
+        )
+        return ContractInvoice.objects.create(
+            contract=contract,
+            invoice=invoice,
+            revision=revision,
+            period_start=day.replace(day=1),
+            period_end=day,
+            invoice_date=day,
+        )
 
     def test_a_revision_in_force_is_locked_and_a_future_one_is_not(self):
+        """W11 — 'in force' is no longer enough on its own; the contract
+        must also have billed something. Both halves asserted here."""
         today = timezone.localdate()
         contract = make_contract(
             company=self.company,
@@ -147,10 +182,22 @@ class RevisionLockingTests(TestCase):
             label="Volgend jaar",
             effective_from=today + timedelta(days=1),
         )
-        self.assertTrue(is_locked(current))
+        # Nothing billed yet: in force, but there is no computed money
+        # for an edit to contradict, so it is still open.
+        self.assertFalse(is_locked(current))
         self.assertFalse(is_locked(future))
 
-    def test_a_revision_locks_on_the_day_it_takes_effect(self):
+        self._bill_a_period(contract, current, today)
+        self.assertTrue(is_locked(current))
+        self.assertFalse(
+            is_locked(future),
+            "a future revision stays open however much has been billed",
+        )
+
+    def test_a_revision_locks_on_the_day_it_takes_effect_once_billed(self):
+        """W11 — the day alone no longer locks. Locking a revision that
+        has produced nothing is what made a contract created today
+        impossible to fill in, and left it worth EUR 0.00 for good."""
         today = timezone.localdate()
         contract = make_contract(
             company=self.company,
@@ -158,7 +205,11 @@ class RevisionLockingTests(TestCase):
             contract_no="CNT-LOCK-0002",
             start_date=today,
         )
-        self.assertTrue(is_locked(contract.revisions.get()))
+        revision = contract.revisions.get()
+        self.assertFalse(is_locked(revision))
+
+        self._bill_a_period(contract, revision, today)
+        self.assertTrue(is_locked(revision))
 
 
 class RevisionTotalsTests(TestCase):

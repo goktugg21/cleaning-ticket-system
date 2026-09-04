@@ -69,6 +69,7 @@ import type {
   StaffCompletionRouteResponse,
   StaffProfileAdmin,
   TicketDetail,
+  TransitionRequirements,
   UserAdmin,
   UserAdminDetail,
 } from "./types";
@@ -1494,6 +1495,16 @@ export interface SubTaskAssignment {
   slot_status: SlotStatus;
   completion_note: string;
   completed_at: string | null;
+  /** W-VIEWER §10 — who pressed the button, and their display name. On a
+   *  worker's own completion this is the worker; on an on-behalf close it
+   *  is the operator, which is what makes the two distinguishable without
+   *  comparing ids. */
+  completed_by_id: number | null;
+  completed_by_name: string;
+  /** W-VIEWER §10 — why an operator closed or reopened this on somebody
+   *  else's behalf. Empty string on a worker's own completion — they are
+   *  not acting on anybody's behalf and are asked for no reason. */
+  completed_on_behalf_reason: string;
   unable_to_complete_reason: string;
 }
 
@@ -1511,15 +1522,28 @@ export interface SubTask {
   created_by_email: string | null;
   created_at: string;
   updated_at: string;
+  // W-LATE §3a — the part's own window: a day, a range, or a day with a
+  // clock hint. All optional; a part with none behaves as before.
+  planned_start_date: string | null;
+  planned_end_date: string | null;
+  time_window_label: string;
+  // W-LATE §3b — the server's word on where the part stands against
+  // its window (`tickets/lateness.part_state`).
+  window_state: SubTaskWindowState;
   is_done: boolean;
   staff_assignments: SubTaskAssignment[];
 }
+
+export type SubTaskWindowState = "NONE" | "OPEN" | "LAST_DAY" | "MISSED" | "DONE";
 
 // POST body for SubTask create (manager only; `ordering` defaults to 0).
 export interface SubTaskCreatePayload {
   title: string;
   description?: string;
   ordering?: number;
+  planned_start_date?: string | null;
+  planned_end_date?: string | null;
+  time_window_label?: string;
 }
 
 // PATCH body for SubTask update (manager only; all fields optional).
@@ -1527,6 +1551,9 @@ export interface SubTaskPatch {
   title?: string;
   description?: string;
   ordering?: number;
+  planned_start_date?: string | null;
+  planned_end_date?: string | null;
+  time_window_label?: string;
 }
 
 export async function listAssignableStaff(
@@ -1534,6 +1561,20 @@ export async function listAssignableStaff(
 ): Promise<AssignableStaff[]> {
   const response = await api.get<AssignableStaff[]>(
     `/tickets/${ticketId}/assignable-staff/`,
+  );
+  return response.data;
+}
+
+// W13-FIX §1 — what the step the operator just pressed still needs.
+// The modal asks the server rather than predicting the rule, so the form
+// and `apply_transition`'s gate cannot drift apart.
+export async function getTransitionRequirements(
+  ticketId: number,
+  toStatus: string,
+): Promise<TransitionRequirements> {
+  const response = await api.get<TransitionRequirements>(
+    `/tickets/${ticketId}/transition-requirements/`,
+    { params: { to_status: toStatus } },
   );
   return response.data;
 }
@@ -1571,6 +1612,40 @@ export async function updateStaffSlot(
   const response = await api.patch<TicketStaffAssignmentAdmin>(
     `/tickets/${ticketId}/staff-assignments/${slotId}/`,
     patch,
+  );
+  return response.data;
+}
+
+// W3-G — what this slot must carry before it may be reported done.
+//
+// Server-resolved, because the rule lives on the extra work the ticket
+// came from and a plain ticket has no extra work at all. The dialog
+// reads this to SAY what is needed and to keep its own submit button
+// honest; the PATCH above still refuses on its own, from the same
+// resolver, so this is never the gate.
+export interface SlotCompletionRequirements {
+  note_required: boolean;
+  file_required: boolean;
+  /** The pre-W3-G rule, for a ticket with no extra work: a note OR a
+   *  photo. Mutually exclusive with the two flags above. */
+  either_required: boolean;
+  source: "extra_work" | "default";
+  /** W13 — WHO ASKED for each requirement. Both origins may hold the
+   *  same one. A cleaner treats "the customer wants a photo of this"
+   *  differently from "your manager wants a note", and the sentence in
+   *  the dialog says which. Reporting only: `note_required` and
+   *  `file_required` above are already the union and are what the
+   *  server refuses on. */
+  note_asked_by: ("customer" | "provider")[];
+  file_asked_by: ("customer" | "provider")[];
+}
+
+export async function getSlotCompletionRequirements(
+  ticketId: number,
+  slotId: number,
+): Promise<SlotCompletionRequirements> {
+  const response = await api.get<SlotCompletionRequirements>(
+    `/tickets/${ticketId}/staff-assignments/${slotId}/completion-requirements/`,
   );
   return response.data;
 }
@@ -1654,6 +1729,14 @@ export interface TicketScheduleSetPayload {
   scheduled_end_at?: string | null;
   time_window_label?: string;
   reschedule_reason?: string;
+  /** W-PLANTRUTH §1a — also move the job's PENDING slots onto this
+   *  window. The Work Plan places a card on the planned day of the WORK
+   *  (the slot's day), not on the ticket's own date, so a door that
+   *  means "move the job" — the board's Reschedule, the schedule card
+   *  when the operator ticks it — has to write both facts or the card
+   *  does not move. Absent (the default) writes the ticket's date
+   *  alone, exactly as every existing caller does. */
+  apply_to_slots?: boolean;
 }
 
 export async function setTicketSchedule(
@@ -1741,6 +1824,41 @@ export async function deleteSubTask(
 // SUPER_ADMIN); BM / STAFF / customer get 403 `auto_complete_flag_forbidden`.
 // Blocked on a terminal ticket (`auto_complete_flag_not_allowed_terminal`).
 // Returns the full refreshed ticket detail.
+/**
+ * W-PLANTRUTH §3c — mark a PART done (or undone) as a manager.
+ *
+ * `SubTask` has no status column: a part is done when every slot filed
+ * under it is COMPLETED. A STAFF member reaches that through their own
+ * slot (`updateStaffSlot`, the workers' half); the people who RUN the
+ * job — BUILDING_MANAGER / COMPANY_ADMIN / SUPER_ADMIN, the same set
+ * that may create and assign parts — had no door, because the slot
+ * PATCH demands per-slot completion EVIDENCE, which is a worker's proof
+ * of a visit and not what a manager ticking a part off is stating.
+ *
+ * So this is that door, and the server writes the slots. It answers 400
+ * `part_has_nobody` for a part nobody is on: with no slot under it
+ * there is nothing that could make it done.
+ *
+ * W-VIEWER §10 — AND IT ASKS WHY. This closes (or reopens) work on
+ * somebody else's behalf, so `reason` is required in both directions;
+ * without one the server answers 400 `part_reason_required`. The reason
+ * lands beside the completion state on each slot, on the ticket's
+ * timeline, and in the audit log. A worker finishing their OWN slot goes
+ * through `updateStaffSlot` and is asked for nothing.
+ */
+export async function setSubTaskDone(
+  ticketId: number,
+  subTaskId: number,
+  done: boolean,
+  reason: string,
+): Promise<SubTask> {
+  const response = await api.post<SubTask>(
+    `/tickets/${ticketId}/sub-tasks/${subTaskId}/done/`,
+    { done, reason },
+  );
+  return response.data;
+}
+
 export async function setAutoCompleteFlag(
   ticketId: number,
   value: boolean,
@@ -1785,11 +1903,23 @@ export async function listServiceCategories(
   if (params.company !== undefined) {
     query.company = params.company;
   }
-  const response = await api.get<PaginatedResponse<ServiceCategory>>(
-    "/services/categories/",
-    { params: query },
-  );
-  return response.data.results;
+  // P-16 (the Sprint 135 picker rule) — every consumer treats this
+  // return as "all categories" (the add-service modal's select, the
+  // Categories tab, the pricing picker), and none has pagination UI:
+  // one bare page silently truncated the moment the catalog crossed
+  // the page size. Fetch every matching row (listAllCompanies pattern).
+  const all: ServiceCategory[] = [];
+  let page = 1;
+  for (let i = 0; i < 100; i++) {
+    const response = await api.get<PaginatedResponse<ServiceCategory>>(
+      "/services/categories/",
+      { params: { ...query, page_size: 200, page } },
+    );
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
 }
 
 export async function createServiceCategory(
@@ -1881,10 +2011,19 @@ export async function listServices(
   if (params.company !== undefined) {
     query.company = params.company;
   }
-  const response = await api.get<PaginatedResponse<Service>>("/services/", {
-    params: query,
-  });
-  return response.data.results;
+  // P-16 — same picker rule as listServiceCategories above: every
+  // consumer reads this as the whole catalog; page exhaustively.
+  const all: Service[] = [];
+  let page = 1;
+  for (let i = 0; i < 100; i++) {
+    const response = await api.get<PaginatedResponse<Service>>("/services/", {
+      params: { ...query, page_size: 200, page },
+    });
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
 }
 
 export async function createService(

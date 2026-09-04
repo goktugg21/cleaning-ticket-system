@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { canAccessTimesheets, canManageTimesheets } from "../auth/permissions";
@@ -32,11 +33,15 @@ export function TimesheetsRoute({
   manager?: boolean;
 }) {
   const { me, loading } = useAuth();
+  // P-15 (P-14's S4 finding) — the first paint speaks the app's
+  // language; "Loading…" was the one hardcoded English word before a
+  // Dutch page.
+  const { t } = useTranslation("common");
 
   if (loading) {
     return (
       <main className="auth-page">
-        <p className="muted">Loading…</p>
+        <p className="muted">{t("loading")}</p>
       </main>
     );
   }
@@ -49,7 +54,10 @@ export function TimesheetsRoute({
     ? canManageTimesheets(me.role)
     : canAccessTimesheets(me.role);
   if (!allowed) {
-    return <Navigate to="/" replace />;
+    // P-14 (findings) — the SAME landing AdminRoute gives: a silent
+    // bounce to the dashboard read as "the link is broken"; the query
+    // string puts the admins-only banner on the landing.
+    return <Navigate to="/?admin_required=ok" replace />;
   }
 
   return <AppShell>{children}</AppShell>;

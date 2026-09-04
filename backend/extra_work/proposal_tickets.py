@@ -54,7 +54,7 @@ from tickets.models import (
     TicketStatusHistory,
 )
 
-from .instant_tickets import earliest_requested_start
+from .instant_tickets import plan_seed
 
 from .models import (
     ExtraWorkRequest,
@@ -71,10 +71,10 @@ def _proposal_line_summary(line: ProposalLine) -> str:
     """One-line human label for a proposal line. Mirrors the line's
     `__str__` shape."""
     if line.service is not None:
-        return f"{line.service.name} × {line.quantity}"
+        return line.service.name
     if (line.description or "").strip():
-        return f"{line.description.strip()} × {line.quantity}"
-    return f"Extra work line × {line.quantity}"
+        return line.description.strip()
+    return "Extra work line"
 
 
 def _build_proposal_title(
@@ -163,15 +163,11 @@ def spawn_tickets_for_proposal(
     # Back-compat legacy link: FIRST approved-for-spawn line.
     first_line = spawn_lines[0]
 
-    # Sprint 9B — seed the operational schedule from the EW's cart
-    # `line_items` requested_date (NOT the proposal lines — ProposalLine
-    # has no requested_date). None -> ticket stays UNSCHEDULED.
-    seed_start = earliest_requested_start(request)
-    seed_schedule_status = (
-        TicketScheduleStatus.SCHEDULED
-        if seed_start is not None
-        else TicketScheduleStatus.UNSCHEDULED
-    )
+    # P-11 A8 — born on the provider's plan when the request holds
+    # one (a person made it before the customer's yes); else unplanned
+    # (P-1: a creation date is not a plan — TCK-2026-000209, "87 days
+    # late"). See `instant_tickets.plan_seed`.
+    seed_start, seed_end, seed_schedule_status = plan_seed(request)
 
     ticket = Ticket.objects.create(
         company=request.company,
@@ -185,6 +181,7 @@ def spawn_tickets_for_proposal(
         extra_work_request=request,
         proposal_line=first_line,
         scheduled_start_at=seed_start,
+        scheduled_end_at=seed_end,
         schedule_status=seed_schedule_status,
     )
 
@@ -193,7 +190,7 @@ def spawn_tickets_for_proposal(
         old_status="",
         new_status=TicketStatus.OPEN,
         changed_by=actor,
-        note="Spawned from approved Extra Work proposal.",
+        note="Created from approved Extra Work proposal.",
         is_override=False,
         override_reason="",
     )
@@ -213,8 +210,8 @@ def spawn_tickets_for_proposal(
 def _ew_line_summary(item: ExtraWorkRequestItem) -> str:
     """One-line human label for a cart line."""
     if item.service is not None:
-        return f"{item.service.name} × {item.quantity}"
-    return f"Extra work line × {item.quantity}"
+        return item.service.name
+    return "Extra work line"
 
 
 def _build_ew_title(
@@ -311,14 +308,9 @@ def spawn_tickets_for_extra_work_request(
     # Back-compat legacy link: FIRST cart line.
     first_item = items[0] if items else None
 
-    # Sprint 9B — seed the operational schedule from the earliest cart
-    # `line_items` requested_date. None -> ticket stays UNSCHEDULED.
-    seed_start = earliest_requested_start(ew)
-    seed_schedule_status = (
-        TicketScheduleStatus.SCHEDULED
-        if seed_start is not None
-        else TicketScheduleStatus.UNSCHEDULED
-    )
+    # P-11 A8 — the provider's plan when one exists; see the
+    # proposal path above.
+    seed_start, seed_end, seed_schedule_status = plan_seed(ew)
 
     ticket = Ticket.objects.create(
         company=ew.company,
@@ -332,6 +324,7 @@ def spawn_tickets_for_extra_work_request(
         extra_work_request=ew,
         extra_work_request_item=first_item,
         scheduled_start_at=seed_start,
+        scheduled_end_at=seed_end,
         schedule_status=seed_schedule_status,
     )
 
@@ -340,7 +333,7 @@ def spawn_tickets_for_extra_work_request(
         old_status="",
         new_status=TicketStatus.OPEN,
         changed_by=actor,
-        note="Spawned from approved Extra Work request (legacy pricing flow).",
+        note="Created from approved Extra Work request (legacy pricing flow).",
         is_override=False,
         override_reason="",
     )

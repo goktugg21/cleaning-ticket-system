@@ -3,6 +3,7 @@ Sprint 152 — week close / reopen.
 
     GET  /api/timesheets/weeks/          list the CLOSED weeks
     GET  /api/timesheets/weeks/status/   is ONE week open or closed?
+    GET  /api/timesheets/weeks/with-hours/  which weeks of a year hold hours
     POST /api/timesheets/weeks/close/
     POST /api/timesheets/weeks/reopen/
 
@@ -19,6 +20,8 @@ AuditLog DELETE entry is the reopen trail.
 from __future__ import annotations
 
 from django.db import IntegrityError, transaction
+from django.db.models import Count, Sum
+from django.utils import timezone
 from rest_framework import generics, serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -35,6 +38,7 @@ from .permissions import (
 )
 from .scope import filter_week_locks_for
 from .serializers import WeekLockSerializer
+from .views_entries import _base_entry_queryset
 from .views_common import (
     parse_int_param,
     resolve_target_company,
@@ -45,6 +49,7 @@ from .views_common import (
 ERR_WEEK_INVALID = "week_invalid"
 ERR_WEEK_ALREADY_CLOSED = "week_already_closed"
 ERR_WEEK_NOT_CLOSED = "week_not_closed"
+ERR_YEAR_INVALID = "iso_year_invalid"
 
 
 def _parse_week(data):
@@ -237,6 +242,137 @@ class WeekReopenView(APIView):
                 "iso_year": iso_year,
                 "iso_week": iso_week,
                 "is_closed": False,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class WeeksWithHoursView(APIView):
+    """GET /api/timesheets/weeks/with-hours/?iso_year=&company=
+
+    P-9 D3 -- WHERE THE HOURS ARE. The Hours pages are week-scoped, so
+    the current week opens empty by construction and the reader had no
+    way of telling "nobody has saved this week yet" from "there are no
+    hours at all". This answers, for one ISO year, which weeks hold
+    saved hours and how many:
+
+        {"iso_year": 2026,
+         "weeks": [{"iso_year": 2026, "iso_week": 35,
+                    "hours": "312.00", "entries": 5, "people": 3,
+                    "is_closed": true, "closed_by_name": "Ramazan",
+                    "closed_at": "2026-08-25T09:00:00Z"}, ...]}
+
+    sorted by week, only weeks with at least one entry. ONE aggregate
+    query grouped on the `iso_year` / `iso_week` columns every entry
+    already carries (`TimeEntry.save` derives them).
+
+    P-11 B1 — the "Earlier weeks" table reads three more facts per
+    week: how many PEOPLE hold hours in it (a distinct count in the
+    same aggregate) and whether it is closed, by whom, when (one
+    `WeekLock` query over the listed year; a lock is company-scoped, so
+    without `?company=` the lock facts are answered for a SUPER_ADMIN's
+    single-company read and left null when the company is ambiguous).
+
+    Scope is the entries list's own: `_base_entry_queryset` applies the
+    tenant floor and then the privacy floor, so a manager reads the
+    company's weeks and everyone else reads their own. `?company=`
+    narrows only (the admin page always sends it: a SUPER_ADMIN works in
+    one company at a time). Open to every provider-side role, like the
+    week list; a customer-side user is 403'd by the permission class.
+
+    Not cached server-side: `settings.CACHES` is not configured (the
+    default is a per-process local memory cache, which gunicorn workers
+    do not share), so a 60-second cache here would answer differently
+    per worker. The pages refetch it alongside the entries instead.
+    """
+
+    permission_classes = [IsTimesheetUser]
+
+    def get(self, request, *args, **kwargs):
+        raw_year = request.query_params.get("iso_year")
+        if raw_year in (None, ""):
+            iso_year = timezone.localdate().isocalendar()[0]
+        else:
+            iso_year = parse_int_param(raw_year)
+            if iso_year is None or not (1970 <= iso_year <= 2200):
+                raise serializers.ValidationError(
+                    {
+                        "iso_year": [
+                            serializers.ErrorDetail(
+                                "iso_year must be a year between 1970 and 2200.",
+                                code=ERR_YEAR_INVALID,
+                            )
+                        ]
+                    }
+                )
+        qs = _base_entry_queryset(request.user).filter(iso_year=iso_year)
+        company = parse_int_param(request.query_params.get("company"))
+        if company is not None:
+            qs = qs.filter(company_id=company)
+        rows = (
+            qs.values("iso_year", "iso_week")
+            .annotate(
+                hours=Sum("hours"),
+                entries=Count("id"),
+                # P-11 B1 — how many people hold hours in the week.
+                people=Count("employee", distinct=True),
+            )
+            .order_by("iso_year", "iso_week")
+        )
+        # P-11 B1 — the lock facts, resolvable only when the read is
+        # about ONE company (a lock is company-scoped). The entries
+        # themselves say whether it is.
+        lock_company = company
+        if lock_company is None:
+            entry_companies = list(
+                qs.values_list("company_id", flat=True).distinct()[:2]
+            )
+            if len(entry_companies) == 1:
+                lock_company = entry_companies[0]
+        locks = (
+            {
+                lock.iso_week: lock
+                for lock in WeekLock.objects.filter(
+                    company_id=lock_company, iso_year=iso_year
+                ).select_related("closed_by")
+            }
+            if lock_company is not None
+            else {}
+        )
+
+        def _lock_facts(iso_week_value):
+            lock = locks.get(iso_week_value)
+            if lock is None:
+                return {
+                    "is_closed": False,
+                    "closed_by_name": None,
+                    "closed_at": None,
+                }
+            closed_by = lock.closed_by
+            return {
+                "is_closed": True,
+                "closed_by_name": (
+                    (closed_by.full_name or closed_by.email)
+                    if closed_by is not None
+                    else None
+                ),
+                "closed_at": lock.closed_at,
+            }
+
+        return Response(
+            {
+                "iso_year": iso_year,
+                "weeks": [
+                    {
+                        "iso_year": row["iso_year"],
+                        "iso_week": row["iso_week"],
+                        "hours": f"{row['hours']:.2f}",
+                        "entries": row["entries"],
+                        "people": row["people"],
+                        **_lock_facts(row["iso_week"]),
+                    }
+                    for row in rows
+                ],
             },
             status=status.HTTP_200_OK,
         )

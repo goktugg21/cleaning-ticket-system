@@ -27,8 +27,27 @@ The **owner does not write code.** The workflow is:
   verifies the pushed commits from `origin`** — never from CC's self-report —
   and issues a merge verdict. **A CC self-report is never the basis for a merge
   verdict.**
-- The owner performs all GitHub UI actions (PRs, merges). CC pushes branches;
-  **CC does not open PRs unless explicitly told to.**
+- **Sprints branch from `main`.** The redesign train (WP-1 → FE-1 …
+  FE-7 → P-1 … P-17) was merged into `main` in P-17 and tagged
+  `v2026.09-redesign` — the restore point. The stacked-branch train
+  ended with that merge; see
+  [docs/planning/merge-recipe.md](docs/planning/merge-recipe.md).
+- The owner performs all GitHub UI actions. CC pushes branches — **pushed
+  before the report is written. A report about commits that are not on
+  `origin` is a report about nothing — web-Claude verifies from `origin`
+  only.** **CC NEVER opens a PR.** There is no CI gate in the loop: a sprint is
+  finished when its local gates pass and the branch is DEPLOYED to
+  crmtest for the owner to see. **Merging happens only when the owner
+  says "merge" — nothing is proposed for merge before that.**
+- **A sprint's report is addressed to web-Claude FIRST.** After deploy,
+  web-Claude audits the build (API probes + visual walkthrough) in its
+  own environment; the owner walks only after that audit. The owner is
+  not the first QA tester: CC uses the system as a real user, attacks
+  the meaningful paths, inspects the UI visually and discovers defects
+  before the owner encounters them. A correct HTTP status is not a
+  correct product — the screen must say the truth, where the user
+  clicked, in words they understand, and after every transition the
+  user must be able to FIND their work through normal navigation.
 
 ---
 
@@ -128,12 +147,27 @@ change writes an `AuditLog`), H-11 (permission override ≠ workflow override).
   Backfill data migrations required when a new column has a non-default meaning.
 
 ### Tests & gates
-- **Backend:** run from `backend/`: `python manage.py test`. **Judge by the
-  textual `OK` / `FAILED` line, NEVER the exit code.** Real Postgres (CI
-  provides one); mock only the SMTP transport. Test-first for new features.
+- **Backend:** run ONLY the test modules of the apps the sprint
+  touched: `python manage.py test <app>.tests.<module> ...` — judge by
+  the textual `OK` / `FAILED` line, NEVER the exit code. **Never run
+  the full backend suite unless the owner explicitly asks for it.**
+  Test-first for new features still applies. Real Postgres; mock only
+  the SMTP transport.
 - **Frontend gate** (all three, in `node:22-alpine`):
   `tsc --noEmit -p tsconfig.app.json` + `eslint .` + `npm run build`.
-  **ESLint baseline is EXACTLY 44 (42 errors, 2 warnings).** Add **no** new
+  **ESLint baseline is EXACTLY 39 (38 errors, 1 warning)** as measured
+  on `feat/fe-5-provider-forms` on 2026-08-29 (FE-5 replaced the
+  provider ticket form's three setState-in-effect resyncs with
+  derivations; before that it was 42 (41 errors, 1 warning), measured
+  on origin on 2026-08-23 twice and re-confirmed at W18 `edce230`).
+  The one warning, `react-hooks/exhaustive-deps`, is
+  `hooks/useSavedBanner.ts:28` (missing `flagMap` — omitted on purpose,
+  it changes identity every render). The previously documented "44
+  (42 errors, 2 warnings) as of `4823b17`" was stale. Re-measure with
+  ONE full run and read the WHOLE
+  output — the drift went unnoticed because several chats each read a
+  tail and named a different file, and one of the files named had no
+  warning at all. Add **no** new
   violations and **no** new `eslint-disable`. No synchronous `setState` in an
   effect body; for prop-derived state, key the component by id.
 
@@ -172,6 +206,38 @@ change writes an `AuditLog`), H-11 (permission override ≠ workflow override).
   open without calling `.close()` first can leave the whole page inert
   (Sprint 118, the frozen-screen bug). Full writeup:
   [docs/engineering/claude-code-operational-notes.md](docs/engineering/claude-code-operational-notes.md).
+
+### Frontend redesign rules (Addendum D)
+
+- The frontend redesign source of truth is
+  [docs/product/sot-addendum-d-frontend-redesign.md](docs/product/sot-addendum-d-frontend-redesign.md).
+  For presentation, vocabulary, navigation, and flow shape it WINS over
+  older UI descriptions in the base SoT (§16) and over current code.
+- **Vocabulary is law:** one name per concept (Addendum D §D.2). Never
+  introduce a new user-facing work noun; the §D.2 banned list applies to
+  all UI copy, both locales, in lockstep.
+- **Every FE sprint self-verifies visually** per Addendum D §D.10: run
+  the stack, screenshot the changed surfaces per affected role, check
+  against the sprint checklist, at most TWO fix iterations per item,
+  then report. Screenshots are design evidence; measured geometry
+  remains the standard for layout-regression claims.
+- **§D.10 verification walks the OLDEST real records on crmtest
+  (read-only), not only fixtures; every sprint report includes what the
+  ugly data showed.** FE-4's "Planned" fix passed on clean fixtures and
+  failed on crmtest's June tickets (P-1).
+- **Replays create their OWN fixtures and list every data mutation at
+  the TOP of the report.** A replay never approves, closes, plans or
+  reschedules a real waiting record on crmtest to prove a path — P-4's
+  replay approved one of the owner's three waiting tickets and the
+  chip he was watching went 3 → 1 under him. Create the meerwerk /
+  ticket / people the replay needs, walk them, and open the report
+  with the list of ids touched (created, mutated, deleted), so the
+  owner can tell his data from the sprint's. (P-5, 2026-08-30.)
+- Detail pages: fact block first, ONE primary action from
+  `actions.can_*`, corrections behind "Geavanceerd" with their existing
+  warning/audit surfaces. No new frontend business inference — if a
+  display needs a derived state, request/extend a backend-computed field
+  (the `display_phase` pattern), never compute it client-side.
 
 ### Naming / style
 - Backend Django/PEP-8: snake_case fields, CamelCase models, dot-namespaced

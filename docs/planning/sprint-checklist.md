@@ -13,9 +13,184 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/sprint-188`. Sprints 153–188 land as ONE PR into
-`main` — 200 commits, a fast-forward, and the first time CI runs on any
-of it. The owner opens and merges it.
+**Branch:** `main`. The Addendum D redesign train
+(WP-1 → FE-1 → … → FE-7 → P-1
+→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11 → P-12 → P-13 → P-14 → P-15 → P-16 → P-17)
+**was merged into `main` on 2026-09-04 (P-17 Part C) and tagged
+`v2026.09-redesign`** — the restore point. The merge carried the
+`feat/ew-gap-closing` chain (Sprints 153–189) with it, so that branch
+needs no separate PR. **Sprints now branch from `main`** (CLAUDE.md §1,
+[merge-recipe.md](merge-recipe.md)); the stacked-branch train is over.
+No branch was deleted at merge time — the train's branches stay for at
+least a week from 2026-09-04 (P-17 C5).
+
+### P-17 — "The walkthrough reads right, then merge" (2026-09-04, DONE)
+
+Docs-only; zero migrations, zero `.py` changed, no app code. Web-Claude
+reported three defects in `docs/walkthrough/`; the owner's instruction
+was to verify each one independently before fixing it.
+
+- **Part 0 — verified.** **W1 CONFIRMED** (one subject–verb error,
+  `company-admin.md:8`, `het aantal dingen dat u vandaag nodig hebben`);
+  the sweep of all four NL halves found **no second** agreement error,
+  but did surface two other NL defects fixed in passing (`Meerwerk's`,
+  an English possessive in the Dutch half; `stil staan` for the single
+  verb `stilstaan`). **W2 CONFIRMED and UNDERCOUNTED** — not "12+" but
+  **25** Dutch surface names inside the `# English` halves (6 / 8 / 6 /
+  5). **W3's withdrawal VERIFIED CORRECT** — all four pages carry their
+  own image, every reference resolves, every image on disk is
+  referenced; the two sets are identical. No work.
+- **Part A — DONE.** W1 fixed against the product's own idiom
+  (`{{count}} dingen hebben u nodig vandaag`); all 25 EN page names
+  replaced with the real EN nav labels read from
+  `frontend/src/i18n/en/` (My schedule, Extra work, Hours, My hours,
+  Invoices, Messages, Notifications, My reports, New report), NL halves
+  left Dutch. **Five factual drifts** found by reading each page as its
+  stranger and fixed: the Dashboard attention list named two categories
+  that do not exist (`controle`, `niet toegewezen`) and missed three
+  that do — the real five are wacht op prijs / wacht op klantbeslissing
+  / vastgelopen / nog niet gepland / factuurmaand loopt risico; the
+  strip is `Nog niet gepland`, not `Niet gepland`; the quote button is
+  `Prijzen en versturen`, not `Prijs en verstuur`; the draft button is
+  `Concept maken`, not `Maak concept`; and the customer's **Mijn
+  meldingen** renders `display_phase` (`Ingepland`, `Klaar — wacht op
+  uw controle`), never the provider's `ticket_status.*` vocabulary the
+  page quoted (`Wacht op beheerder`, `Wacht op u` — the latter is the
+  Start page's section title, not a status at all).
+- **Verified accurate, left alone:** H-12 (a building manager may not
+  issue or send an invoice, keeps drafts/preview/PDF/lists, gets the
+  `invoice_admin_only` refusal); only an APPROVED standing pattern
+  pre-fills the sheet (P-15 §0.2, `timesheets/fill.py`) and a staff
+  member's own week fills too (W12); bell and email are twins from one
+  emitter with one recipient list (`emit_sla_warning_inapp`) and render
+  per RECIPIENT language (P-16 Part D); the customer billing-date rule
+  (`is_earned`'s cutoff arm: WAITING_CUSTOMER_APPROVAL +
+  `sent_for_approval_at`, so approval need not be in) and its credit
+  note on a later rejection.
+- **Part B — gates green.** tsc 0 · eslint **39 (38 errors, 1 warning
+  = `useSavedBanner.ts:28` exhaustive-deps)** · vitest 144/144 ·
+  build OK · nl/en lockstep identical in all 13 bundles ·
+  `makemigrations --check` → No changes. **No backend suite re-run:
+  zero `.py` files changed.**
+- **Part C — the merge.** Dry run re-run against the then-current
+  `origin/main`: zero conflicts. Merged `--no-ff`, tagged
+  `v2026.09-redesign`, crmtest redeployed from `main`.
+
+### P-16 — "Nothing left, then merge" (2026-09-03, in flight)
+
+The owner's instruction: finish everything undone and left; if nothing
+is queued after this, we merge. The deliverable is an EMPTY queue —
+every item FIXED or CLOSED with the ruling written down
+(Addendum D §D.25) — and a merge that is one command away
+([merge-recipe.md](merge-recipe.md), prepared, NOT run; the owner has
+not said "merge"). One migration allowed and used: `notifications/0022`
+(Part D, additive, nullable). Explicitly post-merge (the owner's own
+earlier decisions, not blockers): the Turkish locale, the go-live data
+import ([go-live-import.md](go-live-import.md), plan only), the
+contracts model (his father's meeting decides; the P-15 guard stands).
+
+- **Part A — DONE** — the standing reds dispositioned in TWO rounds
+  (`docs/testing/p16-suite-repair.md`): round 1 the 34 in the suspect
+  families, round 2 the 62 the full current-tree run surfaced (P-15's
+  own rules had silently broken modules its touched-module gate never
+  ran — the disease this rule cures). Final line:
+  **`Ran 6077 tests in 21267.918s — OK (skipped=4)`** — the first
+  green full run since 2026-08-06. **Standing rule (from this sprint
+  on): the full backend suite runs at the close of every sprint; a red
+  is a sprint item, not a note.**
+- **Part B — DONE** — the e2e suite in the FE-7 harness
+  (`docs/testing/e2e-harness.md`): **`401 passed (1.1h)`, 0 failed,
+  0 skipped** — every former skip now runs or is deleted with its
+  reason.
+- **Part C** — the eleven deferred S4s fixed/closed (statuses inline
+  in `p14-findings.md`; pins: `test_p16_part_c`,
+  `test_p16_future_flag`, `test_p16_generate_through`).
+- **Part D** — notification language (§D.13.3 hybrid): the keyed
+  catalogue (`notifications/copy.py`), ~28 kinds × nl/en, per-recipient
+  email render, per-viewer bell render, key-based digest dedupe, the
+  SPA title map gone (`test_p16_copy_catalogue`).
+- **Part E** — the open decisions closed in §D.25; the stray dev-server
+  files dispositioned.
+- **Part F** — `docs/walkthrough/` (one page per role, nl+en).
+- **Part G** — merge prepared: dry run zero conflicts, recipe written,
+  CLAUDE.md notes post-merge branching. RUNS ONLY on the owner's word.
+
+**P-16 queue after this sprint: EMPTY.** Remaining work is post-merge
+by the owner's own decisions (Turkish, go-live import, contracts
+model) — nothing else is deferred.
+
+### P-15 — "Close the list" (2026-09-03, in flight)
+
+The product of P-14 was the list; the product of P-15 is the list
+CLOSED: every S1 and S2 fixed and pinned, every S3 on the owner's
+eight pages, S4 as far as the sprint reaches, each fix tied to its
+finding by title in `docs/testing/p14-findings.md` (now carrying
+inline **P-15: FIXED / RULED / DEFERRED** statuses). Zero migrations.
+Rulings in Addendum D §D.24.7; the new security invariant is
+rbac-matrix §3 **H-12**.
+
+- **Part 0 (rulings, owner one-word veto each):** 0.1 invoice
+  issue/send/un-issue/reverse are CA/SA-only (H-12, double-gated,
+  `invoice_admin_only`); 0.2 only APPROVED patterns fill the sheet
+  (`test_p15_approved_fill`, the grid says why a person's lines are
+  empty); 0.3 the on-behalf sign-off says so ("Checked by {manager} —
+  counts as approved (this customer cannot approve online)"); 0.4 a
+  customer's wish never places a ticket — the Not-planned strip wears
+  `wished_day`, the lateness ladder keeps the wish
+  (`job_wish_window`), the P-1 captioned-phantom pins rewritten.
+- **Part 1 (S1):** the contract lifecycle machine
+  (`contracts/state_machine.py`, `/contracts/<id>/transition/`,
+  serializer read-only, AuditLog diff as history, the form dialog's
+  lifecycle select gone, Cancel behind Geavanceerd); no hidden delete
+  behind a pencil ("Select rows" everywhere, Deactivate called
+  Deactivate, the contracts Delete carries its WhatHappens and a
+  money-bearing row is unselectable AND refused —
+  `contract_has_invoices`).
+- **Part 2 (S2):** BM candidates picker answers like the validator;
+  the two-company worker's My hours resolves + sends `company`; the
+  Tickets page says its counts' period out loud; the CA dashboard's
+  confident zero waits for the probes; the SLA reset gets its confirm
+  + pre-read.
+- **Part 3 (S3, the eight pages):** board failure state + Retry; BM
+  Contracts Start-here in the read voice; BM Invoices doors that
+  work; the EW intent default judged by the intent validator
+  (`intent_required`, preview default honest); + the small
+  off-page S3s (customer-worded notification toggles, audit-log
+  model#id, hour-types subtitle, the EW bulk line).
+- **Part 4 (web-Claude's additions):** the board never shows a half
+  column (width snaps to whole 210px columns — the floor holds); the
+  "Afgerond: Afgerond" fact fixed (missing date → no line; the
+  placement is rule 1 by design); the Agreed hours tab on §D.22
+  (six columns, compressed Pattern, filters folded, one button per
+  row, per-row editor); folds-closed confirmed; "Kind of work / Soort
+  werk" split from the customer's "Work type", the pattern dialog
+  de-week-ified with the fixed-work default pinned.
+- **Part 5:** invoice refusals carry stable codes; the ticket status
+  endpoint's flat refusal body; recurring PATCH answers the read
+  shape; the crew carry stamps the PLANNER; the STAFF roster read
+  gets a read-shaped refusal; `pageApiGet` same-origin (the six e2e
+  specs it failed); Amanda's second customer membership (data only);
+  the S4 word/loading batch (team titles, u-register, klus, boot
+  Loading…, plurals, people-tab subtitles, tickets footer, EW
+  skeleton, /my/facturen send-month fallback, pricing-403 precheck).
+
+**P-16 queue (deferred by title):** the 51 pre-existing backend reds
+in untouched modules (sprint-28-era audit pins; sprint-109/123/127/142
+extra-work modules; seed-demo isolation pins; the sprint-179
+week-grid-source quartet; b7/w3g/sprint7b — a monthly full-suite run
+would have caught them the sprint they broke); notification payload
+localization (behind the owner's migration yes); the customers
+RELATIONSHIP lifecycle words; the dashboard's three reconciling
+numbers; "Price and send" pre-read on the detail; /my/facturen's
+mobile card list; the CA sidebar Hours/My-hours divider; the EW
+cancel-note requirement; future-dated hours flagging; the
+preview-vs-generate month question; the proposal plan-gate refusal
+order.
+
+Sprint 189 runs as THREE parallel Claude Code chats on this one branch,
+on disjoint file sets: chat 1 the two detail pages, chat 2 the backend,
+chat 3 the list and dashboard pages. The plan they execute is
+[docs/planning/ew-gap-closing-plan.md](ew-gap-closing-plan.md).
 
 Sprint 187 shipped, then was VERIFIED rather than believed, and the
 verification found real defects in it. Those became 187C. 187B ran in a
@@ -30,6 +205,2744 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### P-14 — "Everything, end to end" (the TEST sprint, 2026-09-02, in flight)
+
+The owner's words: "Test the system end to end, everything, every
+capability, visually, as a person who knows nothing, as different
+users. Don't trust the tests we have. Backend, frontend, and between
+them." The deliverable is a FINDINGS LIST with evidence
+(`docs/testing/p14-findings.md`), checked off against the capability
+inventory (`docs/testing/capability-inventory.md`); fixes only where
+small and certain, everything else prioritised for P-15. Zero
+migrations. Rulings in Addendum D §D.24.6.
+
+**Part A — shipped** (the owner's two Hours findings + web-Claude's
+certain fixes):
+- A1: Agreed hours back as the Hours page's second tab
+  (`/admin/hours/agreed`, People-style, `hoursTabs.ts` pinned;
+  `?tab=schedule` redirects; ONE name: Agreed hours / Afgesproken
+  uren; the doubled header gone). Drift found: `fill.py` seeds from
+  `auto_fill` alone — approval gates nothing (P-15 ruling needed).
+- A2: the week card's Enter hours + Close week on one baseline, ONE
+  pre-read line under the pair.
+- A3: "How this page works" starts CLOSED everywhere; opening is
+  remembered per page (howStore inverted + re-pinned).
+- A4: at_risk_foot pluralised; the closing sentence said once;
+  Enter hours a normal secondary button that stops greying out on
+  refresh; the All-entries fold names the active period.
+- A5: a wish date is not a plan — EW board placement is
+  provider-plan-only (`test_p14_wish_not_plan`); the staff board
+  opens on a column boundary (no half columns at first paint) with
+  scroll-snap; the stuck strip speaks per viewer (worker: "your
+  manager decides what happens next").
+
+**Part B — the audit, done** (`docs/testing/p14-findings.md` is the
+product; `capability-inventory.md` the checklist):
+- The inventory: 76 surfaces, ~930 capabilities, each with guard,
+  roles, meaning and server call.
+- The walks: 344 page-records across 18 walks (all nine roles, 1440 +
+  390), every record measured overflowPx=0 and consoleErrors=0; cold
+  reads per page per role against the inventory's truth.
+- The chains: 7/7, 64 recorded steps; the money proven to the cent
+  (quote €304.92 → earned €355.74 = invoice = credit note; VAT once;
+  reversal releases the pool; over-quote WARN ONLY; the 0038 legacy
+  line saves hours; a permissions change moves every count exactly
+  and restores byte-identical).
+- The probes: 194 GET endpoints × 9 roles (0 500s, 0 tenant leaks,
+  content-verified); 354 state-machine attempts (0 illegal allowed,
+  0 non-sentence refusals) with proven rollback.
+- The verdict: **65 findings** — S1 2 (the contract lifecycle has NO
+  state machine; the Contracts Edit-pencil hides the only delete
+  door), S2 14, S3 14, S4 35; **11 fixed in-sprint** (each ≤30
+  lines), the rest prioritised as P-15's input. Four PRE-EXISTING
+  test reds found on the P-13 tip and repaired (stale P-10-era pins).
+
+Queued for P-15 (from the findings, S1 first): the contract
+lifecycle machine; the fill's approval-gate ruling; the BM
+candidates-endpoint mismatch; the two-company staff /my-hours 400;
+the spawned-ticket wish-placement ruling; the unstaffed ON_HOLD
+board gap; then Tickets+People to §D.24, notification localization
+(owner migration yes pending), the Turkish locale.
+
+### Done — P-13: the money is never invisible (Addendum D §D.24.5, 2026-09-02)
+
+The full rulings live in §D.24.5; the sprint in one line: a euro the
+system knows about is a euro some screen states, with the way to act
+on it beside it. Shipped on `feat/p13-money-never-invisible`:
+
+- **I — the owner's ONE migration** (his yes, 2026-09-02):
+  `actual_hours` on `ExtraWorkPricingLineItem`
+  (`0038_extraworkpricinglineitem_actual_hours_and_more`, additive,
+  nullable, null = bill the agreed quantity) — closes P-12's D7; the
+  legacy path gets the prefill, Save-hours and the completion gate.
+  The over-quote policy is settled WARN ONLY (amber line always;
+  confirm over 25% / €100 more; never block, never a new quote).
+- **A — Invoices**: `/due/` shows unscheduled customers with finished
+  unbilled work (row: "No billing day set — bills when you say" + Set
+  a billing day + Make a draft now; Start here names them first;
+  never auto-billed); the company selector's seed chain pinned
+  (session → waiting → first by name); the at-risk rows say the
+  job's real state (reason/since/manager names; "stuck" gone;
+  ON_HOLD + NOT_PLANNED join the stages); the Agreement's Amount is
+  ex VAT on all three paths with one ex+incl pair (agreedLines.ts).
+- **B — the Money story**: `MoneyStory` (Agreed → Worked → Goes on
+  the invoice), one component on request + spawned ticket; fixed
+  lines in Worked; `invoice_ref` on the detail (P-9's loader);
+  the amber difference always; the teach line under Save.
+- **C — archive never hides money**: no delete door exists (and
+  `deleted_at` has no writer — crmtest 0/152); cancel of
+  earned-unbilled money requires a reason (refusal names the
+  amount; the reason is logged on the override surface); the archive
+  confirm says the ticket hides, the money stays; pinned in
+  `test_p13_archive_never_hides_money`.
+- **D — finished jobs + rows**: past-tense facts on DONE (Finished
+  {date} / never planned / no crew recorded; read-only department;
+  chip and "— uitvoering" gone); the Done banner says the money fact
+  with Go to invoices; Archive behind Advanced; rows are links
+  everywhere (§D.22 rule 11: `useRowLink` + `ClickableRow`; the two
+  hand-rolled copies folded in; schedule cards whole-card).
+- **E — Hours is one page**: the per-entry log is the bottom
+  "All entries" fold (six columns, filters inside); the road and the
+  schedule toggle left; Start here names WHO it opens on.
+- **F — Contracts**: the sentence a stranger reads on every row and
+  the detail header ("{Customer} pays €{monthly} a month for {n}
+  lines at {buildings}, from {start} to {end}, invoiced on day {n} in
+  advance/afterwards", truthful per branch); the detail's Start here
+  names the one missing thing. The freeze holds — the meeting with
+  the owner's father is the real fix.
+- **G — the seed shows the finance pages** (idempotent; three
+  scheduled marker customers + the no-day star with money; invoices
+  in every state via the real services; an ON_HOLD at-risk job).
+- **H — §D.24 rule 8**: HowThisWorks + WhatHappens in
+  `components/guide/`, the five folds live (Invoices, Contracts,
+  Hours, Recurring, SLA), pre-read lines under the primaries.
+- **J**: pg_backup.sh path fixed and run; EN/NL ordinals; Done banner
+  suppresses Start here; `?tab=money` survives the spawn redirect.
+- **Repairs en passant**: test_line_source_fields +
+  test_sprint182_money_rules (red since W-EW1, 2026-08-24) and
+  test_sprint183_clarity's date-dependent is_due pin.
+
+Queued for P-14: Tickets and People to §D.24; notification
+localization (needs the owner's yes on one migration); the Turkish
+locale. The over-quote question is ANSWERED (warn only) and off the
+owner queue.
+
+### Done — P-12: the page tells you what to do (Addendum D §D.24, 2026-09-02)
+
+The guidance standard, written once (§D.24: purpose line, Start here,
+the road as tabs, the Done banner with move-and-highlight, teaching
+empty states, connections in words, buttons that say what they do) and
+applied in the owner's order. Shipped on `feat/p12-page-tells-you`:
+
+- **A — the standard + the pieces**: §D.24 into Addendum D FIRST;
+  `components/guide/` (StartHere, RoadTabs + TeachHead, DoneBanner over
+  a survive-one-reload store, TeachEmpty, ConnectionLine, the
+  `?highlight=` hook — pure halves vitest-pinned); §D.24.2's
+  one-company-at-a-time selector (session-shared across Invoices,
+  Contracts, Hours, Reports).
+- **B — Hours**: Start here (who has no hours yet, Enter hours
+  pre-selecting exactly them), the week card as the week's home
+  (stepper + Open→Closed road + teach + Close/Enter on the card),
+  Save week answers with WHO was saved (banner + ten-second tint),
+  "+ Add a line" offers the person's bookable buildings, every job
+  line says whose next invoice its hours feed
+  (`reports/week-assignments` carries customer + billing day).
+- **C — Contracts** (freeze holds): the road as tabs (Draft · Active ·
+  Ending ≤60d · Ended; cancelled behind the foot link), stats answers
+  the guidance facts (`test_p12_road`), the detail's progress road,
+  line → recurring-rule connection, Add line / Activate banners, the
+  project→line vocabulary sweep finished.
+- **D — Invoices**: the mockup built — the 4-step road (To invoice →
+  Drafts → Issued → Sent; the All tab was not a step and left), teach +
+  money line per step, Start here from the due row, Make a draft MOVES
+  you to Drafts with the new draft tinted and the banner naming the
+  next step, per-tab row shapes, the at-risk guard as the To-invoice
+  footer, the detail carries the same road and rule-7 confirms
+  (number-at-SEND said everywhere), `?company=` on the invoicing
+  reads. "Save hours to bill" answers with the customer's invoice day.
+- **E — Recurring**: road tabs Active · Paused · Ended (the stored
+  mechanism stays `archived_at`; the person's word is Pause/Resume —
+  one name per concept), Start here = this week's uncrewed visits
+  (stats `no_crew`), create lands ON the new rule with its banner
+  (create now answers the read shape), pause/resume/generate answer
+  with banners, dept/work-type ask-don't-force (empty select, the
+  server stores the seeded "Algemeen" pair — also on the extra-work
+  create page).
+- **F — Extra work**: urgent first in every tab with the red badge and
+  Start here naming the oldest; Price-and-send / Price-and-start /
+  Start-the-work answer with Done banners (relayed onto the spawned
+  ticket across the redirect); the billing sentences carry the
+  customer's invoice day.
+- **G — SLA**: the honest words — the thresholds are per KIND of wait
+  (not per priority; the brief's sentence would have lied), title
+  "SLA-waarschuwingen — wanneer ze afgaan".
+- **H**: hours print short ("5 h"); the completion-routing e2e seeds
+  its own evidence-free ticket.
+- **Not done, and why**: D7 (actual-hours on the legacy pricing-items
+  set) STOPPED under the zero-migrations law — the column deliberately
+  does not exist (Sprint 8B); it needs a migration and the owner's
+  sign-off, queued for P-13.
+
+Queued for P-13: Tickets and People to §D.24 (they pass §D.22);
+notification localization (needs the owner's yes on one migration);
+the Turkish locale; D7's `actual_hours` migration on
+`ExtraWorkPricingLineItem`.
+
+### Done — P-11: Hours, and everything left (Addendum D §D.21.2 / §D.23, 2026-09-02)
+
+The owner's P-10 walk findings first, then the Hours rebuild he asked
+for, then the Contracts/Invoices calm-down §D.22 queued. Shipped on
+`feat/p11-hours-and-the-rest`:
+
+- **A — the walk fixes** (§D.21.2, all eleven): status words on every
+  schedule card/strip row (server-decided `display_phase` on extra-work
+  entries); Plan N's same-day switch; the deadline back on create
+  (reverses P-10 B6's over-cut); "Price and send"; search-in-tab with
+  the cross-tab line (both list pages); the spawned ticket's back link
+  (an FE-4 regex that matched no P-9 tab path, found under A6); the
+  dead Plan-it door (reproduced read-only on crmtest ticket 497 —
+  0 requests on click — and repinned in `lib/planDoor.ts`); **the plan
+  made on the request carries onto the spawned ticket** (`plan_seed`
+  on all three spawn paths + per-person slot dating;
+  `test_p11_plan_carries`; the post-spawn direction probed and holds);
+  Total planned hours follows the people's live sum (the P-10 B5
+  marker was a label lie — the server never required it); **on hold is
+  off the board** (dated or not, the fold is its only place —
+  `test_p7_parked` and the §D.15 matrix repinned); the lateness ladder
+  reads the provider's plan for extra work.
+- **B — Hours** (§D.23): the two hour concepts named and linked once
+  (timesheet hours vs billable hours; the Money tab pre-fills from the
+  timesheet through `GET /extra-work/<id>/timesheet-hours/`); the grid
+  is ONE table (the fill row is the first body row and lands on
+  standard lines only — `gridRules.ts`; person bands; job lines as
+  tagged children; the hour type a select on every line with its
+  multiplier; one add-line per person; Enter moves down the column);
+  the page gets the purpose sentence, the week card with per-person
+  standard/on-jobs split and Edit-on-that-person, the Earlier-weeks
+  table (people + closed-by from `weeks/with-hours/`), and one More
+  menu; report-done asks per-person hours (timesheet job lines); the
+  ticket's Enter-hours nudge lands the office on the grid
+  (`?week=&enter=`). Pins: `test_p11_grid_rows`,
+  `test_p11_billable_prefill`, `gridRules.test.ts`.
+- **C — Contracts, clarity only** (functional freeze holds): the list
+  is five columns (Customer · Buildings · Period · Monthly amount ·
+  Status) with the tile row and view pills gone; a draft with no lines
+  is ONE card and one button (no €0 tiles, no €0 preview — §D.6 rule
+  13); the "Projects" tab reads **Lines** / **Regels**.
+- **D — Invoices, nothing here is scary**: the purpose sentence; tabs
+  with counts (Due now · Drafts · Issued · Sent · All) instead of the
+  KPI tiles; "Generate" → **Make a draft** with the one line about the
+  number following on send; the creator e-mail off the rows; one
+  next-step button per row ("Check & issue" shared with the detail's
+  primary).
+- **E — SLA warnings: a DRIFT, reported, not built.** The brief (and
+  §D.22.1's row) describe a warnings LIST page with counters and
+  per-row actions; no such page exists — `/admin/sla-warnings` is the
+  thresholds settings form and is the only SLA surface
+  (`components/sla/` holds one badge). Recorded in §D.22.1; the
+  reference-page treatment already lives on the schedule's late strip.
+- **F — leftovers**: strips' "Show all N" expands the zone's own list
+  inline (bounded), the table modal stays for the day/Overdue doors;
+  "Not planned yet" lives in ONE key (`common:phase.ew.WAITING_PLANNING`);
+  the sprint-28/-6 spawn tests brought up to the W-EW1/P-5 contracts
+  (first run since — the failures predate the branch); the sophie
+  scoping case noted as a comment beside the manager-c pin.
+
+### Done — P-10: personal schedule, honest words (Addendum D §D.21.1 / §D.22, 2026-09-01)
+
+The owner vetoed four P-9 calls on crmtest (the one-line card fact,
+"Busy", the always-open lanes, extra work on the Tickets page); P-10
+reverses them and repairs the review-placement defect the P-9 walk could
+not see (its fixtures were all stamped "today" — Step 0.2: every waiting
+/ finished fixture is now stamped at least five days in the past).
+Shipped on `feat/p10-personal-schedule`:
+
+- **A — My schedule: the repair.** A1 a job in review is NOT finished
+  (`ticket_finished_at` None while reported done; SQL twins; the closed
+  set incl. blocked endings); A2 review placement is personal (the
+  responsible manager's today card "Check: …" · the strip "Waiting for a
+  manager's check" for everybody else · the worker's "Reported done,
+  waiting for the check"); A3 the page is the board, the zones fold
+  above it as coloured strips (amber / teal / violet / red), On hold
+  under the board; A4 three facts per card, one per line, short dates
+  (`lib/shortDate.ts`), Details fold with the owner's full list; A5
+  Select → Plan N, "Park" → "Put on hold"; A6 reproduced and fixed (the
+  extra-work board read only the customer's wish; `_with_ew_dates`).
+  `tickets/tests/test_p10_review_placement.py`, `test_p10_bulk_plan.py`.
+- **B — Extra work polish.** B1 the ticket's own status words; B2 each
+  tab opens on the chip with work to do, `?chip=` in the URL; B3 no
+  extra work on the Tickets page (reverses P-9 D2); B4 pricing edits in
+  the row, nothing saves itself; B5 four pricing markers in the plan
+  modal; B6 the create page's "Planning" fold is gone; B7 Next-step
+  alignment. `extra_work/tests/test_p10_phase_words.py`,
+  `tickets/tests/test_p10_ticket_list_excludes_extra_work.py`.
+- **C — P-9 leftovers.** C1/C2 screenshots; C3 the stale e2e spec; C4
+  the Open tab's empty state on the 1st in the owner's words.
+- **D — the list-page standard.** Addendum D §D.22, with the P-11
+  candidates (Tickets, Invoices, Contracts, Hours, SLA warnings,
+  Recurring) and the two or three changes each needs.
+
+Queued for P-11 (now taken: Hours, Contracts, Invoices; the SLA row
+turned out to describe a page that does not exist — see P-11 E above).
+Queued for P-12: §D.22 applied to Tickets, Recurring work and People;
+the guidance layer on admin surfaces; notification localization (needs
+the owner's yes on one migration).
+
+### Done — P-9: find your way (Addendum D §D.21, 2026-09-01)
+
+The findability round: the schedule law, the Extra work tabs, the money
+ceremonies, the two empty pages. Step 0 pushed `feat/p8-truth` (it had
+never reached `origin`) and put the rule in CLAUDE.md §1. Shipped on
+`feat/p9-find-your-way`:
+
+- **A — the schedule law.** Four zones always visible (Not planned yet —
+  N · Waiting for the customer — N · the week board · one Filter fold);
+  waiting rows leave the columns of every week; finished work hangs on
+  the day it was finished (`Job.settled_day`, SQL twins on every
+  source, parity pinned); rolled work is on today only (12(d) closed);
+  `apply_to_slots` defaults true (12(e)); an unplanned ticket's start
+  button is disabled with the reason and a door (12(b)); the one card
+  fact line (`cardFact.ts`) on cards, zones and the ticket detail.
+  `tickets/tests/test_p9_schedule_law.py`.
+- **B — Extra work tabs.** `/extra-work/:tab` (to-price · with-customer
+  · approved · finished), cancelled as a foot link, ≤6 columns and one
+  next step per tab from `nextStep.ts`, one money sentence per tab, the
+  guard footer; B2 vocabulary; EN free of "meerwerk".
+  `extra_work/tests/test_p9_tabs.py`, `tests/e2e/p9_extra_work_tabs.spec.ts`.
+- **C — create + money.** Add-only "Something else"; "Total planned
+  hours" needed before pricing; every cart line in the Pricing table
+  ("needs a price"); the coverage check in the three confirms
+  (`lib/extraWorkCoverage.ts`, vitest); hours worked only once started;
+  "Contract price" / "Your price" (12(a)); C7 helper audit.
+- **D — the two empty pages.** One Tickets queue with an Origin column
+  and filter (server `kind`), tab counts always visible, the empty
+  state naming the period and the other tabs; Hours: the empty week
+  says where the hours are, the stepper marks weeks with hours.
+- **G — Settings.** Equal-height cards; last sign-in shown only when
+  recorded (12(c)).
+
+Queued for P-10 by name (§D.21 item 10): Contracts and Invoices
+calm-down, SLA warnings as a reference page, the guidance layer on
+admin surfaces.
+
+### Done — P-8R: the truth round, audit-driven (Addendum D §D.20, 2026-08-30)
+
+Web-Claude audited the P-7 deploy and found the Extra work list empty
+over a full server; the owner's standard ("the owner is not the first
+QA tester") went into CLAUDE.md §1. Shipped on `feat/p8-truth`:
+
+- **A1 — the list hides nothing.** Root cause: the W-NAV1.2 client
+  filter `!has_operational_ticket` plus chips counted over the
+  remainder. Rows = every server row; chips = `display_phase`,
+  exhaustive; a loaded-count guard line; the money tile never a dash.
+  Pinned by an e2e spec and a backend test.
+- **A2 — the plan door starts only on `start: true`.** Contract
+  inverted, every caller explicit, bulk switch off by default, zero
+  migrations, the audit's attack pinned.
+- **A3 — refusals in the reader's words at the control**
+  (`lib/extraWorkRefusal.ts`, 40+ sentences both locales, the two
+  doors "Plan aanvullen" / "Reden opgeven").
+- **A4 — ceremonies:** amber on-behalf decisions in the warning modal
+  on both doors, send-quote confirm with lines + total + customer,
+  start confirm naming the plan, PDF pair once per page.
+- **A5 — label truth** on the plan modal's hours.
+- **A6 — §5.1 verified** with a real agreed price (INSTANT, ticket,
+  WAITING_PLANNING) for customer and provider.
+- **B — the matrix** walked on crmtest with own fixtures (six types,
+  every phase, blocked attempts + findability at every step); two
+  findings fixed (proposal-door reject reason; hours-grid backbone),
+  three queued by name (§D.20 ruling 12).
+- **C / D / F** — hours modal on the pre-P-7 base; Settings designed;
+  Contracts + Invoices purpose lines and connected-facts links.
+- **E** — deadline chip with date + countdown; waiting rows count the
+  days; board caption states the card standard.
+
+### Done — P-7: the finishing round (Addendum D §D.19, 2026-08-30)
+
+The owner's last list — "fix these and I can really say the system is
+done". Shipped on `feat/p7-finish`, every item merge-blocking:
+
+- **S1 — the Enter-hours modal.** One count (the grid's) that says
+  what a row is, *regel* as the one Dutch word; switching week over
+  unsaved hours asks first and the standing loss sentence is gone;
+  the fill row is a tool (tint, edge, icon, verb, one caption); one
+  person prints once with their parts named ("on Ticket #374",
+  "general hours"); job labels wrap. The save math verified
+  server-side: `timesheets/tests/test_p7_mixed_week.py` — all by
+  design, nothing broken.
+- **S2 — plan modal.** Root cause of "cannot remove after Add": the
+  Extra Work page passed no remove handler. Every X asks once and runs
+  the existing unassign; the EW-side unassign clears the open plan
+  (`extra_work/tests/test_p7_plan_removal.py`); last-before-first is
+  refused at the field the moment it happens; stages reveal one at a
+  time (dates → people and hours → done means).
+- **S3 — colour and alignment.** Approve-on-behalf is amber again (row
+  + Geavanceerd + its reason dialog); the pricing line editor's buttons
+  sit on the inputs' band, the "price required" note under the row.
+- **S4 — money words.** Month names everywhere a billing month
+  appears (meerwerk billing line and toast, invoices due sentences /
+  generate panel / chips, invoice detail, customer invoice pages); the
+  owner's consequence sentence; "Save hours to bill" and "Close week"
+  say their consequence beside the button.
+- **S5 — contracts.** The New/Edit modal reveals one stage at a time
+  (all four open when editing); the contracts page has ONE view control
+  with measure and timeframe in the Filter fold. Rules frozen (§D.15).
+- **S6 — SLA calm.** Default view = the warnings and values; the P-5
+  additions fold behind one "Aanpassen" per warning (and on the
+  counting card) with a summary that says what is set.
+- **S7 — the claims audit.** Settings is a horizontal header at every
+  width; the P-6 "converted" rows were spot-checked on live crmtest
+  (audit table in the P-7 report).
+- **S8 — parked leaves the nag.** `parked_entries` / `counts.parked`,
+  a "Geparkeerd (N)" sub-view in the drawer with reasons; the §D.15
+  matrix row for ON_HOLD is `("rolled", "planned_fri", "parked")`
+  (`tickets/tests/test_p7_parked.py`).
+- **S9 — small closures.** Recurring calendar classes + derived legend
+  (skipped ≠ cancelled); the pricing panels share one shell, bulk raise
+  staged; the truncated job chip wraps.
+- **Zero migrations.**
+
+### Done — P-6: the visible round (Addendum D §D.18, 2026-08-30)
+
+The pages P-5 queued, so the owner SEES the difference on every page
+he opens. Shipped on `feat/p6-visible`:
+
+- **V1 — Invoices, the bone.** `/invoices`: four facts, one primary per
+  due row, the guard folded with its count, the list grouped by billing
+  month with status tiles, search and a filter fold; the generate panel
+  in two numbered questions with its consequence sentence; teaching
+  empty states; `?customer=&period=` deep link from the "saved under
+  Invoices → customer → month" toast. `/invoices/:id`: the phase strip
+  with the one action, four facts, lines with their sources, the
+  text-on-the-invoice fold, the document, Geavanceerd for corrections.
+- **V2 — Recurring work.** The detail in the ticket detail's rhythm
+  (rule sentence + next visit on the strip, facts, calendar, money
+  card, Geavanceerd); the list's window column in words; "bezoek"
+  kept as the one word (§D.18 item 3).
+- **V3 — The queued-1 admin pages.** See the inventory table below.
+- **V4 — The trio.** Global search (`GET /api/search/`,
+  `accounts/tests/test_p6_global_search.py`, the header box); the
+  dashboard's top-5 attention with "show all N"; stale-work triage in
+  the "Not planned yet" drawer (`POST /api/tickets/bulk-triage/`,
+  `tickets/tests/test_p6_bulk_triage.py`).
+- **V5 — Small closures.** The money card's doubled waiting phrase;
+  the pricing deep-link proven live on a fixture EW; money and hours
+  serialize with two decimals; the inventory table below.
+- **Zero migrations.**
+
+#### Inventory — the page sets after P-6
+
+| Surface | State | Note |
+|---|---|---|
+| Invoices list, invoice detail | converted (V1) | the bone |
+| Recurring work list, detail, calendar | converted (V2) | calendar's inline styles and legend colours left as they are |
+| Companies list | converted (V3) | PageHeader, one primary, slug column gone (Advanced on the detail), language a word, filter fold, EmptyState, tiles dropped |
+| Buildings list | converted (V3) | filter fold, words for city/type/customers, type column absent when empty, locked selects say why |
+| Building new/edit | converted (V3) | two numbered stages, field-level errors, relation folds with counts |
+| Customers list | converted (V3) | filter fold, lifecycle a word beside one pill, the building filter says it needs a company |
+| Customer new/edit | converted (V3) | three numbered stages, field-level errors, folds with counts, disabled controls say why |
+| Customer overview | converted (V3) | facts block above the chips, About card absorbed, unreadable metrics absent, never a void |
+| Customer pricing | converted (V3) | FE-6's "prices first" finished: EmptyState, money/percent formatted, dashes gone, staged add/edit form with field errors, locked actions say why |
+| Contract detail | converted (V3) | PageHeader + status pill + sentence, facts block, one primary per state, projects empty state; rules frozen (§D.15) |
+| Recurring calendar internals | converted (P-7 S9) | classes, legend derived from the tick list, skipped and cancelled distinct |
+| Pricing page's six secondary panels (folders, move, copy, bulk raise) | converted (P-7 S9) | one shared shell; bulk raise staged (which prices → how much) |
+| Settings | converted (P-7 S7) | horizontal header band at every width; the forms full width below |
+
+### Done — P-5: the closer (Addendum D §D.17, 2026-08-30)
+
+The owner's live walkthrough of P-4, closed. Shipped on `feat/p5-closer`:
+
+- **S0 — the workflow bug.** "Send it to the customer" was refused
+  under `actual_hours_required` (an hourly meerwerk line with no
+  actual hours) and the screen said only "not accepted". The
+  requirements endpoint now reports `actual_hours`, the modal says so
+  and points at the Money tab (the missing-piece pointer), the page
+  maps every refusal code to its own sentence
+  (`lib/transitionRefusal.ts`), the requirements refusal names each
+  missing thing in words and lists `unmet`; the photo requirement is a
+  calm notice. `tickets/tests/test_p5_transition_refusals.py`.
+- **S1 — one plan, one date.** `job_start_day` / `job_end_day` on the
+  detail; the meerwerk plan pushes first AND last day; a ticket start
+  mirrors onto the meerwerk; the transition modal asks a day + optional
+  clock; the schedule card tells one story; meerwerk surfaces never say
+  "ticket" (i18next context); the execution header no longer repeats
+  the title. `tickets/tests/test_p5_one_plan_one_date.py`.
+- **S2 — plan modal.** Every person row has its X; managers plan hours
+  again; hours commit on blur/Enter with a "counted" flash; the pricing
+  gate's missing pieces open the plan modal ON the piece.
+- **S3 — drawer + chips.** The waiting chip sits on its row; "Approve
+  on customer's behalf" is a button; the replay rule in CLAUDE.md.
+- **S4 — session notes.** An honest 404 page; the disabled "Add hours"
+  says why; unset date filters read as unset and the receipt line is
+  muted; the overview's dash count is a word; §D.6 rules 13–15.
+- **S6 (partial).** My Schedule helper texts are one calm line each;
+  the audit log's fields wear human names; the contact role label is
+  dropped from read-only lines; the "more work" literal was not found
+  in either bundle (reported).
+- **S7 — the connections layer.** Contract ↔ building ↔ split ↔
+  invoice trail ↔ occurrence ticket, as links with context
+  (`contracts/tests/test_p5_connections.py`).
+- **S8 — SLA warnings, the owner's additions.** Recipients, a third
+  step, weekend handling, a weekly list; migrations `sla/0002` +
+  `notifications/0021` (`sla/tests/test_p5_sla_choices.py`).
+- **S9.** The plantruth tests run on a frozen Wednesday; the plan-gate
+  past-day tests widen their window; `rescheduled_from_day`; the
+  create page says "not chosen" instead of a dash.
+- **Not done, and why:** S5 (the invoices pages' full treatment), S6.1
+  (recurring work pages), S6.6 (the queued-1 admin pages) and S10 (the
+  approved trio: global search, top-5 attention, stale-work triage)
+  stay QUEUED — P-6 first; the sprint already carried S0–S4 and S7–S9
+  with a migration, and half-shipping a page set or the trio would
+  have put them in the owner's next walk twice.
+
+### Done — P-4: the joy pass, system-wide (Addendum D §D.16, 2026-08-30)
+
+The law: a person who knows nothing about computers finishes the job
+without knowing the system beforehand. Shipped on `feat/p4-joy`:
+
+- **Part A** — units on every chip, quantity suffix, cart line and
+  confirm page (`service_unit_type` / `service_unit_label` on the price
+  row, `lib/unitLabel.ts`); the custom line reads as a request for work
+  with quantity-with-unit in the text; "On several days" is one
+  sentence + calm picker + day chips; the result names the days.
+- **Part B** — `PlanWorkDialog` rebuilt as three stages (When / Who and
+  how much / Done means) with per-person day chips, honest totals, the
+  move-the-plan question, inline deadline warnings, field-level errors
+  (`lib/apiFieldErrors.ts`). The double-count: hours on a day dropped
+  out of the window survived in state, total and payload; the server
+  now refuses new/changed rows outside the window
+  (`test_p4_plan_days.py`, red → green).
+- **Part C** — the billing-month consequence sentence and the
+  "€X saved — Invoices → customer → month" answer
+  (`lib/billingSentence.ts`); Close week explains itself; "Weighted" =
+  "Hours × factor" with a click-to-teach. Per-day WORKED entry mirrors:
+  queued (endpoint accepts dated rows; dialog work only).
+- **Part D** — MEERWERK-kind tickets light "Extra work"
+  (`lib/currentTicketKind.ts`); My Schedule's first paint is an honest
+  loading week (the chip was behind an in-flight response); the sidebar
+  scroll capture no longer refuses zero.
+- **Part E** — the waiting drawer's amber "Approve on customer's
+  behalf" for readers who already hold the override
+  (`tickets/override_authority.py`, `can_override_customer_decision` on
+  entries, `test_p4_waiting_drawer.py`).
+- **Part F** — converted: contract form (4 stages, field errors,
+  billing consequence), Contracts page (filter fold + chips, one view
+  hierarchy), Company detail (facts, policy twin, Advanced, folds,
+  never-void + `RouteErrorBoundary`), Company edit (read tables cut),
+  Building detail (facts, linked tiles, hidden empties, cost split
+  behind Advanced, valueless columns dropped), customer Contracts tab
+  (draft honesty; bounded register, € 0.00 collapse, search), Settings
+  header, Services & catalogs / People top-level tabs, pill
+  unification. The full inventory (converted / passes / decision /
+  queued) is in the P-4 report; the NEXT queue below carries the
+  queued rows.
+
+### Done — P-3: schedule truth pass + contracts clarity (Addendum D §D.15, 2026-08-29)
+
+Branch `feat/p3-schedule-contracts`, stacked on P-2. Zero migrations.
+The owner needed three days to understand why waiting-for-customer
+tickets sat in past day columns; that is the bar failing. Contracts
+were copied from the reference system and their functional revision
+waits for the owner's meeting (2026-08-30) — P-3 changed words, layout
+and teaching modals there, not one rule.
+
+- **(A.1) Waiting-for-customer leaves the day columns.** Rule 9
+  (`work_plan.py` / `views_work_plan.py`): in the current week such a
+  ticket is in no column; it is one row behind "Wacht op klant: N" in
+  its own calm blue, the same drawer as "Nog niet gepland"
+  (`waiting_customer_entries`, `counts.waiting_customer`). Past weeks
+  keep placement as history.
+- **(A.2) One card, one voice.** One status line, at most one time
+  chip; the couldn't-complete reason is on the detail only ("Niet
+  gelukt op 26 aug" on the card); every closed shape has its own words.
+- **(A.3) Phantom clock times die.** Diagnosis: a date-only plan is
+  stored as Amsterdam midnight (`2026-08-26 22:00Z` on TCK-373) and the
+  card printed the instant in the browser's zone — "01:00 AM" three
+  hours east. The server now states the clock (`start_time` /
+  `scheduled_start_time`, null on a day-only plan) and the day; writers
+  send a naive local datetime (`plannedDayIso`), so the day picked is
+  the day stored in any browser zone and "plan for today" no longer
+  invents a 12:00.
+- **(A.4) The manager sees the truth.** `WAITING_MANAGER_CHECK`
+  ("Gemeld als klaar — wacht op uw controle") on banner and card; the
+  customer keeps "wordt uitgevoerd".
+- **(A.5) Plan-after-deadline warns** in the schedule dialog; card and
+  detail say "Gepland na de deadline" (`planned_after_deadline`).
+- **(A.6–A.10)** Title == description renders no subtitle; day columns
+  grow and fold past six cards ("Toon er nog N") instead of scrolling
+  inside themselves; `test_p3_schedule_truth.py` reconciles every count
+  with its list and places every ticket, slot and extra-work status on
+  a pinned Wednesday (the full matrix is in the sprint report); the
+  contact row says "functie: A" instead of a bare "A".
+- **(B) The sidebar stays put** across route changes (its scroll
+  position survives the per-guard `AppShell` remount).
+- **(C) Contracts clarity, no rule changes.** Every listed contract
+  reads as a sentence; every term teaches on click with the contract's
+  own numbers (`components/contracts/ContractTerms.tsx`); unset facts
+  are absent, never a dash; one teaching line per surface (invoices and
+  contracts trimmed). §D.15 records that the functional revision waits
+  for the owner's meeting.
+- **(D) The greeting** reads the account's own first name and falls
+  back to the whole display name — never "Super" from "Super Admin".
+
+### Done — P-2: the guidance round (Addendum D §D.6 rule 12 / §D.2, 2026-08-29)
+
+Branch `feat/p2-guidance`, stacked on P-1. Zero migrations; the backend
+change is one presentation phase. The owner's instruction: walk the
+system as a person who does not know computers and make every page
+guide that person the way the ticket detail, the melding form and the
+meerwerk flow already do. Web-Claude's naive walk of the FE-7 build
+named the failures; this sprint fixed them and re-walked the same way.
+
+- **(0) Two rulings from P-1's verification.** `WAITING_PLANNING` — an
+  approved meerwerk nobody has planned reads "Nog in te plannen" /
+  "Goedgekeurd — wordt ingepland" (customer) instead of "Ingepland"
+  (`extra_work/display_phase.py`, P-1's provenance decides;
+  exhaustiveness test extended). The stale red W-FIX1 test flipped to
+  the owner's G0 rule; the module ends OK.
+- **(1) My schedule — today is on screen.** The week grid scrolls so
+  today's column is in view on every load (on a Saturday the viewport
+  showed Mon–Fri and every carried late job hung on the invisible
+  Saturday column). Empty columns say "Niets gepland"; the three
+  explainer paragraphs became one subtitle line plus a "Hoe werkt dit
+  bord?" popover.
+- **(2) Dashboard greets and counts.** "Goedemorgen, Ramazan — 3 dingen
+  hebben u nodig vandaag" from the same counts as the list; attention
+  rows with nothing to say do not render, and with all silent the list
+  says "Niets heeft u nu nodig."; the month tile says "Nog geen bedrag"
+  rather than "—"; the breadcrumb and the top bar's repeated
+  "Operations console / CleanOps" are gone.
+- **(3) Tickets — filters fold.** The seven controls, the period and
+  the working/archive pair sit behind ONE "Filter" button whose summary
+  carries chips for what is active; the grey scope caption is gone.
+- **(4) Invoices teach.** One plain sentence under the title on how
+  invoicing works; "no customers with a billing schedule" says what a
+  schedule is and links to the customers; the guard says "Niets loopt
+  risico deze factuurmaand" when it is clear; the empty list says what
+  will appear and how.
+- **(5) Contracts — the empty state only.** Zero contracts renders ONE
+  card ("U heeft nog geen contracten… [Nieuw contract]"); the tiles,
+  filters, pills and table appear only when a contract exists (P-3
+  owns the rest).
+- **(6) Recurring work detail narrates the rule.** "Elke maandag en
+  donderdag, ochtend — volgend bezoek: di 2 sep" opens the page, the
+  next visits follow, then the facts and the calendar.
+- **(7) People detail — voice pass.** One buildings list for field
+  staff (the "Access" copy dropped in favour of the card that says what
+  they may do there); "All building tickets (read) · Can request
+  assignment" became "Sees every ticket in this building · May ask to
+  be put on a job"; unset facts are absent, not dashes.
+- **(8) System-wide small honesty.** `getApiError` no longer puts a
+  server sentence on the screen: the person gets one human sentence per
+  status (400/422 "That was not accepted…", 409 "…something changed in
+  the meantime…") and the raw body goes to the console — every one of
+  the ~20 call sites at once; toasts reserve a rail at the bottom of
+  the canvas (`body[data-toast-rail]`) so they never cover list rows;
+  the notification greeting never bursts time-driven warnings and
+  never repeats for the same items (a per-browser high-water id).
+
+### Done — P-1: honest dates on REAL data (Addendum D §D.14, 2026-08-29)
+
+Branch `feat/p1-honest-dates`, stacked on FE-7. Zero migrations. The
+owner reported the "Planned" bug a second time: FE-4's fix passed on
+clean fixtures and failed on crmtest's June tickets. The acceptance
+test was the owner's three named tickets, walked live on crmtest before
+and after.
+
+- **What the ugly data showed.** 43 of crmtest's 54 extra-work tickets
+  carried a `scheduled_start_at` nobody set: the Sprint 9B spawn seed
+  (`extra_work/instant_tickets.py`, `proposal_tickets.py` x2) copied
+  the cart's `requested_date` into the schedule column, and the create
+  serializer defaults that date to the day of entry. TCK-2026-000209
+  ("ggtg", 3 June) read "Planned Jun 3 — 87 days late" on the board
+  and "87 days past plan" on the detail. "VERIFY simple 20260607" is
+  recurring job #3's occurrences — a REAL plan (the recurring pattern),
+  correctly rolled. No plain (non-extra-work, non-occurrence) ticket on
+  crmtest had a phantom. "Dinite Cleaning" matches nothing on crmtest
+  under any spelling; the "I need cleaning" tickets 212/217, born the
+  same minute as 209 with the same phantom, are the nearest records.
+- **(1) A date is a plan only if a person made it.** New
+  `tickets/plan_provenance.py`; `job_dates.job_window` and its SQL twin
+  read the ticket's own column only behind a schedule row, an
+  occurrence, or the extra work's commitment — so the board, the
+  ladder, the counts and the detail stop at the same fact. The seed is
+  stopped: a spawned ticket is born UNPLANNED (`_UNPLANNED`). Additive
+  fields `has_real_plan` / `plan_source` / `planned_by_name` /
+  `planned_at` / `created_by_name` on the ticket detail, the extra-work
+  detail and every work-plan entry. Existing rows untouched.
+- **(2) The words.** Detail: "Ingepland voor <date>" + "door <name>, op
+  <date>"; else "Nog niet ingepland" + "Aangemaakt op <date> door <name>
+  — nog niet ingepland · al N dagen". Every ticket and meerwerk detail
+  states who created it. Cards: the undated words carry the creator;
+  "Gepland" only behind `has_real_plan`.
+- **(3) Work waiting for a manager carries to today.** Rule 8
+  (`work_plan.py`): WAITING_MANAGER_REVIEW jobs hang on today's column
+  of the manager's board, `placement: REVIEW`, "Wacht op controle — al
+  N dagen", not settled, not late; their home week keeps them settled;
+  the worker's completed slot is unchanged. The owner was seeing them
+  settled on the day the worker finished because the board read "not
+  pending" as "over".
+- **(4) The two reported visual bugs.** The plan dialog's subtitle sat
+  10px INTO its title (measured on /extra-work/88: the framed head has
+  no flex gap for the subtitle's `-10px` to pull back) — the head owns
+  its gap now, and the numbered sections get 26px of air with a rule
+  between them. The meerwerk create form's Planning fold: the
+  completion-proof checkboxes LEFT the form (they live in the plan
+  dialog), the date pair and the series switch get a rhythm, the switch
+  one clear line of air.
+- **(5) Meerwerk detail catches up.** "Accepted but no work was created
+  yet" carries its repair as the banner's primary ("Werk aanmaken");
+  the Details card renders only with a plan or contacts (no bare
+  header, no "Contacts 0"); "Gepland: —" reads "nog niet ingepland" and,
+  once planned, who planned it; "Goes on: follows the customer's
+  setting" is one sentence.
+- **Tests.** `tickets/tests/test_p1_honest_dates.py` (phantom fixture:
+  card == detail, no "late"; a person's plan carries a name; a
+  customer's wish stays a wish; the provider's commitment is a plan;
+  a recurring occurrence is a plan; a spawned ticket is born unplanned;
+  the review carry in the current week, at home in its own week, the
+  worker's slot unchanged, gone once confirmed). `test_utils.record_plan`
+  lets the FE-4 / W-PLANTRUTH / 179A fixtures state that a person
+  planned their tickets.
+- **Method (CLAUDE.md).** §D.10 verification walks the OLDEST real
+  records on crmtest, not only fixtures; every sprint report leads
+  with what the ugly data showed.
+
+### Done — FE-7: reports + hours, mobile, the e2e repair and the full §D.6 audit (Addendum D §D.6 / §D.7 / §D.13, 2026-08-29) — THE REDESIGN PLAN CLOSES HERE
+
+Branch `feat/fe-7-final-audit`, stacked on FE-6 (the train; main
+untouched). Zero migrations, zero backend changes. The last sprint of
+the Addendum D plan: WP-1, FE-1, FE-2, FE-3, FE-4, FE-5, FE-6 and FE-7
+are all SHIPPED to crmtest; what the audit could not close inside the
+sprint is listed in the open ledger below, each with a one-line
+proposal.
+
+- **(1) Rapporten + Uren — the last two R-verdicts.** Data and
+  calculations untouched. Rapporten: three named sections (Meerwerk /
+  Meldingen en tickets / Uren en periodeoverzichten), "Per gebouw"
+  first in its section with an anchor the tickets list links to
+  (`/reports#per-gebouw`; the FE-6 footnote copy narrowed to what is
+  actually there); the fake "Aangepast" chip is a real button that
+  unfolds the date pair (8 visible filter controls → 6); the seven
+  report modals close with "Sluiten", not "Annuleren"; chart cards
+  load as chart-shaped skeletons, never a 3px bar, and the fourteen
+  Recharts series no longer animate on mount (rule 1); the five
+  charts that grew without bound are inside `BoundedList`; card and
+  report empty states carry "Verruim de periode"; four empty states
+  said "scope", one said "Granulariteit", two said "extra-werk" — all
+  rewritten. Uren: one primary per screen state (Mijn uren's header
+  button demoted, the week's Save is the primary; "Week afsluiten" is
+  secondary; the admin header primary hides while editing; the
+  contract-hours "Rooster toewijzen" hides while editing and shows in
+  the empty state instead); the admin filter bar folds the date pair
+  behind "Andere periode"; every table loads as skeleton rows, the
+  "Laden…" status chip is a skeleton chip; the raw `TICKET:41` source
+  string in the edit dropdown reads as the job's label; ISO dates,
+  `x1.50` multipliers, `7.5` totals and `2026-W35` read in the
+  session's locale; the contract-hours, week-grid, comparison and
+  worker tables are bounded; the worker-hours report opens compact
+  (12 columns) with the accountant's reference layout one click away,
+  and its nine always-empty columns and the note about them only
+  render in that layout; the formula strings ("3 medewerkers x 2
+  gebouwen = 6 rijen", "(s)/(en)" plurals) read as sentences.
+- **(2) One word, owner-flagged.** The tickets list's settled tab is
+  **"Afgehandeld" (nl) / "Settled" (en)** — it holds rejections as well
+  as approvals. One key per locale (`dashboard.json:tickets_tabs.done`).
+  Confirm or revert on sight.
+- **(3) Playwright e2e repair.** Every spec describes the app that
+  exists: FE-6's People page and customer tabs, the four tickets tabs,
+  FE-3's ticket detail, FE-4's Werkplanning chips, FE-2/FE-5's
+  meerwerk flows. Still a non-gate. The verbatim result of the one
+  full run against the dev stack is under "Gates" below.
+- **(4) Mobile pass (base SoT §3.5).** At 390: no page in the customer
+  portal or the staff surface scrolls sideways; Mijn meldingen and
+  Medewerkers collapse to cards (a shared `table-cards` class, the
+  invitations pattern); the ticket detail's tab pills and the
+  "Geavanceerd" fold reach 36px tap height; `<html lang>` follows the
+  session. At 768 (admin, cheap fixes only): the Terugkerend werk
+  table was clipped inside its card with no scroller — it scrolls in
+  its wrap; header actions wrap under the title up to 900px. Reported,
+  not fixed: at 768 the sidebar stays pinned (the phone breakpoint is
+  760px), so every 860px table scrolls inside its wrap.
+- **(5) The full §D.6 audit** — the table below, every surface, rules
+  1–12, measured at 1280 (and 1440 for the console) with the FE-6
+  overflow-audit recipe plus copy probes (banned words, raw keys,
+  "Loading" text, header button counts) and read by eye per role.
+- **(6) Ledger + docs.** 185 i18n keys nothing renders removed from
+  both bundles (lockstep kept; `chargeable_work.*` is NOT dead — the
+  origin pill renders it as "Meerwerk"); §D.13 written into the
+  addendum (notification localization: A vs B, a hybrid
+  recommendation, migration cost — owner decides); the role-visibility
+  matrix re-derived from the three navigations and the customer tabs,
+  banner gone; this section closes the plan.
+
+#### The §D.6 audit table (the plan's exit document)
+
+Legend: **pass** — holds; **fixed** — fixed in this sprint (screenshot
+in the report); **open** — reported with a one-line proposal. Rules:
+1 scroll, 2 actions-where-clicked/toasts, 3 one primary, 4 ≤5–7
+choices, 5 facts first, 7 no machinery words, 8 nothing overflows +
+bounded lists, 9 one language, 10 designed mid-states, 11 the Advanced
+layer, 12 talks like a person. Rule 6 (the child test) was written per
+flow in FE-2/FE-4/FE-5 and re-walked at 390 in this sprint.
+
+| Surface | Verdict per rule | Open items → proposal |
+|---|---|---|
+| Login / invite / reset | pass 1–12 | — |
+| Dashboard (provider) | pass 1,3,4,5,7,8,9,10,12 · **open 2** | the seeded L1 warning toast ("1 more unread") overlays the attention rows at load → a reserved bottom rail (the toast stack keeps a `padding-bottom` on `.page-canvas` while visible) or fold the L1 batch into one inline line under the KPI tiles |
+| Start (customer) | pass 1–12 | — |
+| Tickets list | pass 1,2,3,5,7,8,9,10,12 · **open 4** | Period + Working/Archive + 5 tabs + 7 filter selects + search = 15 visible choices; FE-6 kept the density for admins (rule 12) → fold Category/Priority/Deadline/Assigned behind "Meer filters" in a later craft pass |
+| Ticket create (provider) / Melding maken (customer) | pass 1–12 | the native file input ("Choose Files") is the browser's own control; a styled drop zone is cosmetic |
+| Ticket detail (all roles) | pass 1,2,3,4,5,7,8,9,10,11,12 · **fixed** (tap targets at 390) | the settled tab word is the owner's call (item 2) |
+| Meerwerk list (provider) / tracker (customer) | pass 1–12 | seed titles contain "extra werkzaamheden" (data, not copy) |
+| Meerwerk create (provider, staged) / flow (customer, 4 steps) | pass 1–12 | — |
+| Meerwerk detail (provider) / customer approval | pass 1,2,3,4,5,8,9,10,11,12 · **fixed 7** ("Proposed" → "Quote sent"/"Quoted") | — |
+| Terugkerend werk list / detail / form | pass 1,2,3,4,5,7,9,10,11,12 · **fixed 8** (768 clip) | — |
+| Werkplanning (staff, BM, admin) | pass 1–12 | each card carries its own primary by design (the pattern reference); "op slot" in a seeded reason is Dutch, not the banned word |
+| Mijn uren | **fixed 3,9,10** · pass rest | week-nav (4 controls) + 7 day chips: at the limit, left as designed |
+| Uren (admin) — worked hours | **fixed 3,4,7,9,10,12** · pass rest | the per-row job/hour-type/building `<option>` lists repeat per row (DOM weight, not visual) → a shared `<datalist>` |
+| Uren (admin) — rooster (contract hours) | **fixed 3,7,8,9,10** · pass rest · **open 4,8** | up to 3 action buttons per row → `OverflowMenu`; 16 columns scroll inside the wrap below ~1100px → card row with the seven days as a ribbon |
+| Week-entry dialog / bulk rooster dialog | **fixed 7,9,10,12** · pass rest · **open 2** | both dialogs are viewport-centred, not anchored to their trigger → anchor to the header button's rect (the `usePickerReserve` pattern) |
+| Rapporten | **fixed 1,3,4,5,7,8,10** · pass rest · **open 3** | 18 equal-weight "Open"/"Export" secondaries and no page primary; the modals are viewport-centred → per-card primary "Open", exports in a per-card menu; anchor modals |
+| Period report modals (5) | **fixed 7,9,10** · pass rest · **open 12** (weekly view) | the weekly report is 13 stacked 11-column tables on a 90-day span → one table with a week selector |
+| Worker hours report | **fixed 7,8,9,10,12** · pass rest | the reference layout stays one click away because the owner asked for the accountant's columns |
+| Hours comparison | **fixed 8,9,10** · pass rest | — |
+| Facturen / invoice detail | pass 1–12 (K/R, close already) | at 768 the invoices table and the at-risk panel scroll inside their wraps |
+| Contracten / contract detail / planning grid | pass 1,2,3,4,5,7,9,11,12 · **fixed 10** (planning skeleton) · **fixed 7** (EN "scope changes") · **open 8** | the 54-column planning grid has no card fallback below 900px → one card per line with a compact week ribbon |
+| Klanten list + customer page (10 tabs) | pass 1–12 | at 768 the tab row scrolls inside itself |
+| Prijzen | pass 1–12 (FE-6) | — |
+| Permissies | pass 1–12 (the pattern reference) | — |
+| Gebouwen / building detail | pass 1–12 | — |
+| Mensen (users / employees / invitations) | **fixed 7** ("Scope" column → "Toegang"/"Access"; invitation copy) · pass rest | — |
+| User detail / edit | **fixed 7** (memberships copy) · pass rest | — |
+| Diensten & catalogi | **fixed 8** (header actions wrap ≤900) · pass rest | — |
+| Bedrijven / Auditlog / Waarschuwingen / Medewerker-aanvragen | pass 1–12 | the audit log's diff grid scrolls inside its wrap by design |
+| Berichten / Notificaties | pass 1–12 | notification body text is server-composed in one language (§D.13, owner decision) |
+| Instellingen | pass 1–12 | — |
+| Customer: Facturen / Medewerkers / Documenten | **fixed 8** (Medewerkers cards at 390) · pass rest | — |
+
+#### Gates
+
+Measured at the branch tip, in `node:22-alpine` / the Playwright
+1.59.1 image; verbatim result lines.
+
+- `tsc --noEmit -p tsconfig.app.json` — clean (no output, exit 0).
+- `node scripts/i18n_audit.mjs` — `MISSING (absent from every bound
+  namespace): 0`; nl/en key sets identical after the 185-key removal.
+- `npm run build` — `✓ built in 5.80s`.
+- `eslint .` — `✖ 39 problems (38 errors, 1 warning)` — exactly the
+  baseline; the one warning is `hooks/useSavedBanner.ts:28`. The four
+  hits inside touched files are the pre-existing setState-in-effect
+  sites (ReportsPage line 297 at HEAD, now 308; three in DashboardPage
+  untouched by this sprint).
+- Backend tests: none — zero backend files changed.
+- **Playwright e2e (non-gate), the one full run** against the dev stack
+  (build served through a Host-rewriting vite preview; a second
+  `runserver` with `DEBUG=True`, `CONN_MAX_AGE=0` and the login throttle
+  lifted; `PLAYWRIGHT_BASE_URL` and `PLAYWRIGHT_API_BASE_URL` both on the
+  preview): `400 tests` → `49 failed · 4 skipped · 347 passed (50.3m)`.
+  The 49 were diagnosed (seeding without `company` — the backend now
+  requires it with more than one provider company; the Permissions page
+  fold; paginated scope assertions; a hardcoded backend host; the
+  customer's legitimate Advanced fold; cross-spec state leaks) and
+  repaired in a second round; the re-run of those 24 files: `265 tests`
+  → `21 failed · 4 skipped · 240 passed (30.0m)`. Two fix iterations is
+  the bound (§D.10); the 21 still failing are listed in the ledger as
+  open, with the run's own words, and are NOT forced green:
+  `cross_company_isolation` ×2, `scope` ×5 (the count-endpoint rewrite
+  disagrees with the seeded data), `sprint27f` ×2 (COMPANY_ADMIN
+  override reason flow), `sprint28_services` ×3, `sprint28_batch15_2`
+  ×1 (override radio draft), `sprint29_batch29_8` J1/J3/J4 (a provider
+  can no longer reach a spawned request's page — a retired surface, see
+  ledger 11), `sprint30` K2, `workflow` ×1 (BM on a WCA ticket),
+  `mobile_layout` ×2, `routes` "/django-admin/login/" (the proxied
+  harness serves the SPA there; passes on the real nginx).
+  Net: 379 of 400 tests describe the app and pass; 21 need a third look.
+- Screenshots (design evidence): the scratchpad `shots3/` set — 102
+  console/customer/staff pages at 1280, 26 customer/staff pages at 390,
+  57 console pages at 768 — plus the crmtest live walk (`walk/`).
+  Measured with the FE-6 overflow recipe: `scrollWidth − clientWidth`
+  is 0 on every page at every width after the fixes.
+
+#### The open ledger at the close of the redesign plan
+
+1. **Notification localization** — §D.13 written; the owner decides A /
+   B / hybrid. Until then email stays Dutch and the bell stays
+   per-site.
+2. **Turkish locale** — parked until after FE-7 (§D.12.8); the §D.13
+   catalogue would make it a copy task.
+3. **Toasts vs list rows** (rule 2) — the bottom-centre stack no longer
+   covers header actions (FE-3) but overlays list rows on long pages;
+   the seeded L1 warnings fire on every load.
+4. **Tablet (768)** — the sidebar stays pinned; every 860px table
+   scrolls in its wrap; proposal: collapse the sidebar at ≤900px (the
+   same breakpoint the tables collapse at) and drop the global 860px
+   floor to per-table minimums.
+5. **Rapporten structure** — no page primary, 18 secondaries, modals
+   not anchored; the weekly report's stacked tables; a rebuilt "focus"
+   worklist has no home on Rapporten (FE-6 removed it from the tickets
+   list; the link copy now promises only the per-building figures).
+6. **Rooster (contract hours) rows** — per-row action buttons and the
+   16-column layout below 1100px.
+7. **Tickets list filter density** (rule 4) — 15 visible choices kept
+   for admin efficiency; a "Meer filters" fold is the proposal.
+8. **Planning grid on a phone** — no card fallback for 54 columns.
+9. **Server error strings reach the screen verbatim** (~20 sites in
+   reports/hours) → map known codes to `t()` keys in `getApiError`.
+10. **Werkplanning behaviour items** carried from WP-1's own list:
+    an undated extra work cannot be planned in one action; unassigned
+    extra work never reaches the week view (already in NEXT §7–§8).
+11. **A spawned meerwerk has no provider-reachable request page.**
+    Once a request has spawned work, `/extra-work/:id` redirects the
+    provider to the job and the Meerwerk list hides the request; its
+    cancel dialog and its own status badge have no surface. Product
+    question: may a provider cancel a running request at all, and
+    where does its operational status show? (Found by the e2e repair,
+    `sprint29_batch29_8` J1/J3/J4.)
+12. **21 e2e tests still failing after two rounds** — see Gates; each
+    needs a third, individual look (spec or product) before the suite
+    can become a gate.
+
+### Done — FE-6: admin console density (Addendum D §D.3.4 / §D.7 / §D.8.2–5, 2026-08-29)
+
+Branch `feat/fe-6-admin-console`, stacked on FE-5 (the train; main
+untouched). Zero migrations, zero backend changes, no permission
+changes: merged surfaces gate per tab with the exact predicate each
+page's route always checked. Six commits, one per area.
+
+- **(1) The customer scoped mode is gone.** The global nav stays
+  (Klanten lit across the subtree); a customer is a page with a header
+  and one row of tabs — Overzicht / Gebouwen / Mensen / Permissies /
+  Prijzen / Contracten / Werk / Facturen / Documenten / Instellingen
+  (`CustomerSubPageHeader`, `CUSTOMER_TABS`), grouped tabs carrying a
+  second toggle (Mensen = users + contacts, Werk = tickets + meerwerk,
+  Facturen = invoices + report, Instellingen = settings + labels). Every
+  old route renders as before (each page names its tab); a building
+  manager sees exactly the three pages the old submenu gave them. The
+  "Beperkt tot" chip, the swapped menu and the escape hatch are gone.
+- **(2) Mensen + Diensten & catalogi.** `/admin/people/:tab` hosts
+  users / employees / invitations, `/admin/services-catalogs/:tab`
+  hosts services / catalogs; each tab is the page it always was in
+  `embedded` mode behind its own predicate; the old list addresses
+  redirect; five nav entries become two. "Medewerker-aanvragen" renders
+  only while a PENDING request exists (count on the badge, from the
+  existing list endpoint).
+- **(3) Pricing, prices first.** The rows in a bounded, searchable
+  table with the customer's folders as filter chips; one primary action
+  + an overflow menu (`OverflowMenu`); new folders are made inside the
+  add/edit form's folder select.
+- **(4) Dashboard.** Four KPI tiles, ONE attention list (eight rows,
+  each a count and a link), the per-building billing summary; the
+  Vandaag / activity / latest-work panels and the dead non-management
+  branch are gone.
+- **(5) Tickets list.** Four primary tabs (Open / Bezig / Wacht op klant
+  / Afgerond, from `TICKET_TAB_OF` in `lib/ticketStatus`), the precise
+  status inside the filter bar, the "Heropend" chip as before; skeleton
+  rows on first load; the by-building / focus panels moved to
+  Rapporten (linked); the table takes the full width and collapses to
+  cards below 900px.
+- **(6) Craft.** Measured overflow audit at 1280/1440 over 38 console
+  pages (`scrollWidth`, every element past the viewport, every scrolling
+  `.table-wrap`): fixed the dashboard/my-hours billing mini-table (the
+  `table.data-table` 860px floor), the audit log's diff grid and its
+  changes cell, the users, extra-work and contracts tables
+  (`data-table-fit` / dense). Left as designed: the Werkplanning week
+  grid and the contracts register scroll INSIDE their own containers.
+- **Not done:** nothing in scope was left open; the "Medewerker-
+  aanvragen visible" screenshot used the pending request already in the
+  dev DB (creating a second one as the demo staff user was refused with
+  "Already assigned to this ticket").
+
+### Done — FE-5: provider forms (Addendum D §D.5.2 / §D.6 rule 12 / §D.7, 2026-08-29)
+
+Branch `feat/fe-5-provider-forms`, stacked on FE-4 (the train; main
+untouched). Zero migrations; no state-machine, permission or endpoint
+contract changes — the forms submit to the existing endpoints with the
+existing fields. Backend limited to one additive read-only boolean.
+
+- **Step 0 (own commit):** the Werkplanning payload carries `can_plan`
+  (the provider-management rule the two schedule endpoints enforce);
+  the undated lane renders "Plan vandaag" only when it is true and its
+  caption stops inviting a viewer who cannot plan
+  (`tickets.tests.test_fe5_can_plan`).
+- **Provider meerwerk create** (`/extra-work/new`): ONE staged page —
+  Voor wie (customer + building; afdeling / werktype / invoice target
+  fill in from the customer's defaults as facts with a pencil) → Wat
+  (the SAME cart as the customer flow: agreed prices with amounts,
+  "iets anders" lines with "prijs volgt", a note per line; the price
+  folder is a filter inside the picker; title + notes fold and derive
+  from the cart when empty) → Wanneer (one wished date; planned end,
+  deadline, the multi-day series and the completion proof behind
+  "Planning") → Urgentie (one "spoed" control) → the cart as created,
+  the sums, and the server's own sentence about what happens next; a
+  choice renders only when `allowed_intents` holds more than one (for a
+  provider actor SoT §5.3 never yields two, so the sentence stands
+  alone). Visible decisions before any fold: 4 empty, 5 with a customer
+  chosen (the cart is one).
+- **"Request a quote" folded in:** route redirects to `/extra-work/new`;
+  the customer nav child, the New-door answer and the list chooser's
+  option are gone; the intent is derived at the bottom of the form.
+- **Shared cart pieces:** `components/meerwerk/` (cart helpers, priced
+  picker — bounded, searchable, folder chips —, custom lines editor,
+  confirm list, outcome sentence) now render on both the customer flow
+  and the provider page. The customer flow's behaviour and test ids are
+  unchanged; `lib/meldingTitle.ts` is the one title mapping for both
+  ticket forms.
+- **Recurring job form:** Wat (customer, building, title; notes +
+  labels fold) → Wanneer (how often, on which days, from, until) →
+  Bezoeken per dag (one sentence; the default single visit is a fact
+  with a pencil, the editor opens on request) → Prijs (the contract
+  line, defaulted when the customer has exactly one; W-PW1 left no
+  per-window pricing to fold) → Ploeg (collapsed, summary line).
+  Visible decisions: 7 empty; 8 once a customer with several contract
+  lines is chosen.
+- **Ticket create (provider):** Voor wie, one description (first line =
+  title), Type / room / wished date behind "Meer details" (opens by
+  itself when `/new` pre-answered the type), priority cards, photos;
+  the side column keeps three lines. Visible decisions: 4 (+ the
+  optional photo drop zone). The three inherited setState-in-effect
+  resyncs became derivations; the ESLint baseline is now 39.
+- **Voice pass:** every label/caption on the three forms rewritten in
+  nl/en lockstep; 88 dead `extra_work` keys and the quote keys removed.
+- **Not done / open:** none of the three forms reached a state the
+  §D.10 fix loop could not close; the "intent choice visible" screenshot
+  is the customer flow's auto-start choice (FE-2 surface), because the
+  provider actor is never offered two intents.
+
+### Done — FE-4: schedule clarity, the owner's first-round feedback (Addendum D §D.12, 2026-08-29)
+
+Branch `feat/fe-4-schedule-clarity`, stacked on FE-3 (the train; main
+untouched). Additive backend only, zero migrations, no state-machine or
+permission changes. Addendum D gains §D.6 rule 12 and §D.12 (the
+decision list).
+
+- **Back goes where you came from:** `useOriginBackLink` reads the
+  recorded in-app origin once at mount (`lib/navHistory`) and points the
+  detail's back link at it — My Schedule with its week and filters
+  (now in the URL: `?week=&status=&show=&q=`), Mijn meldingen, Tickets
+  with its query — with role defaults (staff/BM → My Schedule, customer
+  → Mijn meldingen, provider admin → Tickets). `/tickets` redirects a
+  customer role to Mijn meldingen.
+- **Honest date words (backend + cards + details):** every work-plan
+  entry carries `created_at`, `plan_source` (TICKET / PROVIDER_PLAN /
+  CUSTOMER_WISH), `due_kind`, `settled_at`, `settled_days_after_due`;
+  the ticket detail carries `unplanned_age_days`, `settled_at`,
+  `settled_days_after_due`. "Gepland" only for a plan; a customer's
+  wish says "Klant wenst"; an unplanned item says "Aangemaakt <date> ·
+  nog niet ingepland" on the card AND the detail with the same age.
+  `days_to_due` answers null for settled work (card == detail, tested
+  in `tickets.tests.test_fe4_honest_dates`).
+- **One headline lateness:** the deadline chip when a deadline exists
+  (the rolled/overdue marker then says only the origin), else the
+  planned-day marker; the never-done fact is a quiet note; the ticket
+  detail hides the SLA clock when a due countdown is on screen.
+- **Settled items:** past tense ("Afgerond op <date> (N dagen na de
+  deadline)"), "Wacht op klant" / "Wacht op controle" / "Niet gelukt"
+  as neutral chips; the week column sorts settled work last (server
+  `_week_sort_key`).
+- **My Schedule:** "Nog niet gepland" collapsed to a count-with-age
+  button (drawer oldest first); the strip keeps Totaal / Te laat / Open,
+  the three other buckets fold into the "Laat zien" select.
+- **Meerwerk flow:** N custom lines with optional notes, each a cart
+  line with "prijs volgt"; the confirm page lists them all; the
+  frontend-to-API fixture `extra_work.tests.test_fe4_custom_lines`
+  posts the page's exact body. The customer tracker gained phase chips.
+- **Language integrity:** no literal Dutch bypasses `t()` (sweep of JSX
+  text/attribute literals and EN-equals-NL values found none); the
+  pre-auth language now follows the browser instead of a hardcoded
+  "nl"; the customer-reject copy no longer names a "statusnotitieveld";
+  the SA and provider-admin demo accounts already review in English.
+- **Toasts:** repeats collapse into one card with a count.
+- **Multi-customer membership:** no model change; the chooser's one
+  input (`/auth/me/` `customer_ids`) is pinned by
+  `accounts.tests.test_fe4_membership_chooser`.
+
+### Done — FE-3: detail restructure (Addendum D §D.4/§D.6, 2026-08-29)
+
+Branch `feat/fe-3-detail-restructure`, stacked on FE-2 (the train; main
+untouched). Zero migrations, no state-machine or permission changes;
+backend limited to additive read-only serializer facts.
+
+- **Owner decision 2026-08-29 (step 0):** the work queue keeps Ramazan's
+  word — nav label **Tickets** in both locales (FE-1's "Werkqueue" /
+  "Work queue" reverted); Addendum D §D.3.4 records it. The Meerwerk
+  filter, the dead Chargeable entry and the redirects stay.
+- **Backend (additive, read-only):** `kind` (MELDING / MEERWERK /
+  TICKET), `due_date`, `due_kind` (DEADLINE / PLANNED_DAY) and
+  `days_until_due` on the ticket detail (`tickets/detail_facts.py`,
+  same due rule as the Werkplanning's `job_due`); `days_until_due` on
+  the meerwerk detail (same rule as `is_overdue`). Tests:
+  `tickets.tests.test_fe3_detail_facts`,
+  `extra_work.tests.test_fe3_days_until_due`.
+- **Ticket detail (all roles, provider shape):** the page opens on the
+  phase banner (`display_phase`, provider variant with the workflow
+  sentence + since-when) carrying the ONE primary action from
+  `allowed_next_statuses`; a four-block fact grid (Waar / Wie / Wanneer
+  with the §D.11 chip / Wat) replaces the collapsed "Ticketgegevens"
+  accordion and the header status/place aside; messages sit under the
+  facts with a compact composer (tier `<select>`, recipients + private
+  toggle fold until the composer has focus, bounded thread); the
+  Messages tab is gone (`?tab=messages` clamps to the overview); the
+  side "Acties" card holds "Andere stappen" (other forward moves, plan,
+  convert, archive) and "Geavanceerd" (undo of the last step, the
+  provider's decision on the customer's behalf with its reason prompt,
+  every backward move, raw status/kind, delete). Header buttons are
+  gone. The inline status-note input is gone (the transition modal
+  collects the note; the override prompt collects the reason).
+- **Meerwerk detail (provider):** phase banner + next-step sentence +
+  ONE primary action replaces the badge soup; fact grid Wie/waar · Wat
+  (with the classification editor's pencil) · Wanneer (with the dates
+  editor's pencil and the deadline chip) · Geld; the folded timeline
+  (FE-2's endpoint) rendered for the provider through the shared
+  `MeerwerkTimeline`; "Andere stappen" + "Geavanceerd" (override pair,
+  direct publish, "Plan het werk opnieuw" only when actionable, the
+  billing-month override moved out of the Money tab, cancel, raw
+  status / intent / handling values).
+- **Toasts (§D.8.3, global):** the stack moved from top-right (over the
+  header actions) to bottom-centre of the content area, audited
+  against the shell (bottom-right collides with `StickySaveBar`'s
+  buttons); the old "Zet om naar meerwerk under a toast" collision is
+  measured gone.
+
+### Done — FE-2: the customer surface (Addendum D §D.4/§D.5, 2026-08-28)
+
+Branch `feat/fe-2-customer-surface`, stacked on FE-1 (the train; main
+untouched). Zero migrations, no state-machine or permission changes,
+no new write endpoints.
+
+- **Backend:** `display_phase` on the EW list+detail and ticket
+  list+detail serializers — per-viewer SerializerMethodFields over ONE
+  closed mapping each (`extra_work/display_phase.py`,
+  `tickets/display_phase.py`), cross-product exhaustiveness tests, an
+  unmapped status raises. `GET /api/extra-work/<id>/timeline/` folds
+  the request's history + its spawned ticket's milestones into machine
+  event keys (no free text ever copied in — the B1/B7 privacy floor
+  holds by construction). FE-1's backend word leftovers swept (SLA
+  mail, quote PDF header, invoice PDF title, contracts register,
+  spawn/operational-ticket API strings; generation only).
+- **Frontend:** customer Start (own open items, `start.*` keys, one
+  primary action), the §D.5.1 three-question melding flow, the §D.5.2
+  guided meerwerk flow (server preview states the outcome; auto-start
+  only from `allowed_intents`), the §D.4 tracker grouped by phase with
+  phase-banner + folded-timeline + §D.5.3 approval detail (quote's own
+  price), Mijn meldingen + ticket detail in phase words. Role picks
+  the component, never the route; provider pages untouched.
+- Nine PRE-EXISTING red tests on the train (verified identical on the
+  FE-1 tip) turned green: requested_date payload drift, W12
+  spawned-ticket shape, two origin key sets; plus the W12
+  deferred-field N+1 fixed in the list prefetch's `.only()`.
+
+### Done — FE-1: vocabulary + navigation (Addendum D §D.2/§D.3, 2026-08-28)
+
+Branch `feat/fe-1-vocabulary-navigation`, stacked on
+`feat/wp-1-werkplanning-behaviour` (the train; main untouched). Labels,
+nav structure and redirects ONLY — no form, workflow, endpoint, route
+path or backend code changed; zero migrations.
+
+- **Vocabulary (§D.2):** NL standard word is **Meerwerk** — "Extra
+  werk" swept out of every NL bundle (~150 values); EN keeps "Extra
+  work". EN banned words removed: proposal→quote, spawn→created,
+  operational ticket→ticket, occurrence→planned visit, slot→work
+  block, routing→handling; "Reopened by admin"→"Reopened". EN "Work
+  plan"→"My schedule". The sweep also aligned
+  `ticket_status.converted_to_extra_work` with
+  `backend/notifications/status_labels.py` (they had drifted;
+  `test_sprint184_status_vocabulary` now passes on both).
+- **Navigation (§D.3):** provider roles read four groups (Werk /
+  Financieel / Klanten & mensen / Systeem); STAFF reads Werkplanning /
+  Mijn uren / Berichten / Instellingen, "/" lands on Werkplanning and
+  the bell feed is a tab inside Berichten (staff only); CUSTOMER_USER
+  reads the Klantportaal six (§D.3.1) with the "Meer" fold, and the
+  customer surface says **Klantportaal**, never console. Per-entry
+  role gates unchanged.
+- **Chargeable work is dead:** nav entries removed;
+  `/tickets/chargeable` → `/tickets?work=chargeable&status=ALL` and
+  `/admin/customers/:id/chargeable` → the customer ticket list, with
+  "chargeable" re-admitted as a URL/work-filter value ("Alleen
+  meerwerk" in the queue's own Show select). The type pill reads
+  Meerwerk / Extra work and keeps its link.
+- CLAUDE.md workflow rules updated (Step 0): CC never opens PRs, no
+  full backend suite without an explicit ask, sprints end deployed on
+  crmtest.
+
+### Done — WP-1: Werkplanning behaviour + billing guard (Addendum D §D.11, 2026-08-28)
+
+Branch `feat/wp-1-werkplanning-behaviour`, stacked on
+`feat/ew-gap-closing` (NOT on `main` — the placement rule it extends,
+W-VIEWER/W-PLANTRUTH, exists only on that branch; the prompt's "off
+current main" assumed the chain had merged). Zero migrations, no
+state-machine changes, no billing-month writes. Spec:
+[Addendum D §D.11](../product/sot-addendum-d-frontend-redesign.md).
+
+- **G0** — same-week carry: `placement_for` rule 7 (current week only,
+  overdue-and-open beats planned, card on today marked with its planned
+  day + late count). Frontend markers print "Gepland ma 24 aug — N
+  dagen te laat" (weekday-short).
+- **G1** — `stuck_entries` / `counts.stuck` ("Vastgelopen — actie
+  nodig"): unable-to-complete with nobody assigned, and live extra work
+  whose ticket ended blocked; leaves only via reschedule / reassign /
+  cancel. Rendered on the work plan + dashboard attention block.
+- **G2** — `unplanned_age_days`; "Staat hier al N dagen" past 3 days on
+  the undated lane; counted in the attention block.
+- **G3** — `due_in_days` renamed `days_until_due`; the chip's copy
+  forks on `lateness.deadline` (the word "deadline" only where one
+  exists).
+- **G4** — the billing-month guard: `invoicing/at_risk.py` +
+  `GET /api/invoices/at-risk/` (four chain-break stages, open month or
+  earlier), the "Deze factuurmaand loopt risico" panel on Facturen +
+  dashboard count, and a weekly digest beat task
+  (`send_billing_month_at_risk_digest`; event type
+  `INVOICE_RUN_COMPLETED` reused — a new enum value is a choices
+  migration, deferred).
+- Tests: `test_sprint179a_work_plan` extended (G0/G1/G2/G3);
+  `invoicing/tests/test_at_risk.py` + `test_at_risk_digest.py` (G4).
+
+### Done — W-VIEWER: two readers, two placement facts (owner ruling, 2026-08-27)
+
+**Supersedes W-PLANTRUTH §1a.** That wave decided *one fact places the
+board* — the planned day of the WORK, a slot's day or a part's — and
+applied it to every reader alike. Measured on crmtest the same morning,
+that is what put **TCK-2026-000361** (the ticket schedules it for
+7 September) on **29 August**, because one of Ahmet's four slots carried
+that day; and **TCK-2026-000342** (scheduled 30 August) on today's
+column stamped *"Planned 26 Aug — 1 day late"*, off the back of Ahmet's
+slot window ending on the 26th.
+
+The ruling: **the job's scheduled date and one person's assigned working
+date are different facts and both are true.** So the board is
+viewer-aware.
+
+| Reader | Source | Placed by |
+| --- | --- | --- |
+| SA / PA / Manager (`?scope=company`) | one row per TICKET | the ticket's own `scheduled_start_at` |
+| Everyone else, and the only shape STAFF can get | one row per SLOT the caller holds | the day THEY were given, plus their own parts |
+
+* **`tickets/job_dates.py`** is new and owns the job's date, once, in
+  Python and in SQL. Fallback chain, each link reconfirmed against the
+  field's own documentation before it was picked:
+  `Ticket.scheduled_start_at` → `extra_work.provider_planned_date` (the
+  provider's COMMITMENT — the field a write to which already pushes the
+  spawned ticket's schedule, Sprint 184 §1) → `extra_work.preferred_date`
+  (what was ASKED for; last, and only because the extra work's own card
+  already places on it) → **nothing**. A job with no date is undated; an
+  unrelated staff slot never becomes its date.
+* **One job, one card.** Five people on a ticket is one row for a
+  manager, carrying five names — not five slot cards.
+* **The ladder reads the same date.** `lateness_index.py` now measures
+  the JOB's window, so a stale slot cannot call a scheduled job late.
+  The widest slot/part window survives only as the fallback for a job
+  that states no date anywhere.
+* **The range, and the countdown.** A planned window CONTAINING today
+  hangs on today's column (rule 6), so a job planned across a fortnight
+  is on the day it is being worked. Every card with a real deadline
+  carries `due_in_days` — signed: days left, or days over.
+* **Calm cards.** `viewer_settled` — a worker whose slot and parts are
+  done, a manager whose job is sitting with the customer. Still on the
+  board (they may withdraw it); no longer shouting.
+* **The general board says what it is**, once, above the grid: each
+  ticket appears once on its own scheduled date, and the detailed staff
+  schedule is inside the ticket.
+* **§8** — a worker's own parts moved from the People tab to the
+  OVERVIEW tab, which is the tab they arrive at. Managers keep
+  People → Parts.
+* **§10** — marking a part done (or undone) ON SOMEBODY ELSE'S BEHALF
+  now REQUIRES a reason (400 `part_reason_required`). It lands in three
+  places: on the slot (`completed_on_behalf_reason`, new column,
+  tracked for audit), beside the part's completion state, and on the
+  ticket timeline. A worker finishing their own work is asked nothing.
+* **§13** — the open-parts warning says parts are INTERNAL and never
+  shown to the customer. The per-part quick button in the transition
+  modal is gone: proceeding already closes them with the actor's name,
+  and that button was the same on-behalf act with no reason attached.
+* **§16** — `Sprint 30 Batch 30.1 — test EW 1780594338745` (EW 46) was
+  test residue: no spawned ticket, no invoice line, a proposal never
+  decided. Deleted on crmtest — 13 rows, listed in the handover.
+* **§17** — MailHog's UI is bound to `127.0.0.1` in `docker-compose.yml`
+  (it was on `0.0.0.0`, and MailHog has no authentication of its own).
+  The only front door is the basic-auth `/mailhog/` block, installed by
+  `scripts/ops/install_mailhog_front_door.sh` — the one step that needs
+  root on the host.
+
+**Deliberately NOT done.** The team board's MEMBERSHIP is unchanged: a
+ticket reaches it when at least one person is on it and not cancelled,
+exactly the set the slot-driven board carried. The ruling is about where
+a card is PLACED. Widening it to every scheduled ticket in scope is a
+separate decision with a much bigger screen behind it.
+
+### Done — W-LATE: the late surface, the ladder that speaks, and parts with windows
+
+Three phases, three commits, one deploy. The law of the wave, which
+every screen below obeys: **planned dates never change by themselves.**
+A job not done keeps its planned date; it reappears in TODAY's late
+strip every day because it is unfinished, not because anything moved.
+
+**Phase 1 — the late surface (read-only derivation).**
+- `backend/tickets/lateness.py` is the ONE owner of "how late": L1 the
+  planned date passed, L2 the customer deadline passed, L3 quarantine —
+  thirty days past the anchor (deadline, else planned date) with zero
+  worked hours booked. `lateness_index.py` gathers the facts per JOB
+  (the widest window across the ticket and its slots, the extra work's
+  deadline, hours from `timesheets` by TICKET and EXTRA_WORK source).
+- `GET /api/tickets/work-plan/` gained `late_entries` (one row per late
+  job, crew merged, sorted orange -> bordeaux), `counts.late`, and a
+  `lateness` block on EVERY entry, so the strip, the week card and the
+  day modal cannot disagree about a job.
+- The agenda: a full-width late strip ABOVE the week grid that WRAPS
+  (no horizontal scroll anywhere; the seven day columns untouched), a
+  "+N more" expander so the worst never hides, a bordeaux quarantine
+  bar that renders ONLY when an L3 job exists (Open / Reschedule /
+  Cancel through the doors that already existed), and today's day modal
+  split into "planned today" and "late" through the same client helper
+  (`components/workplan/lateness.ts`).
+
+**Phase 2 — the ladder speaks (additive migrations 0020/0032).**
+- `tickets/escalations.py`, on an hourly beat: L2 entry tells the
+  ticket's ASSIGNED MANAGERS once; persisting past half the promise's
+  own span (planned start -> deadline, else creation -> deadline, never
+  under a day) tells the building managers AND the company admins once;
+  L3 entry tells the PROVIDER ADMINS once. Recipients are resolved by
+  ROLE inside the ticket's provider company through the rosters the SLA
+  sweep already uses; no person appears in code or settings.
+- Once, ever, per step per ticket — recorded in `TicketEscalation`
+  (ticket, step, anchor_date, notified_at, recipient_ids). A genuinely
+  re-planned job (a new deadline) restarts L1/L2 from the new dates and
+  can speak again; L3's never-worked clock resets only when hours land.
+- Both channels, through the existing engine: a bell row AND a mail per
+  recipient, in the recipient's own language, saying the fact and the
+  promise broken ("Zonwering — TCK-2026-000344: deadline 20 aug is 6
+  dagen overschreden"). `Notification.severity` (INFO/L1/L2/L3) is new
+  and backfilled: the four pre-existing time-driven types are L1. The
+  bell, the list and the toast read it — L1 amber, L2 red, L3 dark red
+  and the L2/L3 toast stays until dismissed.
+- The quarantine bar and the late card name who was told, resolved at
+  render time from the recipients the step reached ("<full name> has
+  been notified"); the profile carries no honorific, so the bare full
+  name renders (see NEXT).
+
+**Phase 3 — parts get windows (additive migration 0033).**
+- `SubTask.planned_start_date / planned_end_date / time_window_label`.
+  The server refuses a window outside the ticket's own window (earliest
+  planned day -> latest of planned end, deadline, last slot day) with a
+  stable 400 that names the field (`part_window_outside_ticket`,
+  `part_window_end_before_start`); the parts modal renders it under the
+  input.
+- The Work Plan carries each part's window and STATE
+  (`lateness.part_state`): done = strikethrough, last day = orange,
+  missed = red "niet gedaan op <end>", and a missed part keeps rendering
+  forward until done or deleted — it never escalates on its own. A part
+  windowed into another week places its ticket there (host card under
+  the ticket's heading). `MyPartsPanel` shows the same.
+- Completion stays free: the transition modal lists open parts once,
+  inline, with per-part "mark done" quick actions, and the move is never
+  blocked; the server has no gate on parts (pinned by test).
+
+### Deliberately NOT done — W-LATE
+
+- **No honorific field.** The addendum says "honorific only if the
+  profile carries one"; `User` carries none, so the bare full name
+  renders. Adding the field is a product decision, listed in NEXT.
+- **No websockets.** The bell polls (15 s) as before; real push stays
+  deferred to production day as ruled.
+- **No cancel move for a plain ticket by CA/BM.** The state machine has
+  no provider-side cancel; the quarantine bar's Cancel… is the
+  SUPER_ADMIN out-of-machine jump to CLOSED (with its recorded reason)
+  for tickets, and the CANCELLED transition for extra work. Other roles
+  see Open / Reschedule.
+- **The overdue button stays.** It asks "past its due date" (deadline,
+  else last planned day); the strip asks "planned date passed" and its
+  two worse rungs. Different questions, both labelled.
+
+### Done — W16: the extra works register, copied from his system with the billing left out
+
+The owner: **"make the contracts page exactly the same as my father's
+system. Establish those connections. Copy his system almost everywhere
+now."**
+
+Read first, in the clone at `/tmp/osius-ref`: `ContractController.php`
+(974 lines, 17 methods), `ContractLineController`,
+`ContractProjectController`, the eight Contract\* models, the routes and
+the two contract screens.
+
+**1. The extra works register — built.** His
+`getOrCreateExtraWorksContract($customerId)` gives every customer an
+auto-created contract carrying one line per ad-hoc job, grouped by
+building. Ours is `contracts/extra_work_register.py` +
+`GET|POST /api/contracts/extra-works/<customer_id>/`, rendered under the
+customer's contracts page. Measured on the seeded demo customer: 12 jobs
+across 3 buildings, EUR 990.99.
+
+Two deliberate differences, both because his shape does not survive
+contact with our invoicing:
+
+  * **His lines are hand-typed; ours are projected.** `ContractLine` in
+    his schema has no `extra_work_id` and no other link to a job — no
+    ExtraWork controller or service in his codebase touches
+    `ContractLine` at all. Ours carries `ContractLine.extra_work` and
+    rebuilds every amount from `reports.dimensions._amounts_for_state`,
+    the named server mirror of `rowAmounts()`. So there is no second
+    number to drift, and there is no Add/Edit/Delete on a register line:
+    the row links to the job, which is the one place its amount lives.
+  * **THE REGISTER NEVER RAISES AN INVOICE.** Our Extra Work already
+    reaches one through `invoicing/selectors.py`, whose unbilled pool
+    means "no live `InvoiceLine` claims this row". A register line is
+    not an `InvoiceLine`, so a register that billed would have the pool
+    offer the same work again — every customer billed twice for every
+    job. `invoice_generation.generate_invoices_for_contract` returns
+    empty for a register and `billing.build_forecast` gives it no rows;
+    `TheRegisterNeverBills` pins both, on a register that is ACTIVE and
+    has lines so the guard is what is being tested.
+
+**2. Three figures, because one would have been a lie.** The build
+measured the register at EUR 990.99 earned while the invoice run could
+only offer EUR 660.66 — and both were right: the third job carried the
+legacy `is_invoiced` flag, set without an `InvoiceLine`. A summary
+counting only live claims would have promised a third more revenue than
+existed. The strip now reads *taken on* / *finished* / *still to bill*,
+and `earned - invoiced` reconciles exactly: with EUR 660.66 outstanding
+the run billed EUR 660.66, after which the figure read EUR 0.00.
+
+**3. Activate is a button.** His `POST /contracts/{id}/activate` is one
+press; ours was a `lifecycle` dropdown three clicks inside the edit
+dialog. Now a primary button on a DRAFT, absent on every other state,
+reusing the ordinary PATCH rather than adding a second write path.
+
+**4-5. Revisions, projects and real totals were already working** — W11
+fixed them two days before this prompt was written, and the complaints
+in it are stale. Measured on the live site before changing anything:
+POST a line to revision 3 returned 201, and the contract then read
+`monthly_amount 1200.00 / yearly 14400.00 / hours 10.0 / lines 1`, with
+`/contracts/stats/` agreeing. Nothing was needed and nothing was done.
+
+**Where the prompt was wrong about his code** — three claims, all
+checked in the clone and all false; the corrections are in the report
+and in `extra_work_register.py`'s header. Briefly: billing does NOT flow
+through his contracts (`BillingService` and `ExtraWorkV2InvoiceService`
+contain zero contract references); his "Create revision" is
+`alert(comingSoon)` and `ContractRevision` has no routes and no writer
+anywhere; and his register is not why his totals are real.
+
+### Done — W14: the extra-work button that lied, and the page that threw the record away
+
+The owner, from an extra work whose header read **Open**, pressed one
+button and it went to COMPLETED with no steps in between; then the page
+said **"Extra Work not found"** and he could not tell what he had
+completed. The brief that came with it said Extra Work has no state
+machine and one must be built.
+
+**It already has one, and it is not the fault.**
+`backend/extra_work/state_machine.py` (643 lines) carries an explicit
+`ALLOWED_TRANSITIONS`, a per-transition role/scope resolver, entry
+timestamps, an `ExtraWorkStatusHistory` row inside the same
+`transaction.atomic()`, `select_for_update` against a concurrent racer,
+and reason-required override pairs. CLAUDE.md §3 has recorded it since
+Sprint 26B. Measured on the dev stack before touching anything:
+
+    POST /api/extra-work/262/transition/ {"to_status":"COMPLETED"}
+      -> 400 {"detail":"Transition REQUESTED -> COMPLETED is not allowed.",
+              "code":"invalid_transition"}
+    POST /api/extra-work/6/transition/   {"to_status":"COMPLETED"}
+      -> 400 {"detail":"This Extra Work already has an operational ticket,
+              so its operational status follows that ticket. Move the
+              ticket instead.","code":"operational_status_follows_ticket"}
+
+The server refuses. What went wrong was on the screen.
+
+1. **The primary button never asked the server what was legal.**
+   `resolveNextStep` derived the page's ONE primary action from `status`
+   alone. Extra work 6 is IN_PROGRESS with a ticket, so its
+   `allowed_next_statuses` is `["CANCELLED"]` — and the page rendered
+   "Mark complete" as the primary button anyway. It now takes
+   `allowedNextStatuses` and withdraws any transition the server does
+   not currently allow, naming the ticket that owns the move instead.
+2. **"Extra Work not found" was a lie about a record that was on
+   screen.** Every action handler wrote its failure into the same
+   `error` the initial fetch uses, and the render guard was
+   `if (error || !ew)` -> the not-found empty state. One refused
+   transition therefore deleted the whole loaded record from the page.
+   `error` now means only "could not load"; a failed action writes
+   `actionError`, which renders as an alert with the record still there.
+3. **One primary action, the rest behind a door.** The card showed
+   Plan work / Revise pricing / Cancel request / Approve pricing /
+   Reject pricing side by side. `PRIMARY_FORWARD_TRANSITIONS` has known
+   which move is forward since W2-B; the card now shows that one and
+   collapses the rest behind "Other actions (n)", the same disclosure
+   `TicketDetailPage` uses (W11 §1). Collapsed, they are not in the
+   document, so a stray tab cannot land on a cancel.
+4. **What completing an extra work means for its ticket, stated.**
+   THE RULE: completing an extra work never completes a ticket. Either
+   the request has an operational ticket — and then the ticket decides,
+   the button is not offered, and the server refuses it — or it has no
+   ticket, and completing it closes the request for reporting and
+   billing and nothing else. A confirmation now says which of the two
+   the operator is standing in, and the toast answers his question:
+   "'<title>' is completed. No ticket was changed."
+5. **The table is written down.** `test_w14_transition_table_is_closed`
+   asserts `ALLOWED_TRANSITIONS` is exactly its 15 pairs, that COMPLETED
+   has exactly one way in, and sweeps all 41 remaining ordered pairs of
+   the 8 statuses to prove each raises `invalid_transition`. The
+   PROPOSAL table has had that protection since Sprint 28; the work's
+   own table did not.
+
+Backend unchanged apart from the new test. Frontend `nl`/`en` in
+lockstep.
+
+### Done — W14: one door onto "put people on this job"
+
+The owner, reading a ticket's assignment area top to bottom, counted
+four headings, two explanatory paragraphs and three buttons for a single
+idea, and asked: **"why can I not assign several staff at once AND
+separately with time slots?"**
+
+1. **ONE modal.** `pages/tickets/AssignStaffDialog.tsx` — tick several
+   people, optionally give them a time (**one window for everybody**, or
+   one radio across, **a separate window per person**), optionally file
+   the work under a named part of the job, **one confirm**. Assigning
+   three people to the same morning is one action; giving each of them a
+   different window is the same modal, expanded. The same dialog in
+   `edit` mode is where an existing person's window is changed, so there
+   is no second door for "the same thing, afterwards".
+2. **The section is a NAME, a TABLE and ONE BUTTON.**
+   `pages/tickets/StaffAssignmentSection.tsx` replaces
+   `StaffSlotEditor.tsx` (deleted, 1364 lines). Same shape as the
+   managers table next door: a table, an empty state, one primary
+   button. Both explanatory paragraphs are gone, and so is the inline
+   add form — the picker is a modal, not something that unfolds inside
+   the card.
+3. **"Add slot" and "Add sub-task" resolved to one.** They were not the
+   same operation (one attaches a PERSON, one names a PART of the job)
+   but they sat side by side under one heading looking like a choice
+   between two ways to do the same thing. Creating a part now happens
+   INSIDE the assign dialog ("file this under a new part, called …"), so
+   the standalone `Add sub-task` button is gone. Parts get their own
+   named section with its own table — and ONLY once parts exist. On a
+   ticket with none, nothing about parts is on the page at all.
+4. **The duplicate heading is gone.** For a provider manager the
+   read-only "Assigned {{company}} staff" list rendered the same people
+   as the table one card down, under a second name. It is now absent for
+   that viewer. Customer-side and STAFF viewers keep it — it is their
+   only staffing surface, it carries the anonymised entry and the
+   resolver-gated credential summaries, and it is read-only for them.
+5. **Every action answers in a sentence.** "Ahmet Yıldız and Noah Bakker
+   assigned to this ticket." / "…assigned to 'Atrium, second round'." /
+   "{{name}} is taken off this ticket." / "The part is now called …".
+6. **A refusal names the person it refused.** W13-FIX §6c pre-filtered
+   an indistinguishable duplicate OUT of the picker and then needed a
+   sentence of prose to explain the empty list. Everyone eligible is
+   offered now; the SERVER refuses (`duplicate_flat_assignment`, backend
+   unchanged) and the dialog says who was refused and what to change.
+   Writes are per person, so the ones that landed are kept and
+   announced and the table is reloaded either way.
+
+Backend unchanged. Frontend-only; `nl`/`en` in lockstep.
+
+### Done — W15: Chargeable work opens the extra work, and the tab is an address
+
+The owner's diagnosis, and he is right: "the problem is that there are
+two different pages for the same job. It would be easier if the Extra
+Work detail and the Chargeable Work page were the same. After Started
+work, opening it from Chargeable work should open the same extra work."
+
+**His own system already works this way, and that settled the design.**
+`docs/reference/osius-reference-system/01-extra-work.md` §1.7: Melding
+and Extra Work are "same table, same model, same controller, same status
+ladder" — ONE record with ONE detail page, reached through two route
+prefixes (`/meldings/{id}` vs `/extra-works/{id}`). That is precisely
+"one record, one page, two ways in". And the deep link his backend emits
+is `/extra-works/{id}?tab=info` — the tab lives IN THE URL.
+
+**1. A chargeable row opens the extra work.** `chargeableTarget()` in
+`DashboardPage` resolves the row's click, its keyboard handler and its
+subject link to `/extra-work/<ewId>`. It fixes BOTH chargeable routes at
+once, because `/tickets/chargeable` and
+`/admin/customers/<id>/chargeable` mount the same component with
+`variant="chargeable-work"`.
+
+Nothing new was built on the detail page: it already had the shape the
+owner asks for — four context blocks that never move (customer/building,
+status, money, what next) and then tabs. Measured after landing there
+from a row click: `["Overview","Money","Hours","People","Messages"]` —
+the money and the operations, on one screen.
+
+**2. STAFF keep the ticket, because they cannot open an extra work.**
+Measured on the dev API, not assumed:
+
+    STAFF GET /api/extra-work/6/
+      -> 404 {"detail":"No ExtraWorkRequest matches the given query."}
+    STAFF GET /api/tickets/?is_extra_work=true
+      -> 200, 5 rows, every one carrying extra_work_origin
+
+`scope_extra_work_for` returns `.none()` for STAFF (the P0
+staff-privacy fix), so the Extra work cell and the origin pill had been
+doors to a hard 404 for that role on every screen they appear on. Rule 6
+says a role that cannot use it does not see it. The pill is now a
+`<span>` for those roles — same words, same colour, no navigation — and
+the predicate is read inside `ExtraWorkOriginPill` rather than by each
+of its four consumers, so a fifth cannot forget it.
+
+**3. No duplicate doors.** The Extra work column was an anchor to the
+same record the row now opens, and the origin pill was a third. The
+column is the extra work's NAME now, and the pill is not rendered on
+Chargeable work at all — on a page where every row is chargeable by
+construction it was a chip with no contrast, and it had become a second
+control to one destination. That is the shape W14 §3 measured logging
+`PUSH /tickets/343` twice, so one press of Back went nowhere.
+
+**4. The tab is part of the address.** `ExtraWorkDetailPage` kept the
+tab in `useState`, so a link could only ever reach Overview, a refresh
+threw away which tab you were reading, and two people could not send
+each other "the same screen". It is `?tab=` now, the same query key the
+reference uses, with `replace: true` so four tabs do not become four
+history entries, and with Overview as the ABSENCE of the parameter so
+every existing `/extra-work/<id>` link stays the canonical address.
+
+**5. Back goes where you came from.** Arriving from Chargeable work, the
+header still said "Back to Extra Work" and went to the wrong list. The
+route that navigated puts its own address in history state; the detail
+reads it, and refuses anything that is not a single-leading-slash
+in-app path.
+
+MEASURED, one browser, one walk, on the built bundle:
+
+    A. SUPER_ADMIN, /tickets/chargeable
+       extra-work cell tag           SPAN   (was A)
+       anchors inside those cells    0
+       row click                     /tickets/chargeable -> /extra-work/6
+       tabs on landing               Overview, Money, Hours, People, Messages
+       header blocks                 "B Amsterdam" / "B1 Amsterdam"
+       back link                     "Back to Chargeable work" -> /tickets/chargeable
+       click Money                   /extra-work/6?tab=money
+       RELOAD                        active tab still Money
+       click Hours                   /extra-work/6?tab=hours
+
+    B. STAFF, /tickets/chargeable
+       origin pill tag               SPAN
+       anchors to /extra-work/       0 anywhere on the page
+       row click                     -> /tickets/12  (stays on the ticket)
+
+**Gate**, measured against a pristine `origin/feat/ew-gap-closing`
+worktree at 51c1184 in the same container: origin is **42 (41 errors, 1
+warning)**; CLAUDE.md still says 44. This branch: typecheck clean,
+`eslint .` **42 (41 errors, 1 warning)**, `npm run build` OK.
+
+**Found, NOT fixed, and outside this chat's file set.** The agenda's
+Work Plan links an undated EW row straight to `/extra-work/<id>`
+(`frontend/src/pages/AgendaPage.tsx:862-871`, the `UndatedRow` `<Link>`
+when `entry.ticket_id === null`). Measured as STAFF on `/agenda`:
+one `a[href="/extra-work/6"]` with the text "[DEMO] Lobby strip and seal
+(29.8.5)" — a hard 404 for that role, the same rule-6 defect as the two
+this sprint closed, in a third place. Left for whoever owns the agenda
+rather than edited across a wave boundary while other chats are in that
+file. My pill fix already removed the OTHER extra-work door on that same
+page.
+
+**Left undone, deliberately.** `nextStep.ts` types its tab action as a
+hand-written union `"overview" | "money" | "hours" | "people"` — a
+second, independently maintained copy of the tab keys, which is the
+drift CLAUDE.md has a rule about. It is assignable to `EwTab` so it is
+correct today. Unifying it means exporting `EW_TABS` out of the page
+file, which its own comment refuses on `react-refresh/only-export-
+components` grounds, so it is a move-the-constant refactor rather than a
+one-line fix. Named here rather than done.
+
+### Done — W14: the status where the eye lands, and the note that had nowhere to land
+
+Two things the owner reported after reading the live site. One of them
+cost him a mistake, and his father made the same one independently.
+
+**1. The status was not visible enough, and a big Approve button was.**
+"I went into a ticket detail without looking at its status and a huge
+Approve button appeared. Why am I approving an open job? It turned out
+the work was in customer approval."
+
+Why it was possible: the header status was an 11px `.badge`, third in a
+row of three (`TCK-…`, priority, status) above a 36px title. The
+Workflow card's own readout — `.workflow-current-status`, 20px, with the
+state SENTENCE under it — renders **only in the `visibleNextStatuses.length
+=== 0` branch**, i.e. only when the role has no buttons. So on exactly
+the screen he was on (WCA, SUPER_ADMIN, Approve and Reject present)
+there was no status sentence anywhere on the page.
+
+The status now has its own block at the head of the header band, **left
+of the Location / Customer pair**, which is where the owner asked for
+it. Quiet label, the status name at 20px/800 with a tone dot, and the
+state sentence underneath — `workflow_state.<STATUS>`, the same string
+the Workflow card prints, so there is one vocabulary and not two. Plain
+text, like the pair beside it: no border, no surface, no panel. The chip
+is gone from the meta row; one status display, not two.
+
+MEASURED on the built bundle at 1440x1000, ticket 8
+(WAITING_CUSTOMER_APPROVAL, SUPER_ADMIN):
+
+    STATUS block   x=1031 y=124  230x121
+    PLACE  block   x=1297 y=124  115x103
+    status right edge 1261 <= place left edge 1297   -> LEFT OF, same row
+    status bottom      245 <= Approve button top 436 -> 191px ABOVE it
+    status text "Waiting for the customer", 20px/800, dot rgb(15,107,94)
+    sentence    "With the customer. They have not answered yet."
+    `.detail-header-meta .badge.badge-waiting_customer_approval` count: 0
+
+The narrow-desktop case was measured too, not assumed: with all three
+facts on one line the title column was squeezed to **107px** at 820px.
+`flex-wrap` did not save it (the band's `auto` column keeps taking its
+max-content and starves the `1fr` title column), so between 1080px and
+the existing 760px stack the aside stacks on its own. Re-measured after
+the fix, same four widths:
+
+    w=1440  status y=124  place y=124  (one row)   title 711px
+    w=1200  status y=124  place y=124  (one row)   title 471px
+    w=1000  status y=124  place y=259  (stacked)   title 422px  (was 271)
+    w= 820  status y=116  place y=251  (stacked)   title 258px  (was 107)
+
+No horizontal overflow (`scrollWidth == innerWidth`) at any of the four.
+
+**2. The status note went somewhere; nothing showed the writer where.**
+"Where does the note I write here go, what is it for? I write it and
+leave — does it show anywhere?"
+
+It was never swallowed, and the prompt's premise that it was is wrong.
+It is `TicketStatusHistory.note`, written inside `apply_transition`'s
+`@transaction.atomic` (`tickets/state_machine.py:651`); it comes back on
+`GET /api/tickets/<id>/` as `status_history[].note` AND on
+`GET /api/audit/tickets/<id>/timeline/`; and both timeline renderers on
+this page (`UnifiedTimeline` for provider-audit roles, the status-history
+fallback for everyone else) already print it against the transition row
+it belongs to.
+
+What was missing was the ROOM. The Activity card is collapsed by default
+(RF-4, deliberately: "at a glance minimal, depth behind a click") and
+sits under three other cards, so somebody who typed a note, pressed a
+button and left never saw it arrive and had no reason to believe it had.
+
+So the page shows them, at the one moment it is an answer:
+
+- the field names its destination — "Note on this step (optional)" /
+  "Appears on the Activity Timeline, against this step". The transition
+  modal's note hint says the same, because it is the same field by the
+  other door;
+- the transition's answer carries `change.note_recorded` alongside the
+  status sentence;
+- `revealStatusNote()` opens the drawer and the effect beside it scrolls
+  the card into view once the row exists.
+
+The scroll could NOT be done in the click handler and the first cut that
+tried was measured not working — the card ended at y=911 in a 1000px
+viewport. Two reasons, both real: the transition modal is a native
+`<dialog>`, and the page behind an open one is inert, so a
+`scrollIntoView()` fired in the same block as `setTransitionTarget(null)`
+does nothing; and the row being scrolled to does not exist yet, because
+the ticket has only just been replaced and the audit timeline has not
+refetched. Hence the effect, which runs after the dialog unmounts and
+after the rows land.
+
+MEASURED click path (ticket 10, OPEN -> ACKNOWLEDGED, one browser, one
+walk):
+
+    BEFORE  label       "Note on this step (optional)"
+            placeholder "Appears on the Activity Timeline, against this step"
+            drawer      closed
+            typed       "W14 click path: sleutelkastje code gewijzigd, ..."
+            pressed     "Mark as seen and planned"
+            modal       opened and asked for a start time (rule 3)
+            POST /api/tickets/10/status/ -> 200
+    AFTER   header      "Scheduled, not started"
+            drawer      OPEN
+            toast       "Moved to Scheduled, not started. Your note is on
+                         the Activity Timeline, against this step."
+            timeline[0] "Superadmin changed status from Open to Scheduled,
+                         not started. W14 click path: sleutelkastje code
+                         gewijzigd, doorgegeven aan de klant."
+            card rect   top=807 bottom=972 in a 1000px viewport (in view;
+                        it was 911..1491 before the effect fix)
+
+`sprint27f_ticket_override.spec.ts` asserted the header status through
+`.detail-header-meta .badge.badge-approved`; it now asserts
+`[data-testid='ticket-header-status']`'s `data-status`. That spec also
+asserts the timeline override badge is VISIBLE, which the
+collapsed-by-default drawer had been failing since RF-4 — the override
+path reveals the drawer now, so it can pass again.
+
+**Gate**, measured against a pristine `origin/feat/ew-gap-closing`
+worktree at 94d5605 in the same container: origin is **42 (41 errors, 1
+warning)**, not the 44 CLAUDE.md still claims, and the second warning
+CLAUDE.md names in `TicketDetailPage.tsx` does not exist — the one
+warning is `hooks/useSavedBanner.ts:28`. This branch: typecheck clean,
+`eslint .` **42 (41 errors, 1 warning)**, `npm run build` OK.
+
+### Done — W14: four things the owner could not use, each one measured first
+
+The owner, after W13-FIX: four reports, and the standing instruction
+that a claim is not evidence. Every item below was reproduced on the
+LIVE crmtest stack before a line was changed, and the measurement is
+quoted in the code comment that fixes it.
+
+1. **The category picker still offered every tenant's list, and the
+   ticket rows were still in the wrong language.** Two separate causes,
+   and W13-FIX had fixed neither completely.
+
+   *Duplication:* `CreateTicketPage.tsx` sent `?company=` CONDITIONALLY
+   (`...(intakeCompanyId ? { company: intakeCompanyId } : {})`), so the
+   one caller who most needs the scope — a SUPER_ADMIN before picking a
+   building, which is every SUPER_ADMIN on first render — sent no
+   company and got the unscoped list. Measured on crmtest: 18 rows, six
+   labels once per tenant. The company is now resolved from the
+   building, else the customer's building, else the author's own company
+   when they belong to exactly one; with none of the three there is no
+   list rather than all of them.
+
+   *Language:* W13-FIX taught the CATALOG serializer to read
+   `user.language` and left the OTHER resolver alone.
+   `serializers.TicketCategoryFieldsMixin` — which prints the category on
+   every list row and on the detail page — still read `Accept-Language`,
+   a header nothing in `frontend/src` sets, so it was the BROWSER's
+   locale. Measured as user 9 (`language='en'`): the picker said
+   "Malfunction" while the chip beside it said "Storing". Both call
+   sites now import one `reader_language`.
+
+   Also found while checking every surface: `_annotate_usage`'s
+   `Count("tickets")` adds a GROUP BY, which makes Django DROP
+   `Meta.ordering` (`queryset.ordered` was `False`), so the picker's
+   options arrived in database order. The order is re-stated after the
+   annotate.
+
+2. **The archive showed the working list's status chips.**
+   `filters.apply_archived` gated the rows cleanly and the counts
+   followed, but `StatusTiles` drew `TICKET_LIST_STATUSES` regardless.
+   `TicketViewSet.archive` refuses anything not in
+   `TERMINAL_TICKET_STATUSES` (`archive_not_finished`), so seven of the
+   ten chips could only ever read 0 — measured: `by_status` came back
+   `{}` for `?archived=true`. `TICKET_STATUS_SPEC` gained an
+   `archivable` field (a `Record` over the union, so a new status must
+   answer for itself) and the chips, the `status__in` on the rows and
+   the "All" total all follow the pile that is open. A chip selected in
+   one pile is dropped when it does not exist in the other.
+
+3. **The browser Back button.** Two defects, both measured with
+   `history.pushState` instrumented on the live site.
+
+   *One click, two entries.* The ticket rows are a
+   `<tr onClick={navigate}>` wrapped around `<Link>`s to the same place;
+   the link navigated and the click then bubbled to the row, which
+   navigated again. One click on ticket 343 logged `PUSH /tickets/343`
+   twice and `history.state.idx` went 1 -> 3, so one press of Back
+   landed on the page it was pressed from. The same pattern was in the
+   buildings, customers and companies admin lists.
+
+   *The back link pointed at the dashboard.* All three of
+   `TicketDetailPage`'s back links were `<Link to="/">` under the label
+   `back_to_tickets` — the owner's "it throws me to the dashboard",
+   literally — and being a `<Link>` they PUSHED, so the browser's Back
+   then went forwards into the ticket just left.
+
+   `lib/navHistory.ts` records the path at each `history.state.idx`;
+   `hooks/useBackLink.ts` steps the history back when the entry behind
+   this one IS the page the label names, and otherwise follows the href.
+   `PageHeader` routes its `backLink` through it, which fixes both of
+   `ExtraWorkDetailPage`'s hardcoded `/extra-work` links and every other
+   page that mounts one. The label can no longer lie and the reader gets
+   the list back with its filters and scroll.
+
+4. **Undo and the correction actions were being refused silently.** Not
+   hidden and not broken: 43 of 87 crmtest tickets DO offer an undo, and
+   the button renders enabled. Walked on ticket 356 (ACKNOWLEDGED, undo
+   to OPEN):
+
+       GET  /tickets/356/transition-requirements/?to_status=OPEN
+            -> {"requirements": [], "unmet": []}
+       POST /tickets/356/status/
+            -> 400 {"code": "override_reason_required"}
+
+   `ACKNOWLEDGED -> OPEN` is not in `ALLOWED_TRANSITIONS`, so Sprint 184
+   §2 coerces it to an override and demands a reason. The requirements
+   endpoint did not know that, so the modal asked only for an optional
+   note; on the 400 the page CLOSED the modal, raised no toast, and
+   armed a different inline reason form further down the card. From the
+   operator's chair the button did nothing.
+
+   `state_machine.transition_needs_override_reason` is now the one
+   definition — the same two predicates `apply_transition` coerces on —
+   and `transition_requirements` calls it, so the modal asks for the
+   reason before the press. `unmet()`, the ENFORCEMENT half, excludes it
+   deliberately: the reason keeps its own gate and its own stable code
+   one layer down. The 400 branch survives as a safety net but now keeps
+   the modal open with the refusal inside it instead of vanishing.
+
+### Done — W13-FIX: the eight things that were reported done and were not
+
+The owner, after the W13 deploy to crmtest: "FIX WHAT WAS CLAIMED AND
+NOT DONE." Every item below was reported shipped in a previous wave and
+was visibly broken on the live site.
+
+1. **The transition modal was never built.** W13 reordered the workflow
+   buttons and added i18n keys; every button still POSTed on the first
+   click. Now `pages/tickets/TicketTransitionModal.tsx` opens on the
+   press and the move does not happen until it is answered.
+   `backend/tickets/transition_requirements.py` is the ONE rule set —
+   the modal reads it through
+   `GET /tickets/<id>/transition-requirements/` and
+   `TicketStatusChangeSerializer.save` (i.e. `POST /status/`) enforces
+   it, so the form and the gate cannot drift. The gate was first put on
+   `apply_transition` and that was wrong: it is also the primitive
+   `auto_close`, the rollup, the extra-work hook, the seeder and most
+   test setup use to WALK a ticket into a state, and 71 tests failed
+   saying so. -> ACKNOWLEDGED
+   needs a date (its own docstring already said "seen and SCHEDULED");
+   the forward moves into IN_PROGRESS need who and when. System-driven
+   transitions (`user=None`) carry no requirements.
+
+2. **Three raw i18n keys on the live site**, and the reported cause was
+   wrong: the strings were present in BOTH bundles the whole time. The
+   real cause was a missing `react: { nsMode: "fallback" }` — without
+   it react-i18next binds `useTranslation(["page", "common"])` to
+   `page` ALONE (react-i18next/useTranslation.js), so every key living
+   in `common.json` rendered as its own name. One line in
+   `i18n/index.ts` fixed 35 keys. `frontend/scripts/i18n_audit.mjs`
+   (`npm run i18n:audit`) now checks every literal `t()` key in `src/`
+   against both bundles, plural suffixes and `{ ns: }` overrides
+   included, and fails on a missing one.
+
+3. **The category dropdown listed seven categories per company** and
+   rendered the English label on a Dutch page. The pickers now pass
+   `?company=`, and the label resolver reads `user.language` instead of
+   `Accept-Language` — a header the SPA has never sent, so the value
+   was the BROWSER's locale.
+
+4. **The ticket-list category chip is reverted** to the `.cell-tag`
+   every other column in that row uses.
+
+5. **Period gained "all time"**, added to the `PERIOD_KEYS` constant so
+   the `Record` type forces its label. Not the default.
+
+6. **Managers moved above Assignment**; the managers table stopped
+   overflowing (`table.data-table` carries `min-width: 860px` and the
+   intended `.assign-table` override lost on specificity — measured
+   860px inside a 322px track); the same person can no longer be added
+   twice into an indistinguishable slot — one with neither a start time
+   nor a distinct `time_window_label`, which is what ticket 355 had;
+   dated AM/PM slots and labelled morning/afternoon splits still can;
+   and the staff picker is checkboxes, several at once.
+
+7. **"Take it on" is now "Mark as seen and planned"** — the action, in
+   the words of what it does, and now literally true of the step.
+
+8. **The series editor says what it is for** in one line above its
+   controls. It was NOT removed: it owns time-of-day and condition,
+   which have no other editor.
+
+### Done — W5-B: day-by-day (multi-date) Extra Work
+
+The last feature from the reference system that had never been scheduled. An
+operator agrees a series of visits in one conversation — every Tuesday in
+November, or three slots on the handover day — and had to type the job once per
+visit.
+
+- **§1 — an entry mode on the create form.** SINGLE is unchanged. MULTIPLE turns
+  the title into a STANDARD title and opens a day picker; each picked day/time
+  becomes its own Extra Work sharing customer, building, description, labels and
+  cart. **Every member goes through `ExtraWorkRequestCreateSerializer`** — the
+  same serializer the single form posts to, with the same classification, intent
+  validation, routing decision and ticket spawn. There is no second writer, which
+  is the whole reason the reference system's batch path drifted from its single
+  path: over there `requested_at` holds the SCHEDULED SLOT rather than a request
+  time (22 days before `created_at` on live record 476), `requested_by` is never
+  set, and products are written with a `unit` string where the single path writes
+  `unit_id`.
+- **§2 — a group owns nothing.** It is a creation and editing convenience.
+  Members keep their own status, price, hours and invoice; no total anywhere is
+  computed from a group; the FK is `SET_NULL` so losing the receipt cannot take
+  real work with it. `rowAmounts()` remains the one billing-total rule, and
+  `test_sprint182_money_rules` + `test_m4_billing_fields` ran green alongside the
+  new module to prove the money surface did not move.
+- **§3 — three things deliberately NOT built**, each against a recorded defect.
+  No group-status endpoint (theirs is a query-builder mass update whose target
+  status is never validated and which bypasses every event — live group 17 has
+  eight members in the invoicing pool with `approved_at` null, having skipped
+  approval). No group-delete (theirs soft-deletes every member with **no status
+  check at all**, so a series holding invoiced work goes in one click, then
+  hard-deletes the group row and orphans what it removed). No group planning
+  path — planning already has two doors and bulk-plan has taken per-work values
+  since W4-O.
+- **§4 — `condition` is a real nullable column.** At / before / after handover,
+  plus NULL meaning nobody was asked — which is the honest state of every ad-hoc
+  work and a different fact from "at handover". The reference system cannot
+  express the difference (`match($entry['condition'] ?? 'at')`) and A7 §2.2
+  records the cost in one line. Over there the value is never persisted at all:
+  it is five characters inside the title that every reader recovers by regex.
+- **§5 — the title suffix is composed, never parsed.** `[WK47-19.11.2026:18:00:op]`
+  is generated once from the columns, and every fact in it is also a column.
+  `compose_member_title` runs one way and has no inverse; "rebuild titles"
+  re-derives from the columns. Their title IS the storage, which produced two
+  incompatible suffix formats whose parser understands only one, a week number
+  taken from the group rather than the row, and a bulk editor that overwrites the
+  stored title with the editing user's language variant — a title that becomes
+  the invoice line description.
+- **§6 — all or nothing, and a ceiling of 60.** One transaction around every
+  member and the group, with the group created AFTER the members and its tenant
+  anchors read off them, so a group cannot disagree with its own members and a
+  group with zero members is not expressible. Theirs has no transaction and
+  creates the group first: **15 of their 19 live group rows have no members.**
+  The cap is enforced server-side; a weekly visit for a year is 52 and daily for
+  two months is 60, while "every weekday next year" is 260 works each spawning a
+  ticket and a notification fan-out.
+- **§7 — the list folds a series into one row** carrying the standard title, the
+  member count and a per-status spread. The counts are WHOLE-SERIES truth
+  computed server-side, so a badge never depends on pagination, and there is no
+  header record and no `group_sequence == 1` election — that election is what
+  makes their list totals disagree with their own statistics endpoint. **A work
+  with no series renders exactly as before.**
+- **§8 — a series editor**: one value across every member with per-row override,
+  for title, time and condition. Date, budget hours and assigned people are
+  deliberately absent and the footer names the buttons that own them.
+
+NOT DONE, and left for a follow-up: no browser measurement of the new UI (no
+geometry is claimed anywhere), no Playwright spec, and the DETAIL page shows no
+sign that a work belongs to a series — the detail serializer does not emit the
+`group` block, so that needs a serializer field plus a card. Handed off rather
+than built because `ExtraWorkDetailPage.tsx` was owned by another chat.
+
+### Done — W4-N (wave 4, chat N of 6): contacts beside the whole card, and the hours card
+
+Two owner corrections on the Extra Work detail page. Frontend only — no
+backend file was opened, no migration, no test-runner change.
+
+**Fix 1 — Customer contacts starts at the TOP of the Details card.** The
+third attempt at this. W2-B split only the LOWER half of the card, so the
+contacts heading began level with "Description"; W3-F kept that split and
+merely removed the panel's padding. Both left contacts most of a card
+below "Building", which is not what was asked for. The split now starts
+directly under the section title and holds both fact grids, the dates
+editor and the prose in its left child, so the card reads as three
+columns from its first row.
+
+The acceptance number, measured in the live DOM at 1440px with twelve
+contacts: the "Building" label's top is **y = 269** and the Customer
+contacts block's top is **y = 269** — **delta 0.00px**. Same two numbers
+at 1280px: **269 / 269, delta 0.00**. The contacts heading itself is also
+at **269**. Alignment is structural, not a tuned margin: both are the
+first child of row one of an `align-items: start` grid.
+
+- **The list still scrolls inside its own box and the card does not
+  stretch.** Twelve contacts: list `clientHeight` **300**, `scrollHeight`
+  **1240** — it scrolls. The Details card measures **927px** with twelve
+  contacts and **927px** with two. Identical.
+- **"Edit labels" still moves nothing below it, and now at 1280px too.**
+  Description y **567 → 567** and routing y **855 → 855** at 1440px;
+  **585 → 585** and **873 → 873** at 1280px. That second pair needed a
+  fix: narrowing the fact grid made the read state's ONE icon button fit
+  beside the values where the edit state's TWO did not, so the cell
+  wrapped differently per state and pushed everything below it down
+  **36px** — one `.btn-sm` row plus the flex row-gap. W3-F's parity rule
+  rested on the two states being the same HEIGHT; they now also have the
+  same WIDTHS (equal flex bases on both label/value stacks, and an action
+  slot that reserves two icon buttons in both states), so wrapping is a
+  property of the cell and not of the state. Labels cell measured at
+  **1440 / 1366 / 1280 / 1152px**: identical height (118px) in both
+  states at every one.
+- **Horizontal page overflow is 0** at 1440 and 1280, closed and open.
+- **A role that may not see contacts still gets the full-width card.**
+  `.ew-detail-cols-main:only-child` spans both columns — measured by
+  removing the panel from the live DOM: main **272.7 → 588.7px**, the
+  wrapper's full **588.7px**.
+
+**Fix 2 — the hours panel is a collapsible card, moved and regrouped.**
+
+- **Same card as Requested services, not a second idiom.** It mounts
+  `CollapsibleCard`, the component Requested services uses. Measured
+  side by side: chevron **16x16**, `rotate(-90deg)` closed, colour
+  `rgb(138,155,145)`, header padding `16px 22px`, header height **48px**
+  — identical on both cards.
+- **Closed by default**: `data-open="false"` on first render, and zero
+  `.collapsible-card-body` nodes exist while closed.
+- **Moved** to below People on this request and above Requested services.
+  Card tops at 1440px: People **1513**, Hours **1579**, Requested
+  services **1645**.
+- **The collapsed header carries the over/under-budget figure**, in
+  Requested services' own grammar (volume, then the one figure). All four
+  readings, measured from the rendered header (nl, the primary bundle):
+  over `"8,50 uur geboekt · 2,50 uur over de begroting"`; under
+  `"8,50 uur geboekt · 3,50 uur onder de begroting"`; exactly on budget
+  `"8,50 uur geboekt · Precies op de begroting"`; **no budget set**
+  `"8,50 uur geboekt · Geen begroting om tegen af te zetten"` — never
+  "0 over", which would claim the job landed on a budget nobody set. A
+  zero variance and an absent budget are deliberately different
+  sentences. Header height **48px** and page overflow **0** in all four.
+- **The open state groups the figures by what they are.** Five equal
+  bordered boxes became two groups: Budget → Entered as ONE comparison
+  with the arrow between them and the variance sentence under it,
+  Weighted as a subordinate line beneath (it is Entered times a factor,
+  not a sixth headline), and Labour cost + Travel in their own tinted
+  group — measured `rgb(242,244,242)` against the hours group's
+  `rgb(255,255,255)` — because money is not an hour. "Not budgeted"
+  renders as muted text, not as a figure.
+- **The provenance line survives**, as required: it is the first thing in
+  the opened body, above every figure it explains — "Uren komen uit de
+  urenregistratie; loonkosten worden berekend in rapportage. Op dit
+  scherm staat geen uurloonveld, en dat is met opzet."
+- **No arithmetic was added.** Every figure is still a fixed 2dp string
+  the server produced; the only numeric operation in the component is the
+  existing `Math.abs` that strips a sign the sentence already states.
+
+**i18n.** Three keys added to both bundles (`hours_panel.group_hours_title`,
+`hours_panel.group_money_title`, `hours_panel.meta_entered`); nl and en
+both **592 keys**, symmetric difference empty.
+
+**Gates.** `tsc --noEmit -p tsconfig.app.json --listFiles` exit 0 over
+**849 files, 300 of them under `src/`**; `eslint .` **44 problems (42
+errors, 2 warnings)** — the baseline exactly, no new violation and no new
+`eslint-disable`; `vite build` OK. No test runner was added and no
+backend test was run: the sprint touches no backend file.
+
+### Done — W4-M (wave 4, chat M of 6): the ticket header, the customer's Workflow card, and two photo scopes
+
+Frontend only. `TicketDetailPage.tsx`, the ticket-header and
+ticket-workflow blocks of `index.css`, and the `nl`/`en`
+`ticket_detail` bundles. Every number below is read off the live DOM
+against the same page built from the branch point in a second
+worktree.
+
+- **§1 — the header block is smaller, and it has some craft now.** It
+  stays PLAIN TEXT, which is the point Sprint 191 took three attempts
+  to reach: measured computed `background` `rgba(0, 0, 0, 0)`, `border`
+  `0px none`, `box-shadow` `none`. What changed is the type scale and
+  the labels. Values **18px/800 -> 15px/700**, labels **11px -> 9.5px**
+  with a 10px lucide glyph in front of each (a pin for Location, people
+  for Customer), the building sub-line **13px -> 11.5px**. Measured
+  block height on the real seed row at 1440px: **91px -> 81px**; at
+  1280px **87px -> 81px**. On a stress row (a 48-character room label
+  and a 52-character customer name) **153px -> 138px** at both widths.
+  The block still ends flush with the Convert-to-Extra-Work button
+  (right edge **1412px** at 1440, **1252px** at 1280) and page overflow
+  is **0** in all eight runs. The label colour moved from
+  `--text-faint` to `--text-muted` in the same pass: at 9.5px the old
+  tone was **2.75:1** on the page ground and unreadable; the new one is
+  **5.31:1**.
+
+- **§2 — "No status transitions available for your role." is deleted.**
+  A customer opening their own job was told what their role cannot do,
+  which is worse than being told nothing. In its place the card now
+  states where the job IS: a "Current status" micro-cap, the status name
+  at **20px/800** with a status-coloured 9px dot, and the time it
+  arrived there, read off `status_history` rather than any one timestamp
+  column. Measured from an ACTUAL customer session (Bright Facilities
+  customer, ticket 11): the sentence is gone from the page text, the
+  readout renders at **275x62px**, the dot is `rgb(11, 107, 66)` for
+  IN_PROGRESS, and the since-line reads "Sinds 20 jul 2026, 01:11".
+  The path where a customer CAN act is untouched and was verified
+  separately on a WAITING_CUSTOMER_APPROVAL ticket.
+
+- **§3 — the provider company name on the customer's view is real
+  data, verified rather than assumed.** Logged in as a customer of
+  Bright Facilities (a DIFFERENT provider company from the demo's Osius
+  Demo) the assigned-staff heading reads "Toegewezen **Bright
+  Facilities**-medewerkers". It interpolates `ticket.company_name`; no
+  change was needed.
+
+- **§4a — the per-work photo switch finally has a mount point.**
+  `Ticket.staff_uploads_customer_visible` and its endpoint shipped in
+  Sprint 191 §2.5 with no UI anywhere. It is now a switch at the top of
+  the Attachments card, PA/SA only, disabled on a terminal ticket with
+  the reason stated. The caption says in words that flipping it decides
+  the NEXT upload and releases nothing already stored — in amber, not
+  muted grey, because a manager who misreads that line believes they
+  released yesterday's photos and did not.
+
+- **§4b — the per-ticket half of the staff pre-permission, against
+  chat P's contract.** On the Assignment card, one row per assigned
+  person, three states (not two): grant, refuse, or leave it to the
+  company-wide setting. The scope is in the heading ("Photo permission
+  — THIS JOB ONLY"), in the helper, and in every option label, because
+  there are two controls in this product that look alike and mean
+  different things and the owner asked that nobody have to guess which
+  one they flipped. Each row also states what the next photo would
+  actually do and which rung of chat P's ladder decided it.
+
+### Done — W4-O: one bulk plan, one set of values PER WORK (wave 4, chat O)
+
+`POST /api/extra-work/bulk-plan/` took ONE payload and copied it onto every
+selected id. Work A could not be given four hours while work B got six, and
+planned hours per person were absent from the bulk dialog entirely — the server
+validates a distribution against the crew of EACH work, so a shared
+distribution was only ever valid when the identical crew was on every selected
+job, and offering the field would have produced a 400 that reads as a broken
+dialog.
+
+- **§1 — per-work values, still one transaction.** The body may now be
+  `{"items": [{"request": 258, "budget_hours": "4", ...}, ...]}`. The older
+  `{"requests": [...], ...shared}` spelling is NOT a second endpoint and not a
+  second code path: `_normalise` in `views_planning.py` turns it into exactly
+  the per-work list it is shorthand for, and everything downstream sees one
+  list of `(id, payload)` pairs. Kept alive because `bulk-dates` and
+  `bulk-assign` speak the same dialect, and because "the same window on all
+  six" should be sayable once. **Mixing the two is a 400 with its own code** —
+  `items` beside a shared field would need a precedence rule, and a precedence
+  rule is a thing an operator has to learn and a client can get wrong silently.
+  All-or-nothing survives: an invalid ninth row rolls back the eight before it,
+  proven across BOTH write paths (plain columns and the hours rows, which are
+  written by different code).
+- **§2 — planned hours per person, per work.** Each row's distribution
+  validates against that row's own crew. A person who is not assigned to a
+  given work now produces an error **naming the work and the person**
+  (`extra_work`, `extra_work_title`, `user` on the body) instead of a generic
+  400. That is not an H-1 regression and the test proves it as a property
+  rather than by eyeball: the body is a pure function of the request — every id
+  in it is one the caller SENT, on a work the caller already resolved through
+  its own scope — so "not assigned", "another tenant's person" and "no such
+  account" still produce one identical sentence. The single-work endpoint keeps
+  its constant body unchanged; there is no "which row" question when there is
+  one row.
+- **§3 — the dialog is a table, one row per work, every row editable.** Seven
+  columns: work, budget, our start, our end, photo required, notes required,
+  and hours-per-person behind a per-row expander. Hours got the expander rather
+  than a column because a crew is a list of unknown length and a column would
+  make every row as tall as the largest crew in the selection. An **Apply to
+  all** strip fills values down INTO the rows (nothing from it reaches the
+  wire), so the old one-payload ergonomics survive as one click. Its two
+  completion controls are tri-state `<select>`s, not toggles — "leave every row
+  alone" is a third state a toggle cannot express, and it is the default.
+- **§4 — the table is seeded, not blank.** New
+  `GET /api/extra-work/bulk-plan/?requests=1,2,3` returns what each selected
+  work plans now plus its crew, in **two queries for the whole selection**
+  (pinned by a test that compares the query count for 2 works against 8 — the
+  obvious implementation calls the detail serializer's helper per work, which
+  is two queries EACH). Same view, same door, same scope resolution as the
+  POST. A blank table over existing plans is not neutral: the operator cannot
+  tell "no budget" from "the dialog did not load it", and a save reads as a
+  wipe.
+- **§5 — the three things that must not regress, each pinned.**
+  (a) Both plan endpoints stay on `JSONParser` — DRF reads an absent boolean
+  from form data as `false`, and the per-work shape raises the stakes because a
+  nested `items` list has no form-data spelling at all. (b) Switch
+  independence is now per field per row by CONSTRUCTION: every field is
+  compared against its own seed and omitted when equal, so no control can ride
+  along with another; measured on the wire, not asserted in a comment. (c)
+  Overrun WARNS — the row shows the number and nothing is disabled, nothing is
+  capped, nothing is refused. The reference system built that hard cap and the
+  business had it removed; `validateTotalHours()` is still in their code,
+  uncalled, beside `// Hours validation removed per user request`.
+
+Budget hours still never touch money: not one figure in `planning.py` reaches a
+price, and `rowAmounts()` remains the one billing-total rule.
+
+### Done — Sprint 191 (wave 3, chat E of 2): Location & Customer, third time
+
+The owner asked for these two facts in the page HEADER three times. Sprint 189
+built a card in the right column; Sprint 190 moved the same card up one slot.
+Both readings were wrong, and both were mine. This is the header.
+
+- **§1 — plain text in the header band.** The header is now a two-column band:
+  ticket-number chip row + title + description on the left, Location and
+  Customer on the right, right-aligned, directly under the Convert-to-Extra-Work
+  button. Measured at 1440px: the block's right edge is **1412px** and the
+  Convert button's right edge is **1412px** — flush. The block spans y
+  **126–419**, the chip row starts at y **126** and the title at y **158–237**,
+  so it opens level with the top of the band and runs the full height of the
+  title. Values render at **18px/800** against the title's 36px. It is plain
+  text and measurably so: computed `background` is `rgba(0,0,0,0)`, `border` is
+  `0px none`, `box-shadow` is `none`.
+- **The block is not tied to the button.** On a CLOSED ticket, where
+  `canConvertTicket` is false and no button renders, the block is still there
+  and settles **2px upward** (y 126 → 124) as the row above it shrinks. No space
+  is reserved, nothing disappears, no hole.
+- **§2 — the card is deleted.** Element, CSS block and `data-testid` all gone;
+  `.ticket-place-card` no longer appears anywhere in `src/`. The right column is
+  five cards again, measured in the DOM on every ticket:
+  `side-card-workflow` → `side-card-assignment` → `responsible-managers-section`
+  → `ticket-schedule-card` → `side-card-details`. No e2e spec referenced the
+  testid, so no test needed updating.
+- **Location and Customer are STILL in the Ticket details card.** Verified by
+  expanding it: the first two rows read LOCATION and CUSTOMER on all three
+  tickets measured. That has been right since Sprint 189 and was not touched.
+- **Overflow, under stress.** With a 121-character room label and a
+  106-character customer name the block wraps inside its 300px ceiling and
+  `document.scrollWidth` still equals `clientWidth` (1440) — zero horizontal
+  overflow. At 390px the band stacks, the block goes left-aligned at 17px, and
+  overflow is still 0.
+- `docs/planning/ew-gap-closing-plan.md` §2.1 **items 4 and 5** are corrected in
+  the same commit, with both superseded orders quoted inline so the next chat
+  can see what changed rather than trusting a silently-edited line.
+
+**Gates.** `npm run typecheck` clean over 295 project files; `npm run lint`
+exactly 44 (42 errors, 2 warnings); `npm run build` OK. No i18n key added — the
+header reuses the existing `details_location` / `details_customer`.
+### Done — W3-G: the completion gate stopped asking every job the same question
+
+Plan §2.3, item 7's server side. W2-D stored `file_upload_required` and
+`completion_notes_required` on the extra work and deliberately left
+enforcement to wave 3; this is that enforcement. **No migration** — the
+two columns already exist and nothing was added to any model.
+
+- **The rule is configurable and the two flags are independent.** File
+  only, note only, both, or neither — the four combinations, on the
+  work, set when it is planned.
+- **It is enforced on BOTH completion surfaces, from ONE rule.** New
+  `backend/tickets/completion_requirements.py` answers "what does this
+  job need"; the per-slot gate
+  (`views_staff_assignments._SlotWriteSerializer`) and the ticket-level
+  STAFF completion transition (`state_machine.apply_transition`) both
+  call it. Only the slot gate was named in the brief, and only the slot
+  gate would have been a hole: it does not move the ticket, so a rule
+  binding it alone is walked around by moving the ticket instead — and
+  the ticket transition is the one that makes work billable.
+- **A ticket that came from no extra work keeps exactly the rule it had:
+  a note or a photo.** There are no flags to read, and inventing a
+  default would either drop a requirement live work has always been held
+  to or invent one nobody asked for. The resolver reports `source`
+  (`extra_work` / `default`) so a caller can tell "this needs nothing"
+  from "we could not find out", and four tests pin the old behaviour so
+  a later sprint cannot drift it by accident.
+- **The two gates keep their own evidence pools, unchanged.** The slot
+  reads what is linked to THAT slot — a sibling worker's photo is not
+  proof this visit happened — and the ticket reads its own
+  customer-visible attachments, message-tier exclusions and all.
+- **The error message names what is missing.** "Completing a slot
+  requires a note or a photo" was true of every job until this sprint
+  and is now true of some of them, which makes it the worst kind of
+  message: right often enough to be believed.
+- **The worker is told before they fill the form in.** New read-only
+  `GET /api/tickets/<id>/staff-assignments/<slot>/completion-requirements/`,
+  gated to the slot's owner or a manager exactly like the PATCH. The
+  dialog states the requirement, marks the required fields, and keeps its
+  own button honest — and the server still refuses on its own, from the
+  same resolver. In the system we are closing the gap against, both flags
+  are checked in the browser only, in two screens that check different
+  things, and no endpoint can persist them at all.
+
+**Three things the owner should decide, none of them silently taken:**
+
+1. **Both flags default False, so every EXISTING extra-work ticket now
+   requires nothing where it used to require a note or a photo.** That is
+   what "both False -> nothing required" means applied to live data, and
+   it is the specified behaviour, but it is a real loosening on work
+   already in flight. If the intent was "off means keep the old rule",
+   the change is one line in `completion_requirements.requirements_for_ticket`.
+2. **`file_upload_required` is satisfied by ANY non-hidden attachment,
+   PDF included**, because that is what the field is named and what W2-D
+   documented. The legacy note-or-photo arm keeps its stricter reading
+   (a genuine image; a PDF mislabelled `image/jpeg` never counted and
+   still does not). If it should mean a PHOTO, it is the `has_file`
+   argument at the two call sites.
+3. **Managers still bypass the gate.** B1
+   (`system-business-logic-and-workflows.md` §4.4) scopes the
+   ticket-level rule to STAFF actors, and this sprint changed WHAT the
+   rule asks, not WHO it asks. So a manager can complete a job that
+   requires a photo without one. Asserted in a test rather than left to
+   be discovered.
+
+### Done — W3-H: the hours screen (wave 3, chat H)
+
+Plan §2.8 and decision 12. The model was already there — `TimeEntry`
+has carried `source_type` / `source_id` since Sprint 173, so hours have
+been attributable to an extra work for several sprints — and nothing
+read them back against the job. This is that read, plus the roll-up.
+
+- **An hours panel on the Extra Work detail page.** Worker x day x hour
+  type, read-only, for the entries whose source is this extra work. The
+  hour type is part of the row identity, not a decoration: four normal
+  hours and two overtime hours on the same day for the same person are
+  two different facts and never merge onto one line.
+- **Planned and actual, side by side.** The roll-up shows W2-D's
+  `budget_hours`, the hours actually entered, and the difference between
+  them ("5,50 uur over de begroting"). This is the comparison the
+  reference system cannot make at all: over there `hours_planed` is
+  written by six code paths and read by nothing that decides anything,
+  and all three of its guards are dead code.
+- **Labour cost is computed in `backend/reports/labour_cost.py`** and
+  nowhere else. `timesheets/` still records hours and weighted hours and
+  never touches money — there is a test that walks every non-test file
+  in that app and fails on the word `hourly_rate`.
+- **The screen says where each number lives**, in one line under the
+  title: hours come from the timesheets module, cost is computed in
+  reporting, and there is deliberately no hourly-rate field on this
+  screen. Decision 12 asked for exactly that, so nobody hunts for a wage
+  field that does not exist.
+- **Budget hours never touches money.** It sits beside the cost and does
+  not feed it: cost is computed from the WEIGHTED ENTERED hours. Pinned
+  by a test that multiplies the budget by a hundred and asserts every
+  cost figure is byte-identical.
+
+**The honest part about cost.** There is no wage anywhere in this
+system — not on `User`, not on `StaffProfile`, not on `HourType`, and
+`timesheets` is written never to hold one. Inventing that field would be
+a payroll feature nobody asked for, in apps this sprint does not own. So
+the rate is one deployment setting, `LABOUR_COST_HOURLY_RATE_EUR`, unset
+by default, read by `resolve_hourly_rate` and by nothing else — the seam
+a real per-person rate replaces. **Unset, every cost figure is NULL and
+the panel says why.** It never prints EUR 0,00, because a cost of zero
+would claim the work was free. Travel costs (`TimeEntry.travel_costs`,
+real money somebody really claimed) are shown either way, and are never
+folded into a "total" while the rate is missing.
+
+**Who sees what.** SUPER_ADMIN and COMPANY_ADMIN see the company's rows
+and the cost. A BUILDING_MANAGER is admitted to the panel and sees only
+their OWN hours and no cost — the Sprint 182 §1 privacy floor, applied
+by calling BOTH halves of the pair (`filter_time_entries_for` for the
+tenant, `restrict_entries_to_self` for whose row it is), and the
+response says `visibility: "self"` so the panel states it on screen
+rather than letting a partial grid read as the job's total. STAFF and
+every customer-side role are refused at the door: the panel reports on a
+parent Extra Work, which the P0 staff-privacy decision (A4) closes to
+STAFF, and a worker reads their own hours in the timesheets module where
+the same pair applies.
+
+**Measured, not eyeballed.** 1440x1000, the built app served from this
+worktree against this branch's backend, real rows in the dev database.
+The panel is the fifth card in the main column at y=1440, 1128px wide
+and 269px tall. The five roll-up figures sit on ONE row (five children,
+one distinct top offset), 217px each. `document.scrollWidth` equals
+`clientWidth` (1440) — no horizontal page overflow — and no element
+inside the panel overflows its own box. The grid's scroll box needs
+neither axis at this size (1124/1124 wide, 102/102 tall). With
+`LABOUR_COST_HOURLY_RATE_EUR=32.50`: 17,75 gewogen uren -> "Loonkosten
+EUR 589,38 / Tarief EUR 32,50 per gewogen uur", travel EUR 12,50 beside
+it, and the grid reading 4,00 / 3,50 / blank / 7,50 for the first
+worker. A day nobody worked is BLANK, not 0,00.
+
+**Gates.** `tsc --noEmit -p tsconfig.app.json --listFiles`: 846 files
+listed, 297 of them under `src/`, 0 errors. `eslint .`: 44 problems (42
+errors, 2 warnings) — the baseline exactly, none of them in the new
+files. `vite build` OK in 8.73s. nl/en `extra_work.json` both 588 keys,
+symmetric, 27 added on each side. Backend:
+`reports.tests.test_w3h_extra_work_hours`, Ran 20 tests, OK.
+
+**Click path (SUPER_ADMIN).** Extra werk -> open any extra work -> scroll
+to "Uren op dit meerwerk", directly under the actual-hours card. The two
+are neighbours on purpose and each says which it is: the card above
+enters hours onto a PRICING LINE (what the customer is charged), this
+panel reads the hours the crew booked in the urenregistratie (what the
+job cost us). To see it populated: Urenregistratie -> week grid -> book
+hours with the job picker set to this extra work.
+
+### Done — Sprint 190 §§1–4 (wave 2, chat A of 4): what the owner saw on the test site
+
+Wave 1 shipped, the owner opened it on crmtest, and four things were wrong.
+Frontend only; no backend file touched and no backend test run.
+
+- **§1 — Location & Customer moved ABOVE Workflow.** Sprint 189 put Workflow
+  first. Measured in the live DOM, the rail now reads `ticket-place-card` →
+  `side-card-workflow` → `side-card-assignment` → `responsible-managers-section`
+  → `ticket-schedule-card` → `side-card-details`, verified in all eight ticket
+  statuses the page can reach. The two facts that tell you WHICH job this is now
+  sit directly under the Convert-to-Extra-Work button, above the control that
+  changes it. `docs/planning/ew-gap-closing-plan.md` §2.1 item 5 says the new
+  order — see the note in "What I did NOT do" about that file being untracked.
+- **§2 — both new things came down.** The card's values 22px → **18px** (page
+  title 36px, header description 17px, all measured on the same render), and the
+  narrow-viewport step 19px → 17px, which would otherwise have been bigger than
+  the base. The workflow button 53px → **48px**: the owner called 53px "a little
+  bit fine", so this is a small step down and deliberately not a return to the
+  42px it was before wave 1.
+- **§3 — colour on the workflow buttons, keyed to MEANING.** The primary forward
+  action is now solid `--green` with white text; a second forward move on the
+  same step is a green outline; a rejection is `--red` on white. No new colour:
+  every value is an existing token. The mapping is a `Record<TicketStatus,
+  WorkflowTone>` so a tenth status cannot compile until somebody classifies it —
+  a `Set(["REJECTED"])` would have painted it green in silence. Measured every
+  button in all eight statuses, base AND hover: the lowest contrast anywhere is
+  4.90:1 and no rejecting action is ever green. The base `.status-btn:hover`
+  turned any hovered button green-tinted, so before this, hovering "Move to
+  Rejected" painted it in the approve colour; both tones now own their hover.
+  The solid button's hover deliberately keeps `--green` rather than lifting to
+  `--green-2` the way `.btn-primary` does, because white on `--green-2` measures
+  4.38:1 — under the AA floor for 15px bold text.
+- **§4 — the chargeable pill was invisible for customers.** On
+  `/my/meldingen` the label measured **1.11:1**. Not a colour choice: the pill
+  is an `<a>`, and `.td-subject a { color: inherit }` (0,1,1) outranked
+  `.work-type-pill-extra-work` (0,1,0), so the white was never applied. Fixed by
+  doubling the class to (0,2,0) rather than `!important`. Now **5.09:1**, hover
+  6.60:1, both over the 4.5:1 AA floor. Measured in all four container contexts
+  the pill is dropped into: only `.td-subject` was ever broken (3.49:1 for a
+  clone, 1.11:1 on the real page), and the other three read 5.09:1 identically
+  before and after.
+
+**Gates.** `npm run typecheck` clean over 295 project files; `npm run lint`
+exactly 44 (42 errors, 2 warnings), baseline held, no new `eslint-disable`;
+`npm run build` OK. No i18n key added, so the nl/en pair is untouched.
+
+### Done — W2-D: the planning layer (wave 2, chat 4)
+
+Branch `feat/ew-gap-closing`, plan `docs/planning/ew-gap-closing-plan.md`
+§2.2 and the two flags of §2.3. Backend and API only — every frontend
+file was out of scope by design, because three other chats are reworking
+the pages this will eventually mount on. The plan modal and the bulk-plan
+table are wave 3.
+
+- **A work now carries what we said it would take.** `budget_hours` is
+  the planned total, and it is distributed across the people on the job
+  in a new model, `ExtraWorkPlannedHours` — one row per person, in the
+  `extra_work` app (not in `tickets`, which is another chat's file this
+  wave; not in `timesheets`, which has a deliberate no-money rule and
+  holds ACTUAL hours, and "planned vs actual" cannot be one number
+  comparing itself).
+- **Requested dates and committed dates are now two separate stored
+  pairs.** `preferred_date` -> `planned_end_date` (plus `deadline`) is
+  what the customer asked for and what is owed;
+  `provider_planned_date` -> `provider_planned_end_date` (the second is
+  new) is what the provider committed to. The plan action writes the
+  second pair and never the first, so planning can no longer move the
+  date the provider is measured against, and "did we do what we
+  promised, or what they asked for?" is a question with an answer.
+- **Plan and start are one action.** `POST /api/extra-work/<id>/plan/`
+  writes the budget, the committed window, the per-person hours and the
+  two completion requirements, and then starts the work. A start that
+  cannot happen is REPORTED, never raised: once the work has an
+  operational ticket its status follows that ticket (Sprint 181 §1), so
+  the response comes back `started: false` with
+  `start_skipped: "operational_status_follows_ticket"` and the plan
+  still lands. Throwing away a correct plan because of a state the
+  operator can already see on their screen would be the wrong trade.
+- **Bulk plan, `POST /api/extra-work/bulk-plan/`** — the same payload for
+  many works, all-or-nothing, with one constant rejection body for every
+  reason (H-1). **It carries both completion flags**, which is the whole
+  reason it is written the way it is. Here there is ONE payload
+  serializer and ONE writer, and both read every field — booleans
+  included — by KEY PRESENCE: absent means untouched, so a bulk edit of
+  the dates cannot touch a flag and a bulk edit of a flag is something
+  somebody asked for. (On the reference side the evidence is stronger
+  than the brief's wording: neither flag survives ANY plan write there.
+  The modal sends them, the config-driven update persists neither, and 0
+  of 78 live records has either set —
+  `docs/reference/osius-reference-system/01-extra-work.md` §1.6, §3.6.
+  The brief calls it "bulk plan writes both to false"; the mechanism
+  differs, the consequence is the same.)
+- **Both plan endpoints are JSON-only, and that is a correctness fix.**
+  DRF reads a boolean that is ABSENT from HTML form input as `False` (an
+  unchecked checkbox sends nothing), so with the default parser set a
+  form-encoded plan that never mentioned a completion flag would have
+  written it to False on every work it touched — the same defect,
+  rebuilt by a framework default rather than by anybody deciding it. The
+  payload carries a nested list that form encoding cannot express
+  anyway. Pinned by a test on each endpoint.
+- **Overrun warns. It never blocks.** Distributing more hours than the
+  budget returns 200 with a `hours_overrun` warning naming the budget,
+  the distributed total and the difference; the save has already
+  happened. The warning is on the read surface too
+  (`planned_hours_overrun` on the detail), so the manager approving the
+  work sees it on the screen they approve from. The no-block rule is the
+  business's own: over there the hard cap exists as a complete function,
+  `validateTotalHours()`, is never called, and the model's boot carries
+  `// Hours validation removed per user request`.
+- **Hours belonging to somebody who has been un-assigned stay visible and
+  stay counted**, flagged `is_assigned: false`. Over there the grid is
+  built from the assignment list, so those hours vanish from the screen
+  while staying in every total and nothing explains the difference (live
+  work 474: 13.5 distributed hours against a budget of 1.00, no warning
+  anywhere).
+- **Budget hours never touches money.** Nothing in the planning module
+  reaches a price; `rowAmounts()` and its server-side mirror stay the one
+  billing-total rule. Pinned by a test that reads all six money fields
+  before and after a 40-hour plan and asserts they are unchanged.
+- **Planning is provider-only, and a customer never sees the budget or
+  the distribution** — on the detail or on the list. The two completion
+  flags stay visible to them: those are a promise about the evidence
+  they will get, not a number about our own people.
+
+**Click path (SUPER_ADMIN).** There is no button yet — this is the API
+half, and the UI is wave 3. To see it: Extra Work -> open any
+customer-approved job -> the detail response now carries `budget_hours`,
+`provider_planned_end_date`, `planned_hours`, `planned_hours_total`,
+`planned_hours_overrun`, `file_upload_required`,
+`completion_notes_required` and `actions.can_plan`. Assign people first
+(Extra Work -> the job -> Assignment) or the hours distribution refuses
+them.
+
+**Gates.** Ran 129 tests, OK. No frontend file was touched, so the
+frontend gate was not run. The migration's rendered SQL is four
+`ADD COLUMN` and one `CREATE TABLE` — no drop, no type change, no
+backfill.
+
+**Handoff to wave 3.** The Work Plan still places an extra work on
+`preferred_date` -> `planned_end_date`
+(`backend/tickets/views_work_plan.py` `_ew_week_q` / `_extra_work_job`),
+i.e. on what the CUSTOMER asked for, even though a committed window now
+exists beside it. Whether the plan should draw the committed window when
+one is set is an owner decision, and the file belongs to another chat
+this wave.
+
+**Tests.** `extra_work.tests.test_w2d_planning` and
+`extra_work.tests.test_w2d_bulk_plan` are new;
+`extra_work.tests.test_extra_work_mvp` and
+`extra_work.tests.test_m4_billing_fields` were run because model fields
+and both request serializers changed and those two modules are what
+prove the existing shape is untouched. `extra_work.tests.test_sprint176_dates`
+and `test_sprint184_dates_travel` were added to the list because
+`dates.py` — the ONE writer of an Extra Work's dates — gained the new
+committed-end field and its two validation rules.
+
+**Not done, deliberately.** No enforcement of the two completion flags
+(that is the completion transition, wave 3, and it belongs in one place).
+No coordinator concept — the word does not appear in the reference
+backend at all. No hard cap on hours. No `planned_by` / `planned_at`
+columns: the plan writes one `ExtraWorkStatusHistory` annotation row,
+which is the trail this app already uses for non-status writes, and a
+second copy of the same fact is how two screens end up disagreeing.
+### Done — W2-C: fifteen things above the table became eleven
+
+The owner, on the Extra Work page: *"there are a lot of chips and cards.
+it looks confusing make them simpler. without giving up important
+information."* Frontend only — no backend file was touched and no
+backend test was run, because nothing on the server changed.
+
+MEASURED at 1440x1000 as SUPER_ADMIN against the seeded dev database,
+before and after, from the live DOM. `/extra-work` put **953px** between
+the top of the page and the first row of data; it now puts **728px**.
+`/tickets/chargeable` went 750px to 681px. Nothing scrolls sideways at
+1440 or at 1280 (`scrollWidth == clientWidth` on both).
+
+- **The four KPI counter cards are gone (89px, four boxes).** Three of
+  their four numbers were on screen twice. "Open requests 3" is the
+  "Awaiting pricing" chip, which shows the same 3 AND filters; "Awaiting
+  customer 1" is the "With the customer" chip, same. Those two are
+  covered with nothing lost. "Price approved 3" is a REAL removal: since
+  Sprint 180 split the list into two tracks, that number is split with
+  it — the red "3" badge on the Quote & price tab counts the half with no
+  operational ticket (the same 3, on this data) and the ticket chips on
+  Chargeable work show the other half. There is no one place left that
+  states it, and inventing one would have meant a chip whose count
+  duplicates the badge beside it.
+- **"Total value EUR 8,315.12" moved instead of dying.** It sits on the
+  list's own toolbar now, as a sentence, above the table it describes.
+  Its ARITHMETIC IS UNTOUCHED — measured identical before and after —
+  because relocating a number must not change it. Beside the money strip
+  it read as a fifth figure of the same kind and it is not one: the
+  strip's four are server aggregates over precise populations, this is
+  the sum of what the page loaded. That row was provider-only (the edit
+  toggle inside it is); it renders for everyone now, with the toggle
+  keeping its own gate, so a customer does not lose a number they had.
+  **Known and deliberately not fixed here:** it still sums the loaded
+  set, not the filtered view, so it can disagree with the rows on screen.
+  Re-scoping it is the right fix and is in NEXT — it changes a number,
+  which a layout sprint should not do quietly.
+- **The track control, its sentence and the status chips are ONE band.**
+  Three stacked blocks costing 58 + 19 + 55px plus gaps, two of them
+  rendered as identical rows of tiles. Now: one bordered band, the two
+  tracks as a joined segmented control with the sentence beside them, the
+  status chips on one baseline underneath. 146px to 96px. Both shared
+  components (`TrackTabs`, `StatusTiles`) are restyled BY CONTEXT from
+  `index.css` and neither file was edited — the tickets list renders
+  `StatusTiles` too.
+- **The money strip is 184px tall instead of 116px, with all four figures
+  intact.** The four icon tiles went (a generic clock / hammer / check /
+  banknote said nothing the label did not). The sentence under each
+  figure was REWRITTEN, not trimmed: each states the consequence the
+  label does not — "Money committed, not yet earned", "Lands when the
+  work finishes" — because a second line that only rephrases the heading
+  earns one line's worth. Labels, values, request counts and the unpriced
+  counts all still render.
+- **The wave-1 chip fix was re-verified, not assumed.** Clicking each
+  track still lists rows (13 on Quote & price, 5 on Chargeable work),
+  "All" stays lit on both, a chip still narrows (3 rows) and clears back
+  to 13.
+
+**Not done, on purpose:** the nine ticket status tiles on
+`/tickets/chargeable` are untouched. They are the Tickets page's control
+— `variant="tickets-page"` renders the same ones — so thinning them
+changes a page nobody complained about, and "Waiting for the manager"
+does not survive the one-line treatment in the measured 118px column.
+`/tickets/chargeable` gets the compact strip and nothing else.
+
+### Done — Sprint 189 §§1–4 (chat 1 of 3): the four layout changes
+
+Frontend only. Plan §2.1, items 2–5. No backend file was touched and no
+backend test was run, because nothing on the server changed.
+
+- **§1 — Department and Work Type sit under Preferred Date.** The Details
+  card's dates grid is two columns and held three cells, so the fourth
+  slot — directly under Preferred Date — rendered as blank surface while
+  the same two fields lived in a collapsed card in the right-hand aside,
+  two clicks and a scroll away from every other field of their kind. The
+  card is gone; the values are in the cell, with an Edit trigger beside
+  them and the form opening below the grid — the Sprint 177 §2 shape the
+  deadline cell one row to the left already uses. Provider-only, exactly
+  as the aside card was: measured on a CUSTOMER_USER, neither the cell
+  nor the department name appears anywhere in the page text. The locked-
+  by-invoice case keeps both of its sentences (which invoice, and the
+  reverse-relabel-rebill way out) inline in the cell instead of behind a
+  dead Edit button. Customer Contacts takes the freed height: its scroll
+  box goes 190px → 248px, the collapsed card header (46px) plus the 12px
+  column gap. Nothing else about that panel changed.
+- **§2 — the workflow buttons are the primary action, on BOTH pages.**
+  Measured before and after on the same DOM, at 1440px: the Ticket
+  page's `.status-btn` goes 42px/13px → 53px/15px, the Extra Work page's
+  `.btn-sm` workflow buttons go 30px/12px → 48px/15px. Sizing and weight
+  only — every colour token and hover rule is the one the button already
+  carried, so a Reject button does not turn green by growing. The
+  correction actions behind "show correction actions" and the
+  Confirm/Cancel pair inside the override reason box stay small on
+  purpose; enlarging them would flatten the hierarchy the disclosure
+  exists to create. A long translated label wraps (69px) instead of
+  overflowing.
+- **§3 — Location and Customer, prominent on the Ticket page.** A new
+  always-visible card, second on the right rail, values at 22px between
+  the header description's 17px and the h1's 36px. It is an ADDED
+  display: the Ticket details card still carries both rows, unchanged.
+  It renders UNCONDITIONALLY — deliberately not tied to `canConvertTicket`
+  or any other gate. A room label keeps its building underneath it.
+- **§4 — right column order.** Measured in the DOM as
+  `side-card-workflow` → `ticket-place-card` → `side-card-assignment` →
+  `responsible-managers-section` → `ticket-schedule-card` →
+  `side-card-details`. The Workflow card was at the BOTTOM, below five
+  cards an operator had to scroll past to reach the only control that
+  moves the ticket. The card itself is unchanged; only its position is.
+
+**Gates.** `tsc --noEmit -p tsconfig.app.json` clean over 293 project
+files (a bare `tsc --noEmit` scans NOTHING here — `tsconfig.json` is
+`"files": []` with two project references, so it prints a vacuous pass);
+`eslint .` exactly 44 (42 errors, 2 warnings), baseline held, no new
+`eslint-disable`; `vite build` OK. nl/en `extra_work.json` both 553 keys,
+zero asymmetry, one key added (`detail.labels_edit`).
+
+**Measured, not eyeballed.** 1440x1000, real data from a throwaway
+seeded database, both pages: `document.scrollWidth` equals
+`clientWidth` (1440) — zero horizontal overflow — with the Details card
+at 741px, the Extra Work workflow card at 371px, the ticket rail at
+361px, and no element in either page overflowing its own box, including
+a deliberately long department name and a 56-character room label.
+### Done — W1-C: four figures, and the track tabs stopped emptying the list
+
+Branch `feat/ew-gap-closing` (the Extra Work gap-closing plan,
+`docs/planning/ew-gap-closing-plan.md` §2.4 and its chip fix). Ran as one
+of THREE parallel Claude Code chats on that one branch, on a disjoint
+file set. The `## NOW` header above still names `feat/sprint-188`, and
+all three chats left it alone for the same reason: rewriting one shared
+paragraph from three chats at once conflicts three ways over prose. It
+is the closing chat's job, and it is the one thing in this file still
+owed.
+
+- **Picking a track no longer empties the list.** `switchTrack` reset the
+  status filter to the string `"ALL"`, and the All tile is `""`.
+  `StatusFilter` is a bare `string`, so nothing caught it: choosing
+  Quote & price or Chargeable work set a value no chip owns, every row
+  was filtered out and NO tile lit up. Picking a track now selects All,
+  which is what the owner asked for and what the line's own comment
+  always said it did.
+- **A money strip on the Extra Work list and on Chargeable work.** Four
+  figures, each with a sentence under it saying what it means: quoted and
+  not yet started, in progress, done in this billing month, and — of that
+  — the part already invoiced. The fourth is labelled as a share of the
+  third ("Daarvan al gefactureerd"), because four numbers that look
+  independent invite somebody to add them up.
+- **One aggregate, not a sum of the page.** New
+  `GET /api/extra-work/financial-summary/`
+  (`backend/extra_work/views_financials.py`). Two queries, constant in
+  the row count, pinned by `assertNumQueries` at two different sizes. It
+  computes NO money and NO classification of its own: amounts come from
+  `reports.dimensions._amounts_for_state` (the server mirror of
+  `rowAmounts()`), and which bucket a row lands in comes from
+  `extra_work.billing`'s `is_billable` / `billing_month`. W1-B's billing
+  cutoff widens `is_earned`; because this endpoint calls it rather than
+  restating it, that widening arrives here by itself.
+- **Provider management only.** STAFF and CUSTOMER_USER get 403, and the
+  strip renders nothing for them. A customer's own money already has a
+  customer-facing surface; a provider's commercial roll-up is not
+  something to hand them by accident.
+- **Zero still is not "unpriced".** Each figure carries how many of its
+  requests nobody has priced; a figure where that is ALL of them renders
+  an em dash instead of EUR 0,00. The sums are untouched — an unpriced
+  row contributes zero, because zero is what it contributes.
+- **`is_priced` has one definition again.** Sprint 188's three-EXISTS
+  expression moved out of `ExtraWorkRequestViewSet.get_queryset` into
+  `views_financials.is_priced_expression`, which the list now imports.
+  It also gained its first backend test, in the new module.
 
 ### Done — Sprint 188: zero is a price, and a customer is not an employer
 
@@ -233,6 +3146,584 @@ the list understood and the counts did not.
   PR cannot cite its own number, so the entry for this chain is appended
   by the first commit of the NEXT branch. Inventing one here is exactly
   the "do not invent status" trap.
+
+
+### Done — W4-Q: the bell, and thresholds you can change without a deploy (wave 4, chat Q of 6)
+
+Plan §2.7's two loose ends, both of which W1-B reported honestly at the
+time rather than hiding: the three time-driven warnings were **e-mail
+only**, and every threshold was an **environment variable**. Neither is a
+detail. A warning nobody sees is the silence this whole sprint family
+exists to end, and a number you can only change by redeploying is a
+number nobody changes.
+
+**No engine was rebuilt.** `sla/business_hours.py` has done real
+business-hours arithmetic since Sprint 7 and is untouched. This sprint
+adds a CHANNEL and a CONFIGURATION SURFACE around it.
+
+- **The three warnings now ring the bell.** `SLA_APPROVAL_CUTOFF_DUE`,
+  `SLA_MANAGER_REVIEW_OVERDUE` and `SLA_WORK_NOT_STARTED` join
+  `NotificationType`, and `sla.warnings._emit` writes the in-app row and
+  queues the mail **from one recipient list, in one loop**, so the two
+  channels cannot drift into telling different people. The roster is not
+  re-derived: it is still the tenant-scoped resolvers in
+  `notifications.services`, and the customer ring still passes through
+  `user_has_scope_for_ticket`. A test asserts the two channels reach
+  exactly the same set.
+- **ONE cooldown, shared, and that is a decision.** The window is asked
+  of the mail log **and** the feed, and a hit on either suppresses both.
+  "Have I already told this person about this problem today?" must not
+  have two answers depending on which pipe carried it — two independent
+  clocks would tell one person about one problem twice a day, which is
+  the flood the cooldown exists to stop, arriving through the door this
+  sprint opened. It is also self-healing: if one channel's row is lost,
+  the surviving row still holds the window shut. Three tests pin it,
+  including the deploy case — W1-B's existing mail rows must not all
+  re-fire as bells on the first sweep after this lands.
+- **The three enum values are spelled identically in both enums.** One
+  event, two channels, one name. Safe only while none of them is
+  user-mutable, because `NotificationPreference.event_type` stores both
+  enums' values in one column;
+  `notifications/tests/test_w4q_sla_feed.py` asserts that invariant so
+  the day somebody makes one mutable it fails loudly instead of muting
+  the wrong channel.
+- **The feed says what kind of row it is.** Warnings render with an
+  amber left accent and a translated headline; the server `summary`
+  carries the facts only (which job, how many business hours) because a
+  Dutch sentence stored on the row is a sentence nobody can translate.
+  Amber and not red on purpose: a feed that shouts at the same pitch
+  about a job four hours behind and a real failure is a feed people stop
+  reading.
+- **Thresholds are per company, with a default.** New
+  `sla.models.SlaWarningThreshold` — one nullable column per knob, one
+  row per provider company — and `sla.thresholds` resolves the company's
+  own value where it has one and `settings.SLA_WARN_*` where it does
+  not, **per field**. A company that tuned only its manager-review clock
+  keeps the platform default for the rest.
+- **Nothing had to change in any existing deployment.** No company has a
+  row until somebody saves one, so every warning resolves to exactly the
+  number it resolved to before. The env vars are not deleted and must
+  not be: they are what a company with no row falls back on. The env
+  var stopped being the source of truth and became the fallback, which
+  is a change of role, not of value.
+- **A company's threshold cannot move another company's warnings.** The
+  resolver is asked with the SUBJECT's own `company_id` on every row —
+  never a value hoisted out of the loop, which would be one tenant's
+  clock applied to another tenant's work. This is the tenant-scoping
+  surface of the sprint and it is tested directly rather than assumed:
+  two companies, the same stalled work in each, one of them tuned to a
+  hair trigger, and the assertion is about what the other one does NOT
+  get. Both directions (tuning down, tuning up) and the cooldown knob
+  too.
+- **The screen states what a number MEANS.** `/admin/sla-warnings`,
+  SUPER_ADMIN / COMPANY_ADMIN only. "24" is not a threshold anybody can
+  reason about; the field prints "24 business hours (Mon-Fri
+  09:00-17:00), which is about 3 working days" — and the window comes
+  from the server, which reads the same settings the engine measures
+  with, so the sentence cannot go stale. The two billing-cutoff figures
+  are labelled CALENDAR days, because a billing date is a date on a
+  calendar; that asymmetry is real and is stated rather than smoothed
+  over.
+- **Zero is a legal threshold.** An empty field means "not configured,
+  using the default"; a typed `0` means "warn me the moment it lands in
+  review". They never render or behave the same — the input state is a
+  string, not `number | null`, precisely so `""` and `0` stay distinct.
+  Same distinction the money rule makes between unpriced and free.
+  `override` / `effective` / `default` are three separate fields on the
+  wire for the same reason: an override that happens to equal the
+  default is still an override, and the screen says so.
+- **A customer never sees this.** 403, not an empty list — a filtered-
+  to-nothing response would still leak the endpoint's shape. A
+  BUILDING_MANAGER is refused too: these numbers govern every ticket in
+  a whole company and a BM's authority is one building. A COMPANY_ADMIN
+  probing another company's id gets **404, not 403**, so the status code
+  cannot be used to enumerate company ids.
+- **One predicate governs the link and the route.**
+  `canManageSlaWarnings` + `SlaWarningsRoute`. Two independently-
+  maintained consumers of one rule is the shape that hid the
+  `documents` permission group for three sprints.
+- **Migrations are additive.** `sla/0001_initial` is the first migration
+  the app has ever had (it had no models); `notifications/0018` is
+  choices-only on an existing CharField. No column changes, no backfill,
+  and `makemigrations --dry-run --check` reports **No changes detected**.
+
+**Measured, not eyeballed** (built `dist/` behind `vite preview`, the
+branch backend on the dev database, Playwright reading the live DOM at
+1440x1000):
+
+- `/admin/sla-warnings` renders all **seven** knobs, laid out two-up per
+  warning (x=301 and x=860, w=535 each) with the cooldown full-width
+  (w=1094). Every one prints its meaning: *"24 business hours (Mon-Fri
+  09:00-17:00), which is about 3 working day(s)"*, *"5 calendar day(s)"*,
+  *"24 clock hour(s), so outside working hours as well."*
+- **Empty and 0 measurably differ.** Same field, three states read out of
+  the DOM: empty -> "Not set - the default of 8 is used." / "8 business
+  hours ... about 1 working day(s)"; typed `0` -> "This company's own
+  value." / "0 business hours ... about 0 working day(s)"; cleared again
+  -> back to "Not set - the default of 8 is used."
+- **No horizontal overflow.** `scrollWidth == clientWidth` at 1440 (1440)
+  and at 390 (390), on both the thresholds screen and the feed.
+- **The feed marks a warning and stays legible.** Three warning rows,
+  `data-warning="true"`, each carrying `inset 3px 0 0 rgb(154,90,0)` and
+  a composited background of **rgb(247,242,235)** against a plain row's
+  **rgb(255,255,255)**. The translated headline is 12px/700 in
+  rgb(154,90,0) at **4.91:1** contrast — over the 4.5:1 AA floor for
+  normal-size text; the summary line is 15.9:1. The bell panel shows the
+  same treatment (row 338x87) and the badge reads 3.
+
+### Deliberately NOT done — W4-Q
+
+- **No per-user mute for the warnings.** W1-B kept all three out of
+  `USER_MUTABLE_EVENT_TYPES` and that stands on both channels: a warning
+  exists precisely because nobody is looking, and a mute switch on it
+  silences the one message whose whole purpose is to arrive unasked.
+- **No AuditLog row for a threshold change.** The row carries
+  `updated_by` / `updated_at` and the screen shows both. Registering the
+  model in `audit/signals.py` would mean editing a file another chat may
+  be in this wave; it is a one-line follow-up (**handoff**).
+- **No per-building or per-customer thresholds.** The owner decided per
+  COMPANY. A second axis would need its own resolution order and its own
+  answer to "which one wins", and nobody has asked for one.
+- **No second SLA clock.** `sla/business_hours.py` is untouched. The
+  Extra Work clock is still W1-B's per-tick computation, not a persisted
+  column.
+
+### Done — W1-B (Extra Work gap closing, wave 1, chat 2 of 3)
+
+**Branch:** `feat/ew-gap-closing`. Three chats in parallel on disjoint
+files (W1-A layout, W1-B this, W1-C financial totals) — see
+`docs/planning/ew-gap-closing-plan.md`, which is the contract.
+
+- **The billing cutoff (plan item 14).** `extra_work.billing.is_earned`
+  had exactly one arm — the spawned operational ticket is CLOSED — and
+  CLOSED is reachable only through APPROVED, which is reachable only
+  through WAITING_CUSTOMER_APPROVAL. So work the customer had not
+  answered yet was not merely dated wrong, it was **out of the billing
+  pool entirely**, and `invoice_date` could not rescue it because
+  `invoice_date` only relocates work that is already earned. The owner's
+  case: billing date 30 August, work done 29 August, approval 4
+  September — August found nothing, September billed August's work.
+  There is now a SECOND arm: earned when the ticket is at
+  WAITING_CUSTOMER_APPROVAL with `sent_for_approval_at` stamped.
+  **WAITING_MANAGER_REVIEW qualifies under neither arm** and must not be
+  added to one — that state is staff saying "done" with nobody having
+  checked, and billing it would bill unverified work.
+- **The cutoff comparison is not re-implemented.** The rule is "sent for
+  approval on or before the customer's cutoff", and the cutoff is
+  supplied by WHEN the invoice run fires: `run_daily_invoice_run` runs on
+  `schedule.is_billing_day` and asks for this period OR EARLIER. Work
+  sent for approval after that day does not exist yet when the run reads
+  the pool. No second copy of `invoicing/schedule.py` to drift from.
+- **One definition of earned, not two.** `reports.dimensions
+  ._classify_extra_work` re-tested `ticket.status == CLOSED` itself; it
+  now calls `is_earned`. A new `earned_at()` is the single anchor that
+  `billing_month`, `InvoiceLine.performed_on` and the report's
+  "Completed At" column all read, so the month, the invoice line and the
+  report cannot disagree about which date they mean.
+- **The customer is told, before they decide.** A `BillingCutoffNotice`
+  component on the customer's Meldingen and Facturen pages, and the same
+  three sentences in the approval-request e-mail — plain Dutch, nl
+  primary, en in lockstep. Not dismissible and not in Settings: a notice
+  the reader can un-see, or has to go looking for, is not a notice.
+- **The SLA engine now talks to somebody (plan §2.7).** It has run every
+  five minutes over every live ticket since Sprint 7 with real
+  business-hours arithmetic and notified NOBODY, and all nine
+  `NotificationEventType` members were event-driven — "nothing happened
+  and it should have" was an empty category. `sla/warnings.py` is that
+  category: three warnings (approval due before the cutoff; manager
+  review past target; planned work not started), each with ONE
+  escalation hop at a second threshold, on the existing five-minute
+  beat, through the existing `send_logged_email`, with the existing
+  tenant-scoped rosters. Repeat suppression is a query against the
+  `NotificationLog` rows the sweep itself wrote, not a "did we run?"
+  flag.
+- **Extra Work has a clock.** `reconcile_sla_states` iterates `Ticket`
+  only, so an approved-and-planned Extra Work with no spawned ticket had
+  no clock at all. The not-started sweep covers it, anchored on
+  `provider_planned_date` (what the provider committed to) and never on
+  the customer's `preferred_date` (what they asked for).
+
+### Deliberately NOT done — W1-B
+
+- **No credit-note or reversal mechanism.** One already exists and it
+  already answers "the customer rejects after we billed": a SENT invoice
+  is immutable, and reversal releases the work via
+  `invoice__reversed_by__isnull=True` in `invoicing/selectors.py`.
+- **No persisted SLA status column on Extra Work.** That needs a field
+  on `extra_work/models.py`, which wave 2 owns. The warning sweep
+  computes the Extra Work clock per tick instead.
+- **No in-app (bell) rows for the three warnings** — e-mail only this
+  round. The in-app feed is a second surface with its own enum and its
+  own read/unread lifecycle; adding it is a follow-up, not a detail.
+
+
+### Done — W2-B (Extra Work detail page, wave 2, chat B of 4)
+
+Frontend only. Four fixes on
+[frontend/src/pages/ExtraWorkDetailPage.tsx](../../frontend/src/pages/ExtraWorkDetailPage.tsx)
+plus the `.ew-*` block of `index.css`. Every layout claim below is a
+number read off the live DOM at 1440px, against the same page built from
+the branch point in a second worktree — not an impression.
+
+- **The label editor opens where the labels are.** Department and Work
+  Type display on the RIGHT of the details grid (Sprint 189 put them
+  there). Pressing "Edit labels" opened the two dropdowns on the far
+  LEFT, below the whole grid: measured at x=307 w=695 while the fields
+  they edit sit at x=662 w=341. The editor now opens inside that cell —
+  x=662 w=341 — stacked rather than in a row, which is the only thing
+  Sprint 189's "does not fit in a half-width cell" was actually about.
+- **Customer contacts moved into the Details card.** It was a COLLAPSED
+  card in the far-right rail, three columns from the request it
+  describes. The lower half of the card is now two columns: the
+  description / billing month / override / routing text on the left
+  (379px), contacts on the right (300px). `:only-child` spans the left
+  block across both columns for the roles that may not see contacts at
+  all (it is SUPER_ADMIN / COMPANY_ADMIN only, mirroring a backend 403),
+  so a building manager does not get a half-width card with dead space.
+  The list scrolls inside itself — measured with 12 contacts:
+  scrollHeight 992 inside a 300px box, panel capped at 350px, page
+  horizontal overflow 0.
+- **Messages went from 741px to 1128px.** It was the left column of a
+  2fr/1fr row whose right column held contacts. With contacts gone the
+  rail held at most one collapsed 46px header, so the row was deleted;
+  Preview joined the full-width collapsed stack (People, Requested
+  services) where it reads as one of a set.
+- **Colour on the workflow buttons, and an ORDER to go with it.** Every
+  status button was `.btn-secondary` — "Start review" and "Cancel
+  request" identical outlined boxes, one under the other. The forward
+  action is now filled green and every cancelling or rejecting action is
+  `.btn-danger`, both existing tokens. Measuring it also caught two
+  things nobody had asked about: the backend hands
+  `allowed_next_statuses` in enum order, so **Cancel rendered ABOVE
+  Start review**; and at CUSTOMER_APPROVED with no spawned tickets,
+  "Mark in progress" and "Retry scheduling work" both came out green.
+  Forward now sorts first and cancel last, and while a repair is
+  pending the repair keeps the emphasis.
+
+### Deliberately NOT done — W2-B
+
+- **No i18n keys added.** The moved contacts panel reuses the three keys
+  the card it replaces already used, so nl/en stay in lockstep with no
+  edit.
+- **The provider-override Approve/Reject pair and the customer-side
+  Reject were NOT measured live**, only read. No seed row reaches a
+  PRICING_PROPOSED-with-override-and-no-open-proposal state, and the
+  synthetic response built to force one threw in the page, so it would
+  have been a measurement of a broken render. Their classes are static
+  ternaries in source.
+
+
+### Done — Sprint 191 §2.5 (wave 3, chat I of 5): the photo pool
+
+Staff uploads land internal. Nothing a worker uploads reaches the customer
+until a provider manager releases it, and phase (before / after) is a label
+that decides nothing.
+
+- **`TicketAttachment.visibility`** — INTERNAL / CUSTOMER, its own column
+  beside `is_hidden`, not a reuse of it. `is_hidden` is moderation (hides a
+  row from everyone below provider management, STAFF included);
+  `visibility` is the customer wall (INTERNAL still shows the worker their
+  own photo). Migration `0027` backfills every existing row to the level it
+  was already being served at — `is_hidden` rows to INTERNAL, everything
+  else to CUSTOMER — so no file changed audience when the column arrived.
+- **The wall is enforced on BOTH read paths.** The list queryset and the
+  download endpoint refuse the same rows for a customer-side caller; a wall
+  on one of them only would have been decorative, because the download URL
+  is the second way to reach a file.
+- **The default is resolved in one place** (`_default_visibility`): a
+  customer's own upload is CUSTOMER (hiding it from the uploader is a bug,
+  not a privacy win), a provider-side upload is CUSTOMER only when the work
+  carries `staff_uploads_customer_visible`, and everything else is
+  INTERNAL. Only provider management may name a `visibility` at upload;
+  STAFF sending one gets a 400 `visibility_forbidden`, mirroring the
+  existing `is_hidden` rule.
+- **Promote is one PATCH**, `…/attachments/<id>/visibility/`, provider
+  management only. The role gate answers 403 before any object lookup, then
+  the ticket is resolved through `scope_tickets_for` — so a manager of
+  another tenant gets a 404 and cannot promote across a tenant boundary,
+  and an attachment id belonging to another ticket 404s on this ticket's
+  URL. Releasing a row that `is_hidden` or an internal note would still
+  hide is refused (400 `attachment_visibility_conflict`) rather than
+  producing a pill that lies.
+- **The per-work setting** `Ticket.staff_uploads_customer_visible` (PA/SA
+  only, terminal-ticket guard, one AuditLog row) changes only what happens
+  next: it never retro-promotes what is already stored.
+- **Completion evidence is untouched, and that was verified rather than
+  assumed.** Both gates —
+  `state_machine._ticket_has_visible_attachment` and the per-slot gate in
+  `views_staff_assignments.py` — count `is_hidden=False` rows and neither
+  reads `visibility`. Pinned three ways in
+  `tickets/tests/test_sprint191_attachment_visibility.py`: an INTERNAL
+  photo still satisfies the ticket-level helper, a hidden one still does
+  not, and a slot completes through the real API on an INTERNAL photo with
+  a blank note.
+- **Frontend:** `AttachmentThumb` carries the state and the action. A
+  provider-side viewer sees an "Alleen intern" / "Zichtbaar voor klant"
+  pill; provider management additionally gets the release/withdraw control.
+  A customer sees neither — every file they are served is customer-visible
+  by construction, so a pill saying so is noise.
+
+### Deliberately NOT done — Sprint 191 §2.5
+
+- **No toggle in the ticket page for the per-work setting.** The API, the
+  detail payload and the Django admin field are in;
+  `frontend/src/pages/TicketDetailPage.tsx` belongs to another chat this
+  wave, so the switch has no mount point yet. Chat E owns the placement.
+- **Extra Work has no photo pool of its own.** Photos live on the spawned
+  operational ticket, which is what this sprint hardened;
+  `backend/extra_work/**` was not touched.
+
+### Done — W3-F (Extra Work detail page + the planning screen, wave 3, chat F of 2)
+
+Frontend only. `ExtraWorkDetailPage.tsx`, three new components under
+`components/extra-work/`, the planning types in `api/types.ts`, the
+`.ew-*` block of `index.css`, and the bulk action on the list page.
+Every layout number below is read off the live DOM at 1440px against the
+same page built from the branch point in a second worktree.
+
+- **Department and Work Type are edited IN PLACE.** Pressing Edit used to
+  open a form under the two values — two full-width dropdowns and a
+  button row — which pushed Description, the billing month, the override
+  and Routing down the page by 169px every time. There is no form now:
+  the two values become selects in the slots they already occupy, and
+  Save / Cancel stand where the Edit button stood. **Measured, closed vs
+  open: Description 477 / 477, Billing month 533 / 533, Routing 725 /
+  725, card height 610 / 610.** Before the change the same four numbers
+  were 477 / 646, 533 / 702, 725 / 894, 638 / 807. Held by three things
+  together: identical outer markup in both states, one pinned height
+  shared by `.ew-label-value` and `.ew-label-inline-select`, and a save
+  error that goes to a TOAST rather than an inline banner — an error
+  banner in that cell would push the page down at the worst moment.
+- **Customer contacts reads as a column of the card, not a box on top of
+  it.** Its heading sat 13px below the Description heading it was meant
+  to line up with, because the panel carried 12px of its own padding
+  inside a filled, bordered box. Padding, background and border are
+  gone; a rule down its left edge says "different column" without saying
+  "different card", and the heading wears the same `muted small` class as
+  every other label in that half. **Description 477, contacts heading
+  477.** The wave-2 scroll behaviour is intact: 12 contacts, 712px of
+  content inside a 300px box, panel 322px, page overflow 0.
+- **The planning layer has a screen.** W2-D shipped `plan/` and
+  `bulk-plan/` complete and tested and nothing called them, so from the
+  owner's chair the feature did not exist. There is now a Plan work
+  action on the detail page opening a modal with budget hours, OUR
+  committed window (labelled as ours, with the customer's requested date
+  and deadline shown beside it read-only), one row per assigned person,
+  and the two completion switches. The button says PLAN AND START.
+  Measured 560x779 at 1440px and at 1280px, page overflow 0 at both.
+- **The overrun warns and does not block, and that was measured, not
+  asserted.** With 6 budget hours and 9 distributed the warning renders
+  and `submit disabled` reads FALSE. A real submit went through at 200
+  with `content-type: application/json`, the dialog closed, and the
+  summary rendered the budget, the distribution, the window, the per-
+  person hours and the overrun.
+- **A real bug the measurement caught.** The first build tracked both
+  completion switches with ONE "touched" flag, so flipping "photo
+  required" also sent `completion_notes_required: false`. Harmless on
+  the single-work dialog, where both switches are seeded from the row —
+  and the reference system's exact defect on the BULK dialog, where they
+  start at false because the selected works disagree and there is
+  nothing to seed from. One flip would have cleared the notes flag on
+  every work in the batch. Now one flag per switch, verified on the
+  wire: touching only the photo switch sends
+  `{"requests":[...],"budget_hours":"4","file_upload_required":true}`
+  and no notes key at all.
+- **Bulk plan** is on the Extra Work list's edit-mode toolbar. 560x672,
+  page overflow 0 at 1440 and 1280, the selected works listed in a
+  bounded box, Confirm disabled only when there is literally nothing to
+  write.
+
+### Deliberately NOT done — W3-F
+
+- **No per-work values in the bulk table.** `POST /extra-work/bulk-plan/`
+  takes ONE payload and applies it to every id; a grid of per-work values
+  would need either an API change (forbidden this sprint) or N separate
+  calls, which would throw away the endpoint's all-or-nothing property.
+  The dialog says plainly that the values go to every selected work.
+- **No planned hours in the bulk dialog.** The server refuses hours for
+  anybody not assigned to EACH selected work, so one shared distribution
+  is only valid when the same crew is on every job; offering the field
+  would produce a 400 that reads as a bug in the dialog. Hours are
+  planned per work.
+- **No client-side block on the overrun anywhere**, by instruction and on
+  the evidence: the reference system's own `validateTotalHours()` is a
+  complete function that is never called, under the comment "// Hours
+  validation removed per user request".
+
+### Done — W4-R: a wage per person, dated, and nobody's business but two roles'
+
+W3-H shipped ONE deployment-wide hourly rate and said so out loud: the only
+knob until a real per-person rate was designed. This is that design, plus the
+privacy rule that has to come with it.
+
+- **The rate is per person AND dated.** New model
+  `reports.models.EmployeeHourlyRate` — one row per (employee, company,
+  `valid_from`), open-ended and superseded rather than edited. The rate that
+  costs an hour is the row in force **on the day of that hour**: latest
+  `valid_from` at or before it, ties by `-id`, the identical resolution shape
+  `extra_work.pricing.resolve_price` and `timesheets.ContractHours` already
+  use. Additive migration `reports/0001_initial.py` — the first model in an app
+  that until now was views over other apps' tables.
+- **A RAISE NEVER RE-PRICES THE PAST, and that is the decision the sprint
+  turned on.** Two ways to get it: snapshot the rate onto the hour entry, or
+  version the rate and resolve it by date. **Time-ranged, because the snapshot
+  is not available to us** — it needs a money column on `TimeEntry`, which is a
+  `timesheets` model, and that module holds no wage by rule and by a test that
+  walks its every file. The seam W3-H named
+  (`reports.labour_cost.resolve_hourly_rate`) exists so the answer never has to
+  reach into that app, and it did not. `valid_from` alone with no `valid_to`: a
+  closed range can leave a GAP, and a gap silently falls through to the
+  deployment rate — a different number arrived at by nobody's decision.
+- **Cost is now computed per person per day, not over one summed total.**
+  `labour_cost()` takes `HourSegment(employee_id, on_date, weighted_hours)`
+  and prices each at its own rate; `RateBook` loads a whole crew's history in
+  ONE query. A job that ran across a raise costs January's days at January's
+  rate and May's at May's — 8h at EUR 20.00 plus 8h at EUR 31.75 is EUR 414.00,
+  not 16h at either.
+- **The global rate is still the FALLBACK** for anyone with no personal rate,
+  and when neither exists every cost figure is still NULL. **A zero is never
+  printed** — "we do not know" and "it was free" stay different claims.
+- **Partial knowledge is not a total.** A crew where one person has no rate and
+  there is no fallback produces NO `hours_cost` and NO `total_cost` — plus
+  `unrated_weighted_hours`, so the absence carries its reason instead of being
+  a blank. A figure covering two thirds of a job is the number an operator
+  reads as the job's cost and acts on.
+- **A wage is personal data, and the line is enforced at the API.** New
+  `IsLabourRateManager` + `reports/labour_rate_scope.py`: SUPER_ADMIN and
+  COMPANY_ADMIN (own company only). **BUILDING_MANAGER is refused** — every
+  verb, every URL — even though they are admitted to every OTHER reports
+  surface by `IsRevenueReportConsumer`; STAFF are refused including for their
+  own rate; every customer-side role always. Tested by calling the real URLs
+  as each of the five roles, not by checking a screen.
+- **The back door is closed and here is the choice.** A one-person job's
+  labour cost divided by its hours IS that person's rate. There is no partial
+  answer that survives that division, so a BUILDING_MANAGER gets **no cost
+  block at all** on the hours panel — `cost: null`, on every job, whatever the
+  crew size, whether the rate is personal or global, and including a job they
+  worked themselves. They see their own hours, as they do everywhere else, and
+  no money beside them.
+- **BUDGET HOURS STILL NEVER FEEDS COST.** W3-H's test (multiply the budget by
+  a hundred, assert every cost figure byte-identical) still passes, and gained
+  a twin that does the same with a personal rate in play — the per-person path
+  added a second lookup and the budget had to stay no nearer it than before.
+- **The timesheets purity test still passes, and was TIGHTENED.** It scanned
+  for `hourly_rate` / `labour_cost` / `labor_cost`; `EmployeeHourlyRate`
+  lowercases to `employeehourlyrate`, which none of those catch, so a rate
+  lookup could have been added to `timesheets/` and passed the old test. It
+  cannot now.
+- **Editing history is allowed and is a different thing from a raise.** PATCH
+  and DELETE re-price the period the edited row covers, deliberately: somebody
+  who typed 24.50 for 25.40 has to be able to fix it. What the model prevents
+  is a rate change moving the past as a SIDE EFFECT of an ordinary raise. Every
+  write lands on the `AuditLog` with a before/after diff (the model joins the
+  full CRUD trio in `audit/signals.py`).
+- **The UI says where each number lives** (plan decision 12). New "Uurtarieven"
+  tab on the Uren admin page — that route already admits SA / CA only, which is
+  exactly the endpoint's admit set — leading with a sentence stating that hours
+  are recorded in the hours module, which holds no amounts, and that the rate
+  lives in reporting. Current rate per person, the full dated history, and a
+  form whose hint says a raise is a NEW row from a NEW date. "No rate set"
+  renders as words, never as EUR 0,00.
+
+
+### Done — W4-P (wave 4, chat P of 6): pre-permission for a worker's photos
+
+Wave 3 made a worker's photo internal until a provider releases it. The
+owner then asked for the escape hatch: *"sometimes the provider or the
+manager should be able to give permissions to the staff to not need this.
+for example give pre permission to ahmet and from then his uploaded photos
+are in the pool. this should be in the permissions page and ticket
+assignment page as well. permission page is for all of the tickets. and the
+tickets assignment is that spesific ticket. and this should be clearly
+stated."*
+
+Two scopes, and the whole point is that they are distinguishable.
+
+- **§1 — one model, two scopes.** `tickets.UploadVisibilityGrant`, keyed
+  by (person, ticket) where `ticket IS NULL` is the STANDING scope (every
+  ticket) and a set `ticket` is the PER-TICKET scope. Two PARTIAL unique
+  constraints, because Postgres treats NULLs as distinct and one
+  `unique_together` would allow any number of standing rows per person.
+  Not a sixth bespoke mechanism: the three-state "absent = fall through,
+  explicit entry = a decision" shape is
+  `BuildingManagerAssignment.permission_overrides`, and the row-per-grant
+  shape is `CredentialCustomerVisibility`. Migration `0028`, additive, no
+  backfill.
+- **§2 — the resolution order, in one place and in words.**
+  `backend/tickets/attachment_visibility.py`: **per-ticket > standing >
+  per-work setting > default. Most specific wins. Any explicit grant makes
+  the photo customer-visible. Internal is the default when nothing has
+  been granted at any level.** `views.py::_default_visibility` is now a
+  one-line call site — no rung is implemented twice. The per-work rung is
+  the one that speaks in a single direction: its column default is
+  `False`, so "off" cannot be told from "never set", and reading it as a
+  veto would make the standing grant useless on every work in the system.
+- **§3 — `TicketAttachment.visibility_source`.** WHICH rung decided, written
+  once at upload. "Internal" is no longer one rule with one cause, and a
+  manager who cannot tell a default from a refusal promotes against a rule
+  that already decided. Blank on every pre-W4-P row, which reads
+  *unrecorded* and never *default*.
+- **§4 — granting is privileged, and never self-service.** Both scopes
+  refuse the actor's own user id with 403. STANDING is SUPER_ADMIN /
+  COMPANY_ADMIN only and a COMPANY_ADMIN only inside their own company
+  (`manageable_user_ids_for`); PER-TICKET is provider management with
+  scope on the ticket, which is exactly the line the per-attachment
+  promote action already draws, because a per-ticket grant IS a
+  pre-authorised promote. A BUILDING_MANAGER may therefore do per-ticket
+  and not standing.
+- **§5 — the permissions screen.** `UploadVisibilityCard`, mounted on
+  `/admin/users/<id>`. THREE states, not a toggle: granted / refused /
+  not set. A two-state toggle cannot express "refused" and "not set"
+  separately, and collapsing them would turn every unset person into a
+  refusal the moment somebody opened a work up. The card states its reach
+  ("applies to EVERY ticket") and names the per-ticket setting as the thing
+  that overrides it.
+
+**THE CONTRACT FOR CHAT M** (the per-ticket UI on the Assignment card):
+
+```
+GET   /api/tickets/<ticket_id>/upload-visibility/
+      -> { ticket_id, staff_uploads_customer_visible,
+           people: [ { user_id, user_email, user_full_name,
+                       uploads_customer_visible,          # per-ticket, tri-state
+                       standing_uploads_customer_visible, # tri-state
+                       reason, granted_by_id, updated_at,
+                       effective_visibility,   # INTERNAL | CUSTOMER
+                       effective_source } ] }  # which rung decided
+PATCH /api/tickets/<ticket_id>/upload-visibility/<user_id>/
+      { "uploads_customer_visible": true | false | null, "reason": "" }
+      -> one `people` entry, recomputed
+```
+
+- One entry per DISTINCT person holding a staff slot (a person may hold
+  several dated slots; the permission is about the person, not the slot).
+- `true` grants, `false` refuses, **`null` clears** — three different
+  things. The key is required; omitting it is a 400.
+- Roles: SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER with scope on the
+  ticket. 403 `upload_visibility_forbidden` otherwise, 403
+  `upload_visibility_self_grant_forbidden` on your own id, 404 for an
+  out-of-scope ticket or a person with no slot here.
+- **Do not re-derive the effective value client-side.** Render
+  `effective_visibility` / `effective_source`. Typed client:
+  `frontend/src/api/uploadVisibility.ts`.
+- What a customer sees is unchanged by any of this: the grant decides the
+  LEVEL an upload lands at, never who may read a stored row.
+
+### Deliberately NOT done — W4-P
+
+- **No per-building scope.** A third scope between standing and per-ticket
+  was not asked for, and every added rung is another row in a table an
+  operator has to hold in their head.
+- **No retro-promotion.** A grant changes the level the NEXT upload lands
+  at. Photos already stored keep the level they were given, exactly as
+  `staff_uploads_customer_visible` already behaved.
+- **`UploadVisibilityGrant` is NOT in the generic audit CRUD trio.** A
+  clear is a DELETE and the row that says what was cleared has to carry the
+  scope, which the generic differ would not know to include. Every
+  create / change / clear writes one hand-written AuditLog row naming
+  STANDING or TICKET (H-10).
+- **The per-ticket UI is chat M's.** This sprint ships its backend and its
+  typed client, and nothing on `TicketDetailPage.tsx`.
 
 
 ## Historical — Sprint 181
@@ -859,7 +4350,17 @@ still listed as open, and all of them had shipped.
 
 ### Open — verified still open
 
-1. **The INSTANT / cart route never writes the quote cache.**
+1. **The Extra Work list's "Total value" sums the loaded set, not the
+   filtered view.** It reads every request the page fetched, minus the
+   cancelled ones, while the row count beside it counts what survived
+   the search / chip / category / planned filters — so the two disagree
+   the moment anybody filters. W2-C moved it out of a KPI card and onto
+   the list toolbar and deliberately left the arithmetic alone, because
+   that sprint was about layout and quietly changing a money number in
+   one is how a screen loses its owner's trust. The fix is
+   `sumRows(visibleRows)` from `lib/billing.ts` — the one rule, already
+   imported by that page — plus a label that says which set it means.
+2. **The INSTANT / cart route never writes the quote cache.**
    `instant_tickets.py` sets `CUSTOMER_APPROVED` directly with no
    Proposal, and nothing on that path writes `subtotal_amount` /
    `vat_amount` / `total_amount`. Sprint 188's `is_priced` makes such a
@@ -870,46 +4371,62 @@ still listed as open, and all of them had shipped.
    is genuinely unpriced), so this is a gap to close deliberately, not a
    fire.
 
-2. **`select_for_update` on the unbilled pool.** Two concurrent invoice
+3. **`select_for_update` on the unbilled pool.** Two concurrent invoice
    runs could both claim the same extra work. Deferred from the invoicing
    sprints; no report of it happening, and the nightly job is the only
    scheduled writer.
 
-3. **The invoice preview does not share the real renderer's layout.** It
+4. **The invoice preview does not share the real renderer's layout.** It
    answers "what would be billed" correctly; it just is not the PDF.
 
-4. **`/admin/customers/:id/quote-requests` — delete it or re-expose it.**
+5. **`/admin/customers/:id/quote-requests` — delete it or re-expose it.**
    Three references remain in the frontend and nothing routes to it. A
    decision, not a build.
 
-5. **The typography sweep**, owed since Sprint 175 and dropped or
+6. **The typography sweep**, owed since Sprint 175 and dropped or
    partially done several times since. Genuine outliers only; the
    building and customer detail pages are the house scale.
 
-6. **An undated extra work cannot be planned in one action** from the
+7. **An undated extra work cannot be planned in one action** from the
    Work Plan — it has to be given dates first, elsewhere.
 
-7. **Extra work with nobody assigned never reaches the Work Plan.** The
+8. **Extra work with nobody assigned never reaches the Work Plan.** The
    week view is built from assignments, so unassigned work is invisible
    exactly when someone needs to notice it.
 
-8. **The Work Plan demo seeder** does not add scheduled tickets and extra
+9. **The Work Plan demo seeder** does not add scheduled tickets and extra
    work, so a fresh dev database shows an empty week.
 
-9. **The forecast's "Current Monthly" needs an as-of-today label.**
+10. **A display honorific on the user profile.** W-LATE's "Dhr. <naam>
+    is geïnformeerd" renders the bare full name today because no
+    profile field carries a form of address; the sentence is already
+    built from the resolved recipients, so the field is the whole job.
+11. **Real push for the bell.** The ladder's L2/L3 rows reach the bell
+    through the 15-second poll; websockets/SSE stay deferred to
+    production day (ruled in W4-Q and again in W-LATE).
+
+10. **The forecast's "Current Monthly" needs an as-of-today label.**
    Without it the number reads as a full-month figure.
 
-10. **The three remaining bare "Approved" strings** — the status word
+11. **The three remaining bare "Approved" strings** — the status word
     without saying approved BY WHOM, which is the distinction the owner
     has drawn twice: on a ticket it means the customer accepted the WORK;
     on an extra work it means they accepted the PRICE.
 
-11. **20 undefined CSS class names.** CLOSED as a defect by Sprint 187's
+12. **20 undefined CSS class names.** CLOSED as a defect by Sprint 187's
     verification — every one is paired with a defined companion class or
     is a no-op hook, and the count is byte-identical to the base commit.
     Listed here only so the next sweep does not re-open it.
 
 ### Decisions the owner owes — no build until he answers
+
+- ~~**Should parked (ON_HOLD) work leave the "Not planned yet" lane?**~~
+  **Decided by the owner, built in P-7 S8 (§D.19 item 13):** parked
+  work leaves the nag and lives in the drawer's "Geparkeerd (N)"
+  sub-view with its reason; the §D.15 matrix row for ON_HOLD is
+  `("rolled", "planned_fri", "parked")`.
+- **"bezoek" or "geplande beurt"** for a recurring visit (§D.18 item 3).
+  The code says *bezoek* everywhere; a bundle-only change either way.
 
 - **Who may set a deadline on an extra work** — provider only, or the
   customer too? The editing surfaces exist; the policy does not.
@@ -938,8 +4455,10 @@ still listed as open, and all of them had shipped.
 
 Raised but not decided. Listed so they are not re-discovered as new.
 
-- **Mobile UI polish.** The phone card lists exist everywhere the tables
-  do, but they have never had a pass of their own.
+- **Mobile UI polish.** FE-7 (2026-08-29) walked the customer portal
+  and the staff surface at 390 and the console at 768; what it left
+  open is in FE-7's ledger (the pinned sidebar at 768, the planning
+  grid on a phone).
 - **Refactoring.** `accounts/` carries four overlapping permission
   modules (CLAUDE.md §7), all live and all imported.
 - **A light / advanced mode split**, so an operator who wants six fields
@@ -972,6 +4491,13 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **the redesign train** (tag `v2026.09-redesign`, 2026-09-04) — not a
+  PR: merged `--no-ff` into `main` directly on the owner's word (P-17
+  Part C), per [merge-recipe.md](merge-recipe.md). Brings the whole
+  Addendum D train (WP-1 → FE-1 … FE-7 → P-1 … P-17) **and** the
+  `feat/ew-gap-closing` chain (Sprints 153–189) it was stacked on.
+  Migrations auto-applied on the first backend recreate; all additive.
+  The tag is the restore point. crmtest now builds from `main`.
 - **#130** (`a7c37f6`) — Sprint 152 plus rounds 152.1–152.3: employee
   hours (urenregistratie) as a new, INDEPENDENT `timesheets` app at
   `/api/timesheets/`, with the architectural rule held throughout — **no

@@ -35,6 +35,7 @@ import { useEditMode } from "../../lib/useEditMode";
 import { AssignPeopleDialog } from "../AssignPeopleDialog";
 
 export function ExtraWorkAssignmentCard({
+  onChanged,
   extraWorkId,
   bare = false,
 }: {
@@ -44,6 +45,8 @@ export function ExtraWorkAssignmentCard({
    *  nesting a card in a card. Sprint 175 left the card open precisely
    *  to avoid that nesting; a flag is the honest fix. */
   bare?: boolean;
+  /** W-FIX1 C2 — after any successful crew write. */
+  onChanged?: () => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [rows, setRows] = useState<ExtraWorkAssignment[]>([]);
@@ -126,6 +129,7 @@ export function ExtraWorkAssignmentCard({
       });
       setAddOpen(false);
       reload();
+      onChanged?.();
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -146,6 +150,7 @@ export function ExtraWorkAssignmentCard({
       });
       setAddOpen(false);
       reload();
+      onChanged?.();
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -183,17 +188,21 @@ export function ExtraWorkAssignmentCard({
           )}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {(edit.editMode || rows.length === 0) && (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={openAdd}
-              disabled={busy}
-              data-testid="extra-work-assign-add"
-            >
-              {t("assign.button")}
-            </button>
-          )}
+          {/* W8 §5 — Assign is ALWAYS here, at the top of the card.
+              It used to appear only in edit mode or when the crew was
+              empty, so on a job that already had one person the way to
+              add a second was to first find a control called Edit. The
+              owner's ask was "the assign action AT THE TOP"; a button
+              that hides behind another button is not at the top. */}
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={openAdd}
+            disabled={busy}
+            data-testid="extra-work-assign-add"
+          >
+            {t("assign.button")}
+          </button>
           {rows.length > 0 && (
             <EditModeToggle
               editMode={edit.editMode}

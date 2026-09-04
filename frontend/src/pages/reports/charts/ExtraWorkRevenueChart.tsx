@@ -13,8 +13,9 @@ import type { ReportFilters } from "../../../api/reports";
 import { fetchExtraWorkRevenue } from "../../../api/reports";
 import type { ExtraWorkRevenueState } from "../../../api/reports.types";
 import { useReport } from "../../../hooks/useReport";
-import { formatMoney } from "../../../lib/intl";
+import { formatDate, formatMoney } from "../../../lib/intl";
 import { ExportButtons } from "./ExportButtons";
+import { ChartSkeleton } from "./ChartSkeleton";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -71,14 +72,23 @@ export function ExtraWorkRevenueChart({ filters, refreshKey }: ChartProps) {
       data-testid="chart-card-extra-work-revenue"
     >
       <h3 className="section-title">{t("ew_revenue_title")}</h3>
+      {/* W7 §4 — the subject and the period, on the money itself.
+          "Extra revenue" answered neither "revenue from what" nor "over
+          which days", and the answer was only ever in a paragraph the
+          reader had to hold in their head while looking at the number.
+          It is now interpolated from the payload's OWN window, so the
+          sentence cannot describe a different range than the figures. */}
       <p className="muted small" style={{ marginBottom: 8 }}>
-        {t("ew_revenue_subtitle")}
+        {data
+          ? t("ew_revenue_subtitle_period", {
+              from: formatDate(data.from),
+              to: formatDate(data.to),
+            })
+          : t("ew_revenue_subtitle")}
       </p>
 
       {loading && (
-        <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-          <div className="loading-bar-fill" />
-        </div>
+        <ChartSkeleton />
       )}
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 12 }}>
@@ -122,7 +132,14 @@ export function ExtraWorkRevenueChart({ filters, refreshKey }: ChartProps) {
               marginBottom: 14,
             }}
           >
+            {/* The NAME goes above the amount, not under it. A big
+                number followed by a muted word is read as a number
+                first and identified second, which is exactly how the
+                owner ended up with amounts he could not name. */}
             <div data-testid="ew-revenue-earned">
+              <div className="report-kpi-caption">
+                {t("ew_revenue_state_earned_full")}
+              </div>
               <div
                 style={{
                   fontSize: 28,
@@ -134,11 +151,13 @@ export function ExtraWorkRevenueChart({ filters, refreshKey }: ChartProps) {
                 {formatMoney(data.states.earned.total)}
               </div>
               <div className="muted small" style={{ marginTop: 2 }}>
-                {t("ew_revenue_state_earned")} ·{" "}
                 {t("ew_revenue_requests", { count: data.states.earned.count })}
               </div>
             </div>
             <div data-testid="ew-revenue-in-progress">
+              <div className="report-kpi-caption">
+                {t("ew_revenue_state_in_progress_full")}
+              </div>
               <div
                 style={{
                   fontSize: 20,
@@ -150,7 +169,6 @@ export function ExtraWorkRevenueChart({ filters, refreshKey }: ChartProps) {
                 {formatMoney(data.states.in_progress.total)}
               </div>
               <div className="muted small" style={{ marginTop: 2 }}>
-                {t("ew_revenue_state_in_progress")} ·{" "}
                 {t("ew_revenue_requests", {
                   count: data.states.in_progress.count,
                 })}
@@ -185,7 +203,7 @@ export function ExtraWorkRevenueChart({ filters, refreshKey }: ChartProps) {
                   t("ew_revenue_tooltip_amount"),
                 ]}
               />
-              <Bar dataKey="total">
+              <Bar isAnimationActive={false} dataKey="total">
                 {rows.map((row) => (
                   <Cell key={row.state} fill={STATE_COLOR[row.state]} />
                 ))}
@@ -193,11 +211,14 @@ export function ExtraWorkRevenueChart({ filters, refreshKey }: ChartProps) {
             </BarChart>
           </ResponsiveContainer>
 
+          {/* Names what the total SUMS. It is all four bars added up,
+              not the earned figure above it, and the two being different
+              numbers on one card is the reconciliation question the
+              owner kept hitting. */}
           <p className="muted small" style={{ marginTop: 8 }}>
-            {t("ew_revenue_total", {
+            {t("ew_revenue_total_all_states", {
               amount: formatMoney(data.totals.total),
-            })}{" "}
-            · {t("ew_revenue_incl_vat")}
+            })}
           </p>
         </>
       )}

@@ -8,17 +8,21 @@ import { loginAs } from "./fixtures/login";
 /**
  * Sprint 29 Batch 29.7 — permissions transparency rollup chip.
  *
- * Adds a glance-level rollup chip on the Permissions page user-access
- * cards, on the Customer Users tab rows, and on the User detail
- * Customer access rows. The chip text is "Default" when the (user,
+ * The glance-level rollup chip reads "Default" when the (user,
  * customer) pair has no overrides on any of its access rows; otherwise
  * "Custom (N)" where N is the SUM of override keys across every access
  * row for that pair (same key on different buildings counts twice).
  *
- * The chip carries the 29.6 locked testid
- * `user-detail-permissions-link-<customerId>` on the User detail page
- * via its `testId` prop so the 29.6 spec still passes (no contract
- * regression).
+ * FE-6 — where the chip lives NOW: on the User detail page's Customer
+ * access card, one chip per customer, carrying the 29.6 locked testid
+ * `user-detail-permissions-link-<customerId>` (via the chip's `testId`
+ * prop) and the `permissions-rollup-chip-default|custom` class. The
+ * Permissions page and the customer's Users tab no longer render the
+ * chip: the Permissions page shows one matrix row per access with one
+ * `permission-group-chip` per permission group (Sprint 130), and the
+ * Users tab shows a per-row access summary
+ * (`customer-user-access-summary`). Those replacement surfaces are
+ * what this spec asserts on for the two retired chip homes.
  */
 
 type AccessRow = {
@@ -184,7 +188,7 @@ test.describe("Sprint 29 Batch 29.7 — permissions rollup chip", () => {
     }
   });
 
-  test("Default chip renders on the Permissions page for a no-override user", async ({
+  test("Default chip renders on the User detail page for a no-override user", async ({
     page,
   }) => {
     test.skip(
@@ -194,17 +198,17 @@ test.describe("Sprint 29 Batch 29.7 — permissions rollup chip", () => {
     const t = defaultTarget!;
 
     await loginAs(page, DEMO_USERS.super);
-    await page.goto(`/admin/customers/${t.customerId}/permissions`);
+    await page.goto(`/admin/users/${t.userId}`);
 
     const chip = page.locator(
-      `[data-testid="permissions-rollup-chip-${t.userId}"]`,
+      `[data-testid="user-detail-permissions-link-${t.customerId}"]`,
     );
     await expect(chip).toBeVisible({ timeout: 10_000 });
     await expect(chip).toHaveClass(/permissions-rollup-chip-default/);
     await expect(chip).toHaveText(/^(Default|Standaard)$/);
   });
 
-  test("Custom (N) chip renders on the Permissions page and N matches the API", async ({
+  test("Custom (N) chip renders on the User detail page and N matches the API", async ({
     page,
   }) => {
     test.skip(
@@ -214,10 +218,10 @@ test.describe("Sprint 29 Batch 29.7 — permissions rollup chip", () => {
     const t = custom!;
 
     await loginAs(page, DEMO_USERS.super);
-    await page.goto(`/admin/customers/${t.customerId}/permissions`);
+    await page.goto(`/admin/users/${t.userId}`);
 
     const chip = page.locator(
-      `[data-testid="permissions-rollup-chip-${t.userId}"]`,
+      `[data-testid="user-detail-permissions-link-${t.customerId}"]`,
     );
     await expect(chip).toBeVisible({ timeout: 10_000 });
     await expect(chip).toHaveClass(/permissions-rollup-chip-custom/);
@@ -232,8 +236,10 @@ test.describe("Sprint 29 Batch 29.7 — permissions rollup chip", () => {
   }) => {
     // Sprint 29 Batch 29.8.5 — the chip became a toggle button that
     // opens an inline <PermissionsRollupSummary> rather than
-    // navigating away. The deep-link path is now under the summary's
-    // explicit "Open full editor" link.
+    // navigating away. The deep-link path is under the summary's
+    // explicit "Open full editor" link, which lands on the Permissions
+    // page with `focus_user` set: that opens the collapsed Advanced
+    // card and scrolls the user's matrix row into view.
     test.skip(
       custom === null,
       "no seed user with overrides and seeding failed",
@@ -241,13 +247,10 @@ test.describe("Sprint 29 Batch 29.7 — permissions rollup chip", () => {
     const t = custom!;
 
     await loginAs(page, DEMO_USERS.super);
-    // Click the chip from the Customer Users tab to prove the toggle
-    // works from a different surface (not just the Permissions
-    // page itself).
-    await page.goto(`/admin/customers/${t.customerId}/users`);
+    await page.goto(`/admin/users/${t.userId}`);
 
     const chip = page
-      .locator(`[data-testid="permissions-rollup-chip-${t.userId}"]`)
+      .locator(`[data-testid="user-detail-permissions-link-${t.customerId}"]`)
       .first();
     await expect(chip).toBeVisible({ timeout: 10_000 });
 
@@ -267,25 +270,41 @@ test.describe("Sprint 29 Batch 29.7 — permissions rollup chip", () => {
       { timeout: 10_000 },
     );
 
-    const card = page.locator(`#user-access-card-${t.userId}`);
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await expect(card).toBeInViewport();
+    const row = page
+      .locator(`[data-testid="permissions-matrix-row"][data-user-id="${t.userId}"]`)
+      .first();
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    await expect(row).toBeInViewport();
   });
 
-  test("Customer Users tab renders the rollup chip on at least one row", async ({
+  test("Customer Users tab renders the per-row access summary for the target", async ({
     page,
   }) => {
+    // The Users tab retired the chip in favour of a per-row access
+    // summary cell; the target member's row must carry one.
     const t = custom ?? defaultTarget;
     test.skip(t === null, "no targets available");
 
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${t!.customerId}/users`);
 
-    const chip = page.locator(
-      `[data-testid="permissions-rollup-chip-${t!.userId}"]`,
-    );
-    await expect(chip).toBeVisible({ timeout: 10_000 });
-    await expect(chip).toHaveClass(/permissions-rollup-chip/);
+    await expect(
+      page.locator('[data-testid="customer-users-page"]'),
+    ).toBeVisible({ timeout: 10_000 });
+    const row = page
+      .locator('[data-testid="customer-user-row"]')
+      .filter({
+        has: page.locator(`[data-testid="customer-user-link-${t!.userId}"]`),
+      })
+      .first();
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    await expect(
+      row.locator('[data-testid="customer-user-access-summary"]'),
+    ).toBeVisible();
+    // And the retired chip is not drawn here any more.
+    await expect(
+      page.locator(`[data-testid="permissions-rollup-chip-${t!.userId}"]`),
+    ).toHaveCount(0);
   });
 
   test("User detail page chip carries the 29.6 locked testid and toggles the inline summary", async ({

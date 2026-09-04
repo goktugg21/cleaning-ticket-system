@@ -1,0 +1,33 @@
+/* The clickable day header.
+ *
+ * T2-3 gave the Work Plan's day header a door: clicking it opens that
+ * day full-width. The header's own look lives in `.wp-day-head` in
+ * `index.css`, which this wave does not own — so this file adds ONLY
+ * what turning that header into a <button> requires: undoing the user
+ * agent's button chrome, and the hover/focus affordance a door needs
+ * and an inline style cannot express.
+ *
+ * It sits beside the component instead of in a shared stylesheet
+ * because the component is the only thing that uses it, and
+ * `check-css-classes.mjs` walks every .css under src/, so the gate sees
+ * these names wherever they live.
+ */
+.wp-day-head-button {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+
+.wp-day-head-button:hover,
+.wp-day-head-button:focus-visible {
+  background: var(--surface-3, var(--surface-2));
+}
+
+.wp-day-head-button:focus-visible {
+  outline: 2px solid var(--focus, var(--primary, #2563eb));
+  outline-offset: -2px;
+}

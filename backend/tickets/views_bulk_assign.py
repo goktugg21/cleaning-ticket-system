@@ -62,6 +62,7 @@ from buildings.assignment_eligibility import (
     resolve_assignable_users,
 )
 
+from . import crew_sync
 from .models import TicketManagerAssignment, TicketStaffAssignment
 
 
@@ -203,26 +204,59 @@ class TicketBulkAssignView(APIView):
                     ticket=ticket, user=user
                 ).first()
                 if mode == "assign":
-                    if existing is not None:
-                        # For staff this means "already has a slot here".
-                        # See the module docstring: this endpoint makes
-                        # one slot per pair, never a second.
+                    # W26.3 — for STAFF the blocking question is "does
+                    # this person hold a BASE slot here", the same level
+                    # `staff_already_assigned` now asks, because this
+                    # path creates base slots. Asking it of ANY row (as
+                    # W26 did) would count someone who holds only a part
+                    # slot as already-assigned and leave them filed under
+                    # a part of a job they are not on — the state rule
+                    # (c) exists to prevent. Managers have no parts, so
+                    # for them any row is the answer.
+                    if model is TicketStaffAssignment:
+                        blocked = model.objects.filter(
+                            ticket=ticket, user=user, sub_task__isnull=True
+                        ).exists()
+                    else:
+                        blocked = existing is not None
+                    if blocked:
+                        # It stays a COUNTER here rather than a 400: this
+                        # endpoint's contract is a per-pair tally over a
+                        # batch of tickets (`already_assigned` is a
+                        # documented response field every caller reads),
+                        # and it creates no duplicate either way.
                         already += 1
                         continue
                     model.objects.create(
                         ticket=ticket, user=user, assigned_by=request.user
                     )
                     created += 1
+                    # W-FIX1 C1 (audit F25) — the bulk door mirrors to
+                    # the extra work like the per-slot door does, so a
+                    # person put on a spawned ticket here can be planned.
+                    if model is TicketStaffAssignment:
+                        crew_sync.worker_added(ticket, user, actor=request.user)
+                    else:
+                        crew_sync.manager_added(ticket, user, actor=request.user)
                 else:
                     if existing is None:
                         not_assigned += 1
                         continue
                     # Every matching row, because a staff member may hold
                     # several slots on one ticket and "unassign this
-                    # person" means all of them, not the oldest.
+                    # person" means all of them, not the oldest. W26.3:
+                    # that is already the base-slot cascade the per-slot
+                    # DELETE performs — base row and its part rows go
+                    # together — so this branch needed no change.
                     for row in model.objects.filter(ticket=ticket, user=user):
                         row.delete()
                         removed += 1
+                    # W-FIX1 C1 — and the mirror on the way out: the
+                    # person's open plan goes with their last slot.
+                    if model is TicketStaffAssignment:
+                        crew_sync.worker_removed(ticket, user.id)
+                    else:
+                        crew_sync.manager_removed(ticket, user.id)
 
         return Response(
             {

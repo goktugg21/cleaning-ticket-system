@@ -27,6 +27,8 @@ from buildings.models import Building
 from companies.models import Company
 
 from .models import (
+    ContractHours,
+    HourSource,
     HOURS_MAX,
     HOURS_MIN,
     MULTIPLIER_MAX,
@@ -58,6 +60,7 @@ ERR_BUILDING_COMPANY_MISMATCH = "timesheet_building_company_mismatch"
 ERR_EMPLOYEE_INVALID = "timesheet_employee_invalid"
 ERR_EMPLOYEE_NOT_IN_COMPANY = "timesheet_employee_not_in_company"
 ERR_COMPANY_REQUIRED = "timesheet_company_required"
+ERR_SOURCE_INVALID = "timesheet_source_invalid"
 
 
 def _request_user(serializer):
@@ -95,6 +98,33 @@ def _scoped_siblings(serializer, queryset, scope_filter):
     """
     return scope_filter(_request_user(serializer), queryset)
 
+
+
+def _source_in_scope(actor, company, source_type, source_id) -> bool:
+    """Is (source_type, source_id) a job `actor` may file hours against
+    in `company`? Resolved through the scopers the lists use, imported
+    at call time so this module keeps its import boundary."""
+    if source_type == HourSource.TICKET:
+        from accounts.scoping import scope_tickets_for
+
+        return (
+            scope_tickets_for(actor)
+            .filter(pk=source_id, company_id=company.id)
+            .exists()
+        )
+    if source_type == HourSource.EXTRA_WORK:
+        from extra_work.scoping import scope_extra_work_for
+
+        return (
+            scope_extra_work_for(actor)
+            .filter(pk=source_id, company_id=company.id)
+            .exists()
+        )
+    if source_type == HourSource.CONTRACT:
+        return ContractHours.objects.filter(
+            pk=source_id, company_id=company.id
+        ).exists()
+    return True
 
 class HourTypeSerializer(serializers.ModelSerializer):
     """Read/write serializer for the per-company hour-type catalog.
@@ -308,6 +338,7 @@ class TimeEntrySerializer(serializers.ModelSerializer):
     hours = serializers.DecimalField(max_digits=4, decimal_places=2)
     weighted_hours = serializers.SerializerMethodField()
     is_locked = serializers.SerializerMethodField()
+    is_future = serializers.SerializerMethodField()
 
     class Meta:
         model = TimeEntry
@@ -333,6 +364,7 @@ class TimeEntrySerializer(serializers.ModelSerializer):
             "building_name",
             "note",
             "is_locked",
+            "is_future",
             "created_by",
             "created_at",
             "updated_at",
@@ -350,6 +382,7 @@ class TimeEntrySerializer(serializers.ModelSerializer):
             "weighted_hours",
             "building_name",
             "is_locked",
+            "is_future",
             "created_by",
             "created_at",
             "updated_at",
@@ -405,6 +438,19 @@ class TimeEntrySerializer(serializers.ModelSerializer):
         offering an action that would 400.
         """
         return is_week_closed(obj.company_id, obj.iso_year, obj.iso_week)
+
+    def get_is_future(self, obj) -> bool:
+        """P-16 (P-14 S4) — hours dated AFTER today, by the SERVER's
+        clock (a browser in another timezone must not decide what
+        "today" is — the P-3 rule). A FLAG, never a block: entering
+        hours on the planned day ahead of time is a real, deliberate
+        practice (the P-14 chains did it), so the surfaces mark it
+        amber and let the person decide — the same warn-don't-block
+        principle as the over-quote rule.
+        """
+        from django.utils import timezone
+
+        return obj.date > timezone.localdate()
 
     def validate_hours(self, value):
         if value is None or value < HOURS_MIN or value > HOURS_MAX:
@@ -514,6 +560,31 @@ class TimeEntrySerializer(serializers.ModelSerializer):
             enforce_week_open(company.id, old_date)
         if new_date is not None and new_date != old_date:
             enforce_week_open(company.id, new_date)
+
+        # W-FIX1 D8 (audit F47) — the job an hour is filed against must
+        # be one the actor may see, in THIS company. The ticket door
+        # refused at the button only; the endpoint took any id. Read
+        # through the same scopers every list uses, at call time
+        # (`timesheets` still imports nothing from `tickets` or
+        # `extra_work` at module level — the rule `HourSource` states).
+        source_type = attrs.get(
+            "source_type", getattr(instance, "source_type", HourSource.OTHER)
+        )
+        source_id = attrs.get("source_id", getattr(instance, "source_id", None))
+        if source_id and not _source_in_scope(
+            actor, company, source_type, source_id
+        ):
+            raise serializers.ValidationError(
+                {
+                    "source_id": [
+                        serializers.ErrorDetail(
+                            "That job is not one you can record hours "
+                            "against in this company.",
+                            code=ERR_SOURCE_INVALID,
+                        )
+                    ]
+                }
+            )
 
         return attrs
 

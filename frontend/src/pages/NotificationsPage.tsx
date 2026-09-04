@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BellOff, CheckCheck } from "lucide-react";
+import { AlertTriangle, BellOff, CheckCheck } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import { listAllCompanies } from "../api/admin";
@@ -25,12 +25,21 @@ import {
   setCompanySubscription,
 } from "../api/notifications";
 import type { CompanyAdmin, Notification } from "../api/types";
+import { isSlaWarningEvent } from "../api/types";
+import { notificationSeverityClass } from "../lib/notificationSeverity";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { Toggle } from "../components/Toggle";
 import { formatRelative } from "../lib/intl";
 
-export function NotificationsPage() {
+export function NotificationsPage({
+  embedded = false,
+}: {
+  /** FE-1 (§D.3.2) — rendered as the "Notificaties" tab inside
+   *  Berichten for STAFF. The host page owns the header, so the
+   *  embedded feed skips its own; everything else is identical. */
+  embedded?: boolean;
+} = {}) {
   const { t } = useTranslation("common");
   const { me } = useAuth();
   const navigate = useNavigate();
@@ -152,25 +161,40 @@ export function NotificationsPage() {
 
   return (
     <div data-testid="notifications-page">
-      <PageHeader
-        eyebrow={t("notifications.eyebrow")}
-        title={t("notifications.title")}
-        subtitle={t("notifications.subtitle")}
-        actions={
-          !viewAsMode ? (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={handleMarkAll}
-              disabled={markingAll || unread === 0}
-              data-testid="notification-mark-all"
-            >
-              <CheckCheck size={15} strokeWidth={2} />
-              {t("notifications.mark_all_read")}
-            </button>
-          ) : undefined
-        }
-      />
+      {embedded ? (
+        <div className="page-header-actions" style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={handleMarkAll}
+            disabled={markingAll || unread === 0}
+            data-testid="notification-mark-all"
+          >
+            <CheckCheck size={15} strokeWidth={2} />
+            {t("notifications.mark_all_read")}
+          </button>
+        </div>
+      ) : (
+        <PageHeader
+          eyebrow={t("notifications.eyebrow")}
+          title={t("notifications.title")}
+          subtitle={t("notifications.subtitle")}
+          actions={
+            !viewAsMode ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleMarkAll}
+                disabled={markingAll || unread === 0}
+                data-testid="notification-mark-all"
+              >
+                <CheckCheck size={15} strokeWidth={2} />
+                {t("notifications.mark_all_read")}
+              </button>
+            ) : undefined
+          }
+        />
+      )}
 
       {/* #109 Part D — SA-only: company view-as filter + the
           per-company subscribe Toggle (platform rule: a boolean state
@@ -342,14 +366,36 @@ export function NotificationsPage() {
                   !viewAsMode && !notification.is_read
                     ? " notif-page-row-unread"
                     : ""
-                }`}
+                }${
+                  isSlaWarningEvent(notification.event_type)
+                    ? " notif-page-row-warning"
+                    : ""
+                }${notificationSeverityClass(notification, "notif-page-row")}`}
                 onClick={() => handleSelect(notification)}
                 data-testid="notification-row"
+                data-severity={notification.severity}
+                /* Sprint W4-Q §1 — the KIND of row is an attribute, not
+                   a second testid. `notification-row` stays the one
+                   selector for "a row in this feed" so nothing that
+                   counts rows has to learn a second name. */
+                data-warning={
+                  isSlaWarningEvent(notification.event_type) ? "true" : undefined
+                }
               >
                 {!viewAsMode && !notification.is_read && (
                   <span className="notif-item-dot" aria-hidden="true" />
                 )}
                 <span className="notif-page-row-main">
+                  {/* P-16 Part D — see NotificationBell: the warning's
+                      headline arrives resolved from the API in the
+                      viewer's own language. */}
+                  {isSlaWarningEvent(notification.event_type) &&
+                    notification.title && (
+                      <span className="notif-warning-title">
+                        <AlertTriangle size={13} strokeWidth={2.2} />
+                        {notification.title}
+                      </span>
+                    )}
                   <span className="notif-page-row-summary">
                     {notification.summary}
                   </span>

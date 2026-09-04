@@ -117,7 +117,9 @@ const ALL_ROLES: Role[] = [
   "CUSTOMER_USER",
 ];
 
-export function UsersAdminPage() {
+/** FE-6 — `embedded`: rendered as a tab of the Mensen surface, which
+ *  owns the title; the page keeps its count line and its actions. */
+export function UsersAdminPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { me } = useAuth();
   const { t } = useTranslation("common");
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
@@ -381,12 +383,16 @@ export function UsersAdminPage() {
 
   return (
     <div>
-      <div className="page-header">
+      <div className={embedded ? "page-header page-header-embedded" : "page-header"}>
         <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
-          </div>
-          <h2 className="page-title">{t("nav.users")}</h2>
+          {!embedded && (
+            <>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>
+                {t("nav.admin_group")}
+              </div>
+              <h2 className="page-title">{t("nav.users")}</h2>
+            </>
+          )}
           <p className="page-sub">
             {loading
               ? t("users.loading")
@@ -403,7 +409,7 @@ export function UsersAdminPage() {
             <RefreshCw size={14} strokeWidth={2.5} />
             {t("refresh")}
           </button>
-          <Link className="btn btn-primary btn-sm" to="/admin/invitations">
+          <Link className="btn btn-primary btn-sm" to="/admin/people/invitations">
             <MailPlus size={14} strokeWidth={2.5} />
             {t("users.invite_user")}
           </Link>
@@ -625,7 +631,9 @@ export function UsersAdminPage() {
         )}
 
         <div className="table-wrap admin-list-wrap">
-          <table className="data-table">
+          {/* FE-6 (§D.8.4) — ten columns measured 63px past the viewport
+              at 1280; the dense cells bring the row back inside. */}
+          <table className="data-table data-table-dense data-table-fit">
             <thead>
               <tr>
                 <th>{t("users.col_email")}</th>
@@ -786,7 +794,7 @@ export function UsersAdminPage() {
               !hasActiveFilters ? (
                 <Link
                   className="btn btn-primary btn-sm"
-                  to="/admin/invitations"
+                  to="/admin/people/invitations"
                 >
                   {t("users.invite_user")}
                 </Link>

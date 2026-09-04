@@ -99,6 +99,10 @@ export interface RecurringJob {
   pricing_mode: PlannedWorkPricingMode;
   fixed_price: string | null; // VAT-exclusive decimal string
   vat_pct: string;
+  /** P-6 V2 — on the wire since the contract link shipped; the pages
+   *  used to cast for it. */
+  contract_line: number | null;
+  contract_line_name: string | null;
   is_active: boolean;
   archived_at: string | null;
   created_by: number;

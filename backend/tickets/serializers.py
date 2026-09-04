@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 from pathlib import Path as FilePath
@@ -20,7 +21,11 @@ from customers.models import (
 )
 from sla import business_hours
 
+from .override_authority import (
+    can_override_customer_decision as _can_override_customer_decision,
+)
 from .models import (
+    AttachmentVisibility,
     SubTask,
     Ticket,
     TicketAttachment,
@@ -30,10 +35,17 @@ from .models import (
     TicketStaffAssignment,
     TicketStatus,
     TicketStatusHistory,
-    WorkCategory,
+    TicketCategory,
 )
 from .permissions import message_type_visible_to_user, user_has_scope_for_ticket
+from .schedule_history import latest_schedule_change
+from .serializers_ticket_categories import reader_language
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
+from .transition_requirements import (
+    ERR_TRANSITION_REQUIREMENTS,
+    phrase_for,
+    unmet as transition_unmet,
+)
 
 # Sprint 7B — reuse the Extra Work cart-line input contract for the
 # convert-to-extra-work endpoint. `extra_work.serializers` does NOT
@@ -155,6 +167,35 @@ def _iso_date(value):
     return value.isoformat() if value is not None else None
 
 
+def _my_planned_hours(ew_request, request) -> list[dict]:
+    """W6-H — the caller's OWN planned days on this Extra Work.
+
+    `[{date, hours}, ...]`, ascending, with `date: null` for hours
+    planned before anybody decided the day. Empty when the caller has no
+    plan on this job, which is the ordinary case for most viewers.
+
+    Hours only. No rate, no cost, no other person's name.
+    """
+    if ew_request is None or request is None:
+        return []
+    user = getattr(request, "user", None)
+    if user is None or not getattr(user, "is_authenticated", False):
+        return []
+
+    from extra_work.models import ExtraWorkPlannedHours
+
+    rows = ExtraWorkPlannedHours.objects.filter(
+        extra_work_request=ew_request, user=user
+    ).order_by("date", "id")
+    return [
+        {
+            "date": row.date,
+            "hours": f"{row.hours:.2f}",
+        }
+        for row in rows
+    ]
+
+
 def resolve_extra_work_origin_core(ticket) -> dict | None:
     """Shared Extra Work origin resolution for the ticket list + detail
     serializers.
@@ -268,6 +309,15 @@ def resolve_extra_work_origin_core(ticket) -> dict | None:
         "planned_end_date": _iso_date(ew_request.planned_end_date),
         "deadline": _iso_date(ew_request.deadline),
         "provider_planned_date": _iso_date(ew_request.provider_planned_date),
+        # W-H — the other half of the committed pair. W2-D added
+        # `provider_planned_end_date` to the extra work and this dict
+        # was not updated, so a ticket spawned from a job planned to run
+        # Monday to Wednesday could borrow the Monday and nothing else.
+        # Read-only here for the same reason its start is: the extra
+        # work owns both, the ticket shows them and links.
+        "provider_planned_end_date": _iso_date(
+            ew_request.provider_planned_end_date
+        ),
     }
 
 
@@ -348,14 +398,61 @@ class TicketStatusHistorySerializer(serializers.ModelSerializer):
         return data
 
 
-class TicketListSerializer(serializers.ModelSerializer):
-    building_name = serializers.CharField(source="building.name", read_only=True)
-    # Sprint 185 E §1 — the KIND OF WORK, beside `type`'s kind of
-    # message. `default=None` because the FK is nullable and traversing
-    # `category.name` on an untagged melding must render, not raise.
-    category_name = serializers.CharField(
-        source="category.name", read_only=True, default=None
+class TicketCategoryFieldsMixin:
+    """W13 — how a melding's category is printed, in ONE place.
+
+    Both the list and the detail serializer show the same three things:
+    the label in the reader's language, the slug (so a client can match
+    on something stable) and the colour (so the list can draw a chip
+    instead of another line of grey text). Writing them twice is how the
+    two screens end up naming one row differently, which is the exact
+    defect the reference system's audit records about its own catalog.
+
+    `default=None` everywhere: the FK is nullable, "not categorised yet"
+    is a real state, and traversing it must render rather than raise.
+    """
+
+    def get_category_label(self, obj) -> str | None:
+        """W14 §1 -- the reader's language, from the ONE resolver.
+
+        This read `Accept-Language` alone, which is the BROWSER's locale
+        and never the app's: nothing in `frontend/src` sets that header.
+        So the ticket LIST and the ticket DETAIL printed the category in
+        whatever language the browser was installed in, while the
+        picker directly beside them printed it in the language the user
+        chose. Same row, two names, one screen.
+
+        `reader_language` is that one resolver; see it for the measured
+        before/after.
+        """
+        if obj.category_id is None or obj.category is None:
+            return None
+        return obj.category.label_for(
+            reader_language(self.context.get("request"))
+        )
+
+    def get_category_slug(self, obj) -> str | None:
+        return obj.category.slug if obj.category_id and obj.category else None
+
+    def get_category_color(self, obj) -> str | None:
+        if obj.category_id is None or obj.category is None:
+            return None
+        return obj.category.color or None
+
+
+class TicketListSerializer(
+    TicketCategoryFieldsMixin, serializers.ModelSerializer
+):
+    archived_by_name = serializers.CharField(
+        source="archived_by.full_name", read_only=True, default=None
     )
+    building_name = serializers.CharField(source="building.name", read_only=True)
+    # W13 — WHAT KIND OF MELDING. Kept named `category_name` because
+    # that is what every existing caller reads; what changed is the
+    # catalog behind it and that the value is now language-resolved.
+    category_name = serializers.SerializerMethodField(method_name="get_category_label")
+    category_slug = serializers.SerializerMethodField()
+    category_color = serializers.SerializerMethodField()
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     company_name = serializers.CharField(source="company.name", read_only=True)
     assigned_to_email = serializers.CharField(source="assigned_to.email", read_only=True, default=None)
@@ -374,6 +471,33 @@ class TicketListSerializer(serializers.ModelSerializer):
     # across a page of EW-spawned tickets. Callers needing them hit the
     # ticket detail endpoint.
     extra_work_origin = serializers.SerializerMethodField()
+    # FE-2 (Addendum D SS D.4) -- the customer-facing phase banner.
+    # Read-only by construction, per-viewer by context; presentation
+    # only, never consulted by backend logic.
+    display_phase = serializers.SerializerMethodField()
+    # P-9 D2 -- WHERE THE ROW CAME FROM, on the list. The same three
+    # values the detail's fact block shows (`detail_facts.ticket_kind`:
+    # MELDING / MEERWERK / TICKET), computed from the parent FKs and the
+    # author's role -- both already on the row (`created_by` is in the
+    # list queryset's `select_related`), so this costs no query per row.
+    # An occurrence ticket is a TICKET here; the row's `occurrence_origin`
+    # is what makes it "Recurring" on screen.
+    kind = serializers.SerializerMethodField()
+
+    def get_kind(self, obj) -> str:
+        from .detail_facts import ticket_kind
+        return ticket_kind(obj)
+
+    def get_display_phase(self, obj) -> str:
+        from .display_phase import ticket_display_phase
+        request = self.context.get("request") if self.context else None
+        user = getattr(request, "user", None) if request else None
+        viewer_is_customer = (
+            getattr(user, "role", None) == UserRole.CUSTOMER_USER
+        )
+        return ticket_display_phase(
+            status=obj.status, viewer_is_customer=viewer_is_customer
+        )
 
     class Meta:
         model = Ticket
@@ -384,8 +508,12 @@ class TicketListSerializer(serializers.ModelSerializer):
             "type",
             "category",
             "category_name",
+            "category_slug",
+            "category_color",
             "priority",
             "status",
+            "display_phase",
+            "kind",
             "company",
             "company_name",
             "building",
@@ -400,12 +528,21 @@ class TicketListSerializer(serializers.ModelSerializer):
             "sla_remaining_business_seconds",
             "sla_display_state",
             "extra_work_origin",
+            "occurrence_origin",
             # Sprint 9B — scheduling fields on the list serializer too so
             # the agenda view can render them without a detail fetch.
             "scheduled_start_at",
             "scheduled_end_at",
             "time_window_label",
             "schedule_status",
+            # W-H §1 — the archive, as ONE fact plus who and when.
+            # `archived_at` is the state (set = archived); the two
+            # companions are the trail. The list carries them too, so a
+            # row in the archive view can say who filed it without a
+            # per-row detail fetch.
+            "archived_at",
+            "archived_by_name",
+            "archive_note",
         ]
         read_only_fields = fields
 
@@ -421,6 +558,65 @@ class TicketListSerializer(serializers.ModelSerializer):
     def get_extra_work_origin(self, obj):
         return resolve_extra_work_origin_core(obj)
 
+    # P-5 S7 — the occurrence origin (see `resolve_occurrence_origin`).
+    occurrence_origin = serializers.SerializerMethodField()
+
+    def get_occurrence_origin(self, obj):
+        return resolve_occurrence_origin(obj)
+
+
+def resolve_occurrence_origin(obj):
+    """P-5 S7 — THE OTHER ORIGIN: an occurrence ticket says which recurring
+    job (and, through its contract line, which contract) it is a visit
+    of, and which visit of this year's it is. None for any other ticket.
+    Shared by the list and the detail serializer."""
+    occurrence_id = getattr(obj, "planned_occurrence_id", None)
+    if occurrence_id is None:
+        return None
+    from planned_work.models import PlannedOccurrence
+
+    occ = (
+        PlannedOccurrence.objects.select_related(
+            "recurring_job",
+            "recurring_job__contract_line",
+            "recurring_job__contract_line__revision",
+            "recurring_job__contract_line__revision__contract",
+            "recurring_job__contract_line__revision__contract__contract_type",
+        )
+        .filter(pk=occurrence_id)
+        .first()
+    )
+    if occ is None:
+        return None
+    job = occ.recurring_job
+    year = occ.planned_date.year
+    siblings = PlannedOccurrence.objects.filter(
+        recurring_job_id=job.id, planned_date__year=year
+    ).exclude(status__in=["CANCELLED", "SKIPPED"])
+    visit_index = siblings.filter(planned_date__lt=occ.planned_date).count() + (
+        siblings.filter(planned_date=occ.planned_date, id__lte=occ.id).count()
+    )
+    line = job.contract_line
+    contract = line.revision.contract if line is not None else None
+    return {
+        "occurrence_id": occ.id,
+        "planned_date": occ.planned_date.isoformat(),
+        "status": occ.status,
+        "recurring_job_id": job.id,
+        "recurring_job_title": job.title,
+        "frequency": job.frequency,
+        "visit_index": visit_index,
+        "visits_this_year": siblings.count(),
+        "contract_id": contract.id if contract else None,
+        "contract_no": contract.contract_no if contract else None,
+        "contract_type_name": (
+            contract.contract_type.name
+            if contract is not None and contract.contract_type_id
+            else None
+        ),
+        "contract_line_name": line.name if line is not None else None,
+    }
+
 
 # Sprint 4 — sub-task serializers.
 class SubTaskAssignmentSerializer(serializers.ModelSerializer):
@@ -433,6 +629,16 @@ class SubTaskAssignmentSerializer(serializers.ModelSerializer):
     user_full_name = serializers.CharField(
         source="user.full_name", read_only=True
     )
+    # W-VIEWER §10 — WHO closed this, when it was not the person it
+    # belongs to. `completed_by_id` alone cannot answer that: on a
+    # worker's own completion it holds the worker, and the reader has to
+    # compare two ids to tell the two apart. The name is resolved here so
+    # the chip can say "Done by Sara on behalf of Ahmet" without a second
+    # lookup.
+    completed_by_id = serializers.IntegerField(
+        source="completed_by.id", read_only=True, default=None
+    )
+    completed_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = TicketStaffAssignment
@@ -448,9 +654,21 @@ class SubTaskAssignmentSerializer(serializers.ModelSerializer):
             "slot_status",
             "completion_note",
             "completed_at",
+            "completed_by_id",
+            "completed_by_name",
+            # W-VIEWER §10 — the reason an operator closed (or reopened)
+            # this on somebody else's behalf. Empty on a worker's own
+            # completion, which is asked for no reason at all.
+            "completed_on_behalf_reason",
             "unable_to_complete_reason",
         ]
         read_only_fields = fields
+
+    def get_completed_by_name(self, obj) -> str:
+        user = obj.completed_by
+        if user is None:
+            return ""
+        return (user.full_name or "").strip() or user.email
 
 
 class SubTaskSerializer(serializers.ModelSerializer):
@@ -462,6 +680,9 @@ class SubTaskSerializer(serializers.ModelSerializer):
         source="created_by.email", read_only=True, default=None
     )
     is_done = serializers.SerializerMethodField()
+    # W-LATE §3b — NONE / OPEN / LAST_DAY / MISSED / DONE, the server's
+    # word, so no screen re-derives the colour from the dates.
+    window_state = serializers.SerializerMethodField()
     staff_assignments = SubTaskAssignmentSerializer(many=True, read_only=True)
 
     class Meta:
@@ -472,6 +693,11 @@ class SubTaskSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "ordering",
+            # W-LATE §3a — the part's own window.
+            "planned_start_date",
+            "planned_end_date",
+            "time_window_label",
+            "window_state",
             "created_by",
             "created_by_email",
             "created_at",
@@ -484,6 +710,9 @@ class SubTaskSerializer(serializers.ModelSerializer):
     def get_is_done(self, obj) -> bool:
         return obj.is_done()
 
+    def get_window_state(self, obj) -> str:
+        return obj.window_state()
+
 
 class SubTaskWriteSerializer(serializers.ModelSerializer):
     """Validates the operator-editable SubTask fields on create / patch.
@@ -491,7 +720,18 @@ class SubTaskWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SubTask
-        fields = ["title", "description", "ordering"]
+        fields = [
+            "title",
+            "description",
+            "ordering",
+            # W-LATE §3a — the window. The two rules on it (end not before
+            # start; inside the ticket's own window) are checked in the
+            # view through `part_windows.refusal`, which answers a STABLE
+            # 400 carrying the field the message belongs to.
+            "planned_start_date",
+            "planned_end_date",
+            "time_window_label",
+        ]
 
 
 class TicketCategorySerializer(serializers.Serializer):
@@ -510,7 +750,7 @@ class TicketCategorySerializer(serializers.Serializer):
     """
 
     category = serializers.PrimaryKeyRelatedField(
-        queryset=WorkCategory.objects.all(),
+        queryset=TicketCategory.objects.all(),
         allow_null=True,
     )
 
@@ -523,18 +763,301 @@ class TicketAutoCompleteFlagSerializer(serializers.Serializer):
     auto_complete_on_subtasks = serializers.BooleanField()
 
 
-class TicketDetailSerializer(serializers.ModelSerializer):
-    building_name = serializers.CharField(source="building.name", read_only=True)
-    # Sprint 185 E §1 — see `TicketListSerializer`: the kind of WORK,
-    # rendered beside the kind of MESSAGE. Nullable FK, so `default=None`.
-    category_name = serializers.CharField(
-        source="category.name", read_only=True, default=None
+class TicketAttachmentPolicySerializer(serializers.Serializer):
+    """Sprint 191 §2.5 — input for the PA/SA attachment-visibility-policy
+    action: the per-work "staff uploads are customer-visible immediately"
+    setting. Same shape as `TicketAutoCompleteFlagSerializer`, which is
+    the endpoint this one mirrors."""
+
+    staff_uploads_customer_visible = serializers.BooleanField()
+
+
+class TicketAttachmentVisibilitySerializer(serializers.Serializer):
+    """Sprint 191 §2.5 — input for the promote/demote action on ONE
+    attachment. `visibility` is the whole body: INTERNAL keeps the row on
+    the provider side, CUSTOMER releases it across the customer wall.
+    Phase is deliberately NOT settable here — a label change is not a
+    visibility change and must not ride along on the same action."""
+
+    visibility = serializers.ChoiceField(choices=AttachmentVisibility.choices)
+
+
+class TicketDetailSerializer(
+    TicketCategoryFieldsMixin, serializers.ModelSerializer
+):
+    archived_by_name = serializers.CharField(
+        source="archived_by.full_name", read_only=True, default=None
     )
+    building_name = serializers.CharField(source="building.name", read_only=True)
+    # W13 — see `TicketListSerializer`. One mixin, so the two screens
+    # cannot print one category two ways.
+    category_name = serializers.SerializerMethodField(method_name="get_category_label")
+    category_slug = serializers.SerializerMethodField()
+    category_color = serializers.SerializerMethodField()
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     company_name = serializers.CharField(source="company.name", read_only=True)
     created_by_email = serializers.CharField(source="created_by.email", read_only=True)
     assigned_to_email = serializers.CharField(source="assigned_to.email", read_only=True, default=None)
     status_history = TicketStatusHistorySerializer(many=True, read_only=True)
+    # FE-2 (Addendum D SS D.4) -- the customer-facing phase banner.
+    # Read-only by construction, per-viewer by context; presentation
+    # only, never consulted by backend logic.
+    display_phase = serializers.SerializerMethodField()
+
+    def get_display_phase(self, obj) -> str:
+        from .display_phase import ticket_display_phase
+        request = self.context.get("request") if self.context else None
+        user = getattr(request, "user", None) if request else None
+        viewer_is_customer = (
+            getattr(user, "role", None) == UserRole.CUSTOMER_USER
+        )
+        return ticket_display_phase(
+            status=obj.status, viewer_is_customer=viewer_is_customer
+        )
+
+    # P-13 C/D — the finished job's MONEY fact, for the Done banner and
+    # the archive confirm: the earned-but-unbilled amount on the parent
+    # extra work, with the customer's billing day. Null unless the
+    # viewer is provider management, the ticket is EW-born (canonical
+    # FK), and `extra_work.billing.unbilled_billable_total` says money
+    # actually waits (billable, unclaimed, positive). Read-only,
+    # backend-computed — the screen never infers billing state itself.
+    extra_work_billing = serializers.SerializerMethodField()
+
+    def get_extra_work_billing(self, obj):
+        request = self.context.get("request") if self.context else None
+        user = getattr(request, "user", None) if request else None
+        if getattr(user, "role", None) not in {
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        }:
+            return None
+        ew = obj.extra_work_request
+        if ew is None:
+            return None
+        from extra_work.billing import unbilled_billable_total
+
+        total = unbilled_billable_total(ew)
+        if total is None:
+            return None
+        from customers.models import Customer
+
+        customer = ew.customer
+        day = None
+        if customer is not None:
+            if customer.invoice_day_of_month:
+                day = customer.invoice_day_of_month
+            elif customer.invoice_day_rule == Customer.InvoiceDayRule.FIRST_OF_MONTH:
+                day = 1
+            elif customer.invoice_day_rule == Customer.InvoiceDayRule.LAST_OF_MONTH:
+                day = "LAST_OF_MONTH"
+        return {
+            "unbilled_total": f"{total:.2f}",
+            "customer_name": customer.name if customer is not None else "",
+            "customer_invoice_day": day,
+        }
+
+    # FE-3 (Addendum D SS D.4 / SS D.11) -- the fact block's two missing
+    # facts: what KIND of work this is, and how it stands against its
+    # due date. Pure functions in `detail_facts.py`; read-only,
+    # presentation only, zero storage.
+    kind = serializers.SerializerMethodField()
+    due_date = serializers.SerializerMethodField()
+    due_kind = serializers.SerializerMethodField()
+    days_until_due = serializers.SerializerMethodField()
+    # P-1 — provenance: is the window a PERSON's plan, whose, and when.
+    # Read off history that already exists (`tickets/plan_provenance.py`);
+    # nothing stored. `created_by_name` is the plain fact every detail
+    # states — nobody guesses who opened a ticket.
+    has_real_plan = serializers.SerializerMethodField()
+    plan_source = serializers.SerializerMethodField()
+    # P-15 §0.4 — the customer's wish as a bare fact; set only when the
+    # wish is the job's sole date (it places nothing, dues nothing).
+    wished_day = serializers.SerializerMethodField()
+    planned_by_name = serializers.SerializerMethodField()
+    planned_at = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
+
+    def get_kind(self, obj) -> str:
+        from .detail_facts import ticket_kind
+        return ticket_kind(obj)
+
+    def get_has_real_plan(self, obj) -> bool:
+        return self._due_facts(obj)["has_real_plan"]
+
+    def get_plan_source(self, obj):
+        return self._due_facts(obj)["plan_source"]
+
+    def get_wished_day(self, obj):
+        return self._due_facts(obj)["wished_day"]
+
+    # P-15 §0.3 — the on-behalf sign-off, said out loud. When the
+    # approval leg was a provider override, `approved_on_behalf` is
+    # True and the fact block words the check as the sign-off; when
+    # additionally no customer-side account can even reach the ticket
+    # (`customer_can_decide_online` False), the sentence explains WHY
+    # the check counts: "this customer cannot approve online".
+    approved_on_behalf = serializers.SerializerMethodField()
+    approved_by_name = serializers.SerializerMethodField()
+    customer_can_decide_online = serializers.SerializerMethodField()
+
+    def get_approved_on_behalf(self, obj) -> bool:
+        from .detail_facts import approval_leg
+
+        return approval_leg(obj)[1]
+
+    def get_approved_by_name(self, obj):
+        from .detail_facts import approval_leg
+
+        return approval_leg(obj)[0]
+
+    def get_customer_can_decide_online(self, obj):
+        # Answered only while the question is live: the ticket waits on
+        # the customer now, or the approval was recorded on their
+        # behalf. None otherwise — the reachability walk is per-ticket
+        # work the list must never pay.
+        from .detail_facts import approval_on_behalf
+        from .models import TicketStatus as _TS
+        from .permissions import any_customer_user_can_reach
+
+        if obj.status == _TS.WAITING_CUSTOMER_APPROVAL or approval_on_behalf(
+            obj
+        ):
+            return any_customer_user_can_reach(obj)
+        return None
+
+    def get_planned_by_name(self, obj):
+        return self._due_facts(obj)["planned_by_name"]
+
+    def get_planned_at(self, obj):
+        return self._due_facts(obj)["planned_at"]
+
+    def get_created_by_name(self, obj) -> str:
+        author = obj.created_by
+        if author is None:
+            return ""
+        return (author.full_name or "").strip() or author.email
+
+    def _due_facts(self, obj) -> dict:
+        cached = getattr(obj, "_fe3_due_facts", None)
+        if cached is None:
+            from django.utils import timezone as _tz
+            from .detail_facts import ticket_due
+            cached = ticket_due(obj, _tz.localdate())
+            obj._fe3_due_facts = cached
+        return cached
+
+    def get_due_date(self, obj):
+        return self._due_facts(obj)["due_date"]
+
+    def get_due_kind(self, obj):
+        return self._due_facts(obj)["due_kind"]
+
+    def get_days_until_due(self, obj):
+        return self._due_facts(obj)["days_until_due"]
+
+    # FE-4 (Addendum D SS D.12) -- the honest-date facts, same source.
+    unplanned_age_days = serializers.SerializerMethodField()
+    settled_at = serializers.SerializerMethodField()
+    settled_days_after_due = serializers.SerializerMethodField()
+
+    def get_unplanned_age_days(self, obj):
+        return self._due_facts(obj)["unplanned_age_days"]
+
+    def get_settled_at(self, obj):
+        return self._due_facts(obj)["settled_at"]
+
+    def get_settled_days_after_due(self, obj):
+        return self._due_facts(obj)["settled_days_after_due"]
+
+    # P-5 S7 — the occurrence origin (see `resolve_occurrence_origin`).
+    occurrence_origin = serializers.SerializerMethodField()
+
+    def get_occurrence_origin(self, obj):
+        return resolve_occurrence_origin(obj)
+
+    # P-5 S1 — ONE PLAN, ONE DATE. The job's own window as
+    # `tickets/job_dates.job_window` resolves it: the ticket's own
+    # schedule when a person set one, else the meerwerk's committed
+    # window — and nothing further since P-15 §0.4 (a customer's wish
+    # is a fact, `wished_day`, never a window). The page used to read
+    # only `scheduled_start_day` and so a meerwerk planned on the extra
+    # work looked unplanned on the ticket and asked the operator to
+    # plan AGAIN (TCK-2026-000385).
+    job_start_day = serializers.SerializerMethodField()
+    job_end_day = serializers.SerializerMethodField()
+
+    def get_job_start_day(self, obj):
+        from .job_dates import job_window
+
+        start, _end = job_window(obj)
+        return start.isoformat() if start else None
+
+    def get_job_end_day(self, obj):
+        from .job_dates import job_window
+
+        _start, end = job_window(obj)
+        return end.isoformat() if end else None
+
+    # P-5 S9.2 — the day a plan was moved FROM, decided by the server in
+    # its own zone (P-3 §A.3): the card printed the raw instant.
+    rescheduled_from_day = serializers.SerializerMethodField()
+
+    def get_rescheduled_from_day(self, obj):
+        return self._day(getattr(obj, "rescheduled_from", None))
+
+    # P-3 §A.5 — a real plan whose last day is past the deadline; the
+    # detail states it ("Gepland na de deadline"), the dialog warns.
+    planned_after_deadline = serializers.SerializerMethodField()
+
+    def get_planned_after_deadline(self, obj) -> bool:
+        return self._due_facts(obj)["planned_after_deadline"]
+
+    # P-3 §A.3 — the clock of the plan, decided by the SERVER in its own
+    # zone; null when the plan is a day and not a time (stored as local
+    # midnight). The browser used to print the raw instant in its own
+    # zone, which is where "01:00 AM" came from on a date-only plan.
+    scheduled_start_time = serializers.SerializerMethodField()
+    scheduled_end_time = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _clock(value):
+        if value is None:
+            return None
+        from django.utils import timezone as _tz
+        local = _tz.localtime(value)
+        if local.hour == 0 and local.minute == 0:
+            return None
+        return local.strftime("%H:%M")
+
+    def get_scheduled_start_time(self, obj):
+        return self._clock(obj.scheduled_start_at)
+
+    def get_scheduled_end_time(self, obj):
+        return self._clock(obj.scheduled_end_at)
+
+    # ...and the DAY, in the server's zone, as a plain ISO date. The
+    # browser used to take the day off the instant in ITS zone, which
+    # west of Amsterdam files a midnight plan under the previous day.
+    scheduled_start_day = serializers.SerializerMethodField()
+    scheduled_end_day = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _day(value):
+        if value is None:
+            return None
+        from django.utils import timezone as _tz
+        return _tz.localtime(value).date().isoformat()
+
+    def get_scheduled_start_day(self, obj):
+        return self._day(obj.scheduled_start_at)
+
+    def get_scheduled_end_day(self, obj):
+        return self._day(obj.scheduled_end_at)
+
+    schedule_planned_by_name = serializers.SerializerMethodField()
+    schedule_planned_at = serializers.SerializerMethodField()
     allowed_next_statuses = serializers.SerializerMethodField()
     # Per-record per-current-user actions block. Lets BM / STAFF /
     # CUSTOMER_USER (who cannot self-introspect via the admin-only
@@ -592,8 +1115,19 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "type",
             "category",
             "category_name",
+            "category_slug",
+            "category_color",
             "priority",
             "status",
+            "display_phase",
+            # FE-3 -- the fact block's kind pill and its SS D.11 chip.
+            "kind",
+            "due_date",
+            "due_kind",
+            "days_until_due",
+            "unplanned_age_days",
+            "settled_at",
+            "settled_days_after_due",
             "company",
             "company_name",
             "building",
@@ -602,6 +1136,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "customer_name",
             "created_by",
             "created_by_email",
+            "created_by_name",
             "assigned_to",
             "assigned_to_email",
             "assigned_staff",
@@ -616,6 +1151,14 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "rejected_at",
             "resolved_at",
             "closed_at",
+            # W-H §1 — the archive, as ONE fact plus who and when.
+            # `archived_at` is the state (set = archived); the two
+            # companions are the trail. The list carries them too, so a
+            # row in the archive view can say who filed it without a
+            # per-row detail fetch.
+            "archived_at",
+            "archived_by_name",
+            "archive_note",
             # Sprint 184 §3 — the customer's wanted date, so the provider
             # can see what was asked for. A wish; it never decides late.
             "customer_wanted_date",
@@ -633,19 +1176,62 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "sla_remaining_business_seconds",
             "sla_display_state",
             "extra_work_origin",
+            "extra_work_billing",
+            "occurrence_origin",
             # Sprint 9B — operational scheduling (read-only here; mutated
             # via the dedicated POST/DELETE schedule endpoint). These are
             # operational (no amounts), safe for every role that already
             # sees ticket detail.
             "scheduled_start_at",
             "scheduled_end_at",
+            # P-3 §A.3 — the server-decided clock (null on a day-only plan).
+            "scheduled_start_time",
+            "scheduled_end_time",
+            "scheduled_start_day",
+            "scheduled_end_day",
+            # P-5 S1 — the job's resolved window (own plan, else meerwerk).
+            "job_start_day",
+            "job_end_day",
+            "rescheduled_from_day",
+            # P-3 §A.5 — the plan's last day is past the deadline.
+            "planned_after_deadline",
             "time_window_label",
             "schedule_status",
             "rescheduled_from",
             "reschedule_reason",
+            # W-H — WHO PLANNED IT, and when they did.
+            #
+            # Not stored: read off the schedule annotation row on
+            # `status_history`, which has recorded the operator since
+            # Sprint 9B and is already prefetched for this view. A
+            # `planned_by` column on Ticket would be the same fact in a
+            # second place.
+            #
+            # Provider-side only. Which employee typed the date is
+            # internal staffing detail, gated exactly like
+            # `reschedule_reason` and `rescheduled_from` below.
+            "schedule_planned_by_name",
+            "schedule_planned_at",
+            # P-1 — is the window a person's plan at all, and whose.
+            "has_real_plan",
+            "plan_source",
+            # P-15 §0.4 — the wish as a bare fact ("Wished for {date}").
+            "wished_day",
+            # P-15 §0.3 — the on-behalf sign-off, said out loud.
+            "approved_on_behalf",
+            "approved_by_name",
+            "customer_can_decide_online",
+            "planned_by_name",
+            "planned_at",
             # Sprint 4 — sub-tasks + auto-complete opt-in (additive).
             "sub_tasks",
             "auto_complete_on_subtasks",
+            # Sprint 191 §2.5 — the per-work photo-visibility setting.
+            # Read-only here like every other flag on this serializer;
+            # mutated through the dedicated PA/SA endpoint. Safe for
+            # every role that already sees ticket detail: it states the
+            # rule, it is not itself a photo.
+            "staff_uploads_customer_visible",
         ]
         read_only_fields = fields
 
@@ -677,8 +1263,34 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         if getattr(viewer, "role", None) == UserRole.CUSTOMER_USER:
             data["reschedule_reason"] = ""
             data["rescheduled_from"] = None
+            data["rescheduled_from_day"] = None
+            data["schedule_planned_by_name"] = None
+            data["schedule_planned_at"] = None
+            # P-1 — same gate: which employee planned it is internal.
+            # `has_real_plan` and the dates stay; only the name goes.
+            data["planned_by_name"] = None
             data["sub_tasks"] = []
         return data
+
+    def _schedule_change_row(self, obj):
+        """The newest schedule annotation row, resolved once per render."""
+        cache = getattr(self, "_schedule_row_cache", None)
+        if cache is not None and cache[0] == obj.id:
+            return cache[1]
+        row = latest_schedule_change(obj)
+        self._schedule_row_cache = (obj.id, row)
+        return row
+
+    def get_schedule_planned_by_name(self, obj):
+        row = self._schedule_change_row(obj)
+        actor = getattr(row, "changed_by", None) if row else None
+        if actor is None:
+            return None
+        return (actor.full_name or "").strip() or actor.email
+
+    def get_schedule_planned_at(self, obj):
+        row = self._schedule_change_row(obj)
+        return row.created_at if row else None
 
     def _resolve_allowed_next_statuses(self, obj):
         """Single computation shared by the top-level
@@ -750,37 +1362,12 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         # `provider_driven_customer_decision` coercion block in
         # `tickets.state_machine.apply_transition`: SA / CA in scope /
         # BM in assigned building (gated by the B6 revocable key) —
-        # the per-record answer is precise to THIS ticket's building.
-        has_override_authority = False
-        if role == UserRole.SUPER_ADMIN:
-            has_override_authority = True
-        elif role == UserRole.COMPANY_ADMIN:
-            from companies.models import CompanyUserMembership
-            has_override_authority = CompanyUserMembership.objects.filter(
-                user=user, company_id=obj.company_id
-            ).exists()
-        elif role == UserRole.BUILDING_MANAGER:
-            assigned = BuildingManagerAssignment.objects.filter(
-                user=user, building_id=obj.building_id
-            ).exists()
-            has_override_authority = assigned and user_has_osius_permission(
-                user,
-                "osius.building_manager.override_customer_decision",
-                building_id=obj.building_id,
-            )
-        # Tightened so the answer reflects CURRENT record state, not
-        # just authority: the override is only meaningful at the
-        # customer-decision step (WAITING_CUSTOMER_APPROVAL with
-        # APPROVED or REJECTED reachable in the live state machine).
-        in_decision_phase = (
-            str(obj.status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL)
-            and (
-                str(TicketStatus.APPROVED) in allowed_set
-                or str(TicketStatus.REJECTED) in allowed_set
-            )
-        )
-        can_override_customer_decision = (
-            has_override_authority and in_decision_phase
+        # the per-record answer is precise to THIS ticket's building,
+        # and only at the customer-decision step. P-4: the rule lives
+        # in `override_authority` so the My Schedule drawer can ask
+        # the same question and get the same answer.
+        can_override_customer_decision = _can_override_customer_decision(
+            user, obj, allowed
         )
 
         # M1 B5 — note booleans mirror the POSTING table enforced by
@@ -907,6 +1494,27 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         payload["actual_hours_required"] = ew_has_unfinalized_hourly_lines(
             ew_request
         )
+
+        # W6-H — WHICH DAYS THE CALLER IS PLANNED ON, and only theirs.
+        #
+        # THIS IS THE WORKER'S SURFACE, and it is here rather than on the
+        # Extra Work detail page for a reason that is already settled
+        # policy: `extra_work.scoping.scope_extra_work_for` returns
+        # `none()` for STAFF — the post-2026-05-20 P0 staff-privacy fix —
+        # with the note "Operational visibility for STAFF lives on the
+        # spawned Ticket". A worker cannot open the parent Extra Work at
+        # all, so telling them which days they are on had to happen on
+        # the ticket they can already open.
+        #
+        # ALWAYS THE CALLER'S OWN ROWS, whatever the role. This is not a
+        # crew roster: a manager who wants the whole grid has the hours
+        # panel and the plan dialog, both of which are already gated for
+        # them. Filtering by `user=request.user` here means the payload
+        # is identical for every role and carries nobody else's hours,
+        # so there is no role branch to get wrong later.
+        payload["my_planned_hours"] = _my_planned_hours(
+            ew_request, self.context.get("request")
+        )
         # Sprint 8B — `final_total_amount` is a COMMERCIAL amount. The
         # staff-privacy floor forbids STAFF from seeing price/amount
         # data, so it is gated OUT for STAFF viewers (who can reach this
@@ -1019,7 +1627,34 @@ def _assigned_staff_payload(ticket, viewer):
         show_email = bool(customer.show_assigned_staff_email)
         show_phone = bool(customer.show_assigned_staff_phone)
         if not (show_name or show_email or show_phone):
-            return [{"anonymous": True, "label_key": "tickets.assigned_team_anonymous"}]
+            # W-N1 §4 — ANONYMOUS, BUT NOT FACELESS.
+            #
+            # This used to return ONE row for the whole team, and the
+            # comment further down said in as many words that a fully
+            # redacted roster therefore exposed no credentials either.
+            # That was a fair reading of "anonymous" and a poor one of
+            # what a customer needs: they are entitled to know that the
+            # people in their building are qualified, and a VCA
+            # certificate says nothing about WHO holds it.
+            #
+            # So the roster becomes one row PER MEMBER, each carrying
+            # the same resolver-gated credentials the named path
+            # carries, and nothing else. Identity redaction is
+            # unchanged and is in fact stricter here than on the named
+            # path: no name, no email, no phone, and no `id` either —
+            # the numeric id is not a name, but it is a handle a
+            # customer could correlate across tickets, and this row has
+            # no need of one.
+            return [
+                {
+                    "anonymous": True,
+                    "label_key": "tickets.assigned_team_member_anonymous",
+                    "credentials": _staff_credentials_payload_for_viewer(
+                        a.user, viewer, customer
+                    ),
+                }
+                for a in _distinct_by_user(assignments)
+            ]
     else:
         show_name = show_email = show_phone = True
 
@@ -1044,25 +1679,53 @@ def _assigned_staff_payload(ticket, viewer):
         if show_phone:
             profile = getattr(user, "staff_profile", None)
             entry["phone"] = profile.phone if profile else ""
-        if is_customer:
-            # M2 P3 (SoT Addendum A.3) — CUSTOMER_USER viewers ONLY: the
-            # resolver-gated credential / property summary for each
-            # assigned staff member, in the context of the ticket's
-            # customer. Provider viewers get NO new keys — their payload
-            # is byte-identical to pre-M2. The anonymous-collapse early
-            # return above is untouched, so a fully-redacted roster never
-            # exposes credentials either.
-            entry["credentials"] = _staff_credentials_payload_for_customer(
-                user, viewer, customer
-            )
-            entry["properties"] = _staff_properties_payload_for_customer(
-                user, viewer, customer
-            )
+        # W-UX1-A — EVERY VIEWER, NOT JUST THE CUSTOMER.
+        #
+        # This block used to be guarded `if is_customer:` and said so:
+        # "CUSTOMER_USER viewers ONLY ... Provider viewers get NO new
+        # keys — their payload is byte-identical to pre-M2." The owner
+        # has ruled that visibility follows the ladder for everyone, so
+        # the guard is gone.
+        #
+        # It is the SAME CALL, not a provider variant. The rule lives in
+        # `accounts.visibility.filter_credentials_visible_to`, which is
+        # already written per role (visibility.py:101-123): SA/CA get
+        # the queryset unfiltered, BM gets PROVIDER_ONLY + CUSTOMER_
+        # VISIBLE, CUSTOMER_USER gets CUSTOMER_VISIBLE joined to its own
+        # grant. A second implementation here — or any filtering on the
+        # client — is how the two ladders drift apart.
+        #
+        # `customer` stays the ticket's customer for every viewer: the
+        # resolver reads it only on the CUSTOMER_USER branch, so it is
+        # context for the one role that needs it and inert for the rest.
+        entry["credentials"] = _staff_credentials_payload_for_viewer(
+            user, viewer, customer
+        )
+        entry["properties"] = _staff_properties_payload_for_viewer(
+            user, viewer, customer
+        )
         out.append(entry)
     return out
 
 
-def _staff_credentials_payload_for_customer(staff_user, viewer, customer):
+def _distinct_by_user(assignments):
+    """One entry per distinct staff member, first slot wins.
+
+    The named path below does this inline because a staff member may
+    hold several slots on one ticket; the anonymous path needs exactly
+    the same collapse, and two copies of it would drift.
+    """
+    seen = set()
+    out = []
+    for a in assignments:
+        if a.user_id in seen:
+            continue
+        seen.add(a.user_id)
+        out.append(a)
+    return out
+
+
+def _staff_credentials_payload_for_viewer(staff_user, viewer, customer):
     """M2 P3 — credential summary for a customer viewer, filtered by the
     accounts.visibility resolver for the CONTEXT customer.
 
@@ -1113,7 +1776,7 @@ def _staff_credentials_payload_for_customer(staff_user, viewer, customer):
     return out
 
 
-def _staff_properties_payload_for_customer(staff_user, viewer, customer):
+def _staff_properties_payload_for_viewer(staff_user, viewer, customer):
     """M2 P3 — custom-property summary for a customer viewer, filtered
     by the accounts.visibility resolver for the CONTEXT customer.
     Shape: {name, value, document_url?}."""
@@ -1198,12 +1861,17 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "room_label",
+            # W13 — `type` stays writable for the API's existing
+            # callers, but no screen offers it any more: the CREATE FORM
+            # asks one question, "what kind of melding is this", and the
+            # answer is a `category`. See `TicketCategory` for why the
+            # column survives the field going.
             "type",
-            # Sprint 185 E §1 — the kind of WORK, offered at intake.
-            # Optional: a melding may arrive before anyone knows which
-            # trade it belongs to, and forcing a guess here would fill
-            # the category report with noise. Validated against the
-            # ticket's own company in `validate()` below.
+            # W13 — THE classification, and the only one a form asks
+            # for. Optional: a melding can arrive before anyone has
+            # decided, and forcing a guess here would fill the category
+            # report with noise. Validated against the ticket's own
+            # company AND against `available_at_intake` in `validate()`.
             "category",
             "priority",
             "building",
@@ -1236,16 +1904,28 @@ class TicketCreateSerializer(serializers.ModelSerializer):
                 {"customer": "Customer is not linked to the selected building."}
             )
 
-        # Sprint 185 E §1 — a category belongs to ONE provider company,
-        # and the ticket's company is the building's. Naming another
-        # company's category would tag this melding with a row the
-        # actor cannot see and would put a foreign name into this
-        # tenant's category report, so it reads as nonexistent (H-1)
-        # rather than as a permission error.
+        # A category belongs to ONE provider company, and the ticket's
+        # company is the building's. Naming another company's category
+        # would tag this melding with a row the actor cannot see and
+        # would put a foreign name into this tenant's category report,
+        # so it reads as nonexistent (H-1) rather than as a permission
+        # error.
+        #
+        # W13 §4 — the same answer for a category that exists but is not
+        # offerable AT INTAKE, and for an archived one. "Ongegrond" is a
+        # VERDICT: it is reached by reading the melding, not declared by
+        # whoever raises it. The create forms do not show it, and this is
+        # what makes that a RULE rather than a UI habit — the reference
+        # system does the modal and skips the enforcement, and its own
+        # audit records what that costs.
         category = attrs.get("category")
-        if category is not None and category.company_id != building.company_id:
+        if category is not None and (
+            category.company_id != building.company_id
+            or not category.is_active
+            or not category.available_at_intake
+        ):
             raise serializers.ValidationError(
-                {"category": "Unknown work category."}
+                {"category": "Unknown category."}
             )
 
         if not building.is_active:
@@ -1373,6 +2053,35 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         validated_data["company"] = building.company
         validated_data["created_by"] = request.user
         validated_data["status"] = TicketStatus.OPEN
+        # W13 — the ONE place `type` is derived from `category`.
+        #
+        # No screen asks for `type` any more, but the column is NOT NULL
+        # and the pre-existing tickets-by-type report reads it, so a
+        # create that left it at the model default would quietly file
+        # every new melding as a REPORT and rot that report. The mapping
+        # is declared on the category row (`legacy_type`), so this reads
+        # it rather than deciding it.
+        #
+        # Only when NOBODY has already stated a type. Two places can:
+        #
+        #   * the request body (`initial_data`) — the API contract is
+        #     unchanged for callers still sending one;
+        #   * a `serializer.save(type=...)` kwarg, which DRF merges into
+        #     `validated_data` before this runs. That is how M7 coerces a
+        #     customer-created melding to REPORT, and the M6 meldingen
+        #     split reads the result.
+        #
+        # Checking only the first was a real bug: for a customer picking
+        # "Klacht", `perform_create` set REPORT and this line then
+        # overwrote it with COMPLAINT, breaking an invariant with its own
+        # test. A derived value must never win over a stated one.
+        category = validated_data.get("category")
+        if (
+            category is not None
+            and "type" not in self.initial_data
+            and "type" not in validated_data
+        ):
+            validated_data["type"] = category.legacy_type
         return super().create(validated_data)
 
 
@@ -1658,6 +2367,16 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             "mime_type",
             "file_size",
             "is_hidden",
+            # Sprint 191 §2.5 — the customer wall and the phase label.
+            # Both writable at upload; `visibility` only for provider
+            # management (see `validate_visibility`), `phase` for anyone
+            # who may upload at all, because a label grants nothing.
+            "visibility",
+            "phase",
+            # W4-P — WHICH rung of the resolution ladder decided
+            # `visibility` when this row was created. Read-only in every
+            # direction: it is a record of a decision, not an input.
+            "visibility_source",
             "created_at",
         ]
         read_only_fields = [
@@ -1671,6 +2390,7 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             "original_filename",
             "mime_type",
             "file_size",
+            "visibility_source",
             "created_at",
         ]
 
@@ -1727,6 +2447,29 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "Only provider management roles may upload "
                 "hidden/internal attachments."
+            )
+
+        return value
+
+    def validate_visibility(self, value):
+        """Sprint 191 §2.5 — only provider management may CHOOSE a
+        visibility at upload time.
+
+        Mirrors `validate_is_hidden`, and for the same reason: the level
+        an upload lands at is a provider decision, not the uploader's.
+        STAFF gets the computed default (INTERNAL, unless the work
+        carries `staff_uploads_customer_visible`) and a customer-side
+        uploader gets CUSTOMER — both resolved in
+        `TicketAttachmentListCreateView.perform_create`, which is the one
+        place that default lives."""
+        request = self.context.get("request")
+        user = request.user if request else None
+
+        if not is_provider_management_role(user):
+            raise serializers.ValidationError(
+                "Only provider management roles may choose an "
+                "attachment's visibility.",
+                code="visibility_forbidden",
             )
 
         return value
@@ -1835,20 +2578,372 @@ class TicketStatusChangeSerializer(serializers.Serializer):
         required=False, allow_blank=True, default=""
     )
 
+    # W13-FIX §1 — THE MODAL'S ANSWERS TRAVEL WITH THE MOVE.
+    #
+    # `transition_requirements` refuses a step whose preconditions are
+    # unmet. These two optional fields are how the operator MEETS them
+    # in the same press: the modal renders a field per missing
+    # requirement and posts the answers here, so "start the work"
+    # stays one action rather than three (assign, then schedule, then
+    # transition) with two chances to walk away half-done.
+    #
+    # They are applied inside `save`'s transaction BEFORE the
+    # transition, so either the ticket is assigned AND scheduled AND
+    # moved, or none of it happened.
+    assigned_staff_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+        max_length=50,
+    )
+    scheduled_start_at = serializers.DateTimeField(required=False, allow_null=True)
+
     def save(self, **kwargs):
         ticket = self.context["ticket"]
         user = self.context["request"].user
         try:
-            return apply_transition(
-                ticket=ticket,
-                user=user,
-                to_status=self.validated_data["to_status"],
-                note=self.validated_data.get("note", ""),
-                is_override=self.validated_data.get("is_override", False),
-                override_reason=self.validated_data.get("override_reason", ""),
+            # One transaction for the whole answer: the requirements the
+            # modal collected are applied first, then the move is made
+            # against a ticket that already satisfies them. A failure
+            # anywhere rolls the assignment and the date back too, so a
+            # refused transition never leaves a half-assigned ticket
+            # behind.
+            with transaction.atomic():
+                self._apply_transition_answers(ticket, user)
+
+                # W13-FIX §1 — WHAT THE STEP NEEDS, checked at the door
+                # the operator came through.
+                #
+                # This gate lives HERE and not in `apply_transition`,
+                # and the difference matters. `apply_transition` is the
+                # STATE MACHINE: it owns which moves are legal for which
+                # role, and it is also the programmatic primitive that
+                # `auto_close`, the sub-task rollup, the extra-work sync
+                # hook, the demo seeder and a great deal of test setup
+                # use to WALK a ticket into a state. None of those is a
+                # person filling in a form, and putting a form-
+                # completeness rule on the primitive made 71 unrelated
+                # tests fail for the right reason: it was the wrong
+                # layer.
+                #
+                # `POST /tickets/<id>/status/` IS the operator pressing
+                # the button, so it is where "did you answer what this
+                # step needs" belongs. A client that skips the modal
+                # still cannot get past it, which is the guarantee that
+                # was actually asked for.
+                #
+                # Checked AFTER `_apply_transition_answers` so the
+                # answers the modal collected count towards satisfying
+                # it, and inside the same transaction so a refusal
+                # leaves neither the date nor the assignment behind.
+                # W-UX1 §4 — the override travels with the check. The
+                # proof gate binds every role now, and the ONE way past
+                # it is the explicit two-press override, whose reason
+                # `apply_transition` records below. Passing the flag here
+                # is what makes "override" mean something at this door
+                # rather than only at the next one.
+                missing = transition_unmet(
+                    ticket,
+                    self.validated_data["to_status"],
+                    user,
+                    is_override=self.validated_data.get("is_override", False),
+                    note=self.validated_data.get("note", ""),
+                )
+                if missing:
+                    # P-5 S0 — THE ERROR-BODY LAW. The refusal names
+                    # what is missing in words (`detail`), carries the
+                    # stable code, AND lists the keys (`unmet`) so the
+                    # page can put each one at its field in its own
+                    # language instead of showing "not accepted".
+                    raise serializers.ValidationError(
+                        {
+                            "detail": "This step still needs "
+                            + ", ".join(phrase_for(key) for key in missing)
+                            + ".",
+                            "code": ERR_TRANSITION_REQUIREMENTS,
+                            "unmet": list(missing),
+                        }
+                    )
+
+                # W-PLANTRUTH §3b — PROCEEDING CLOSES THE OPEN PARTS.
+                # The modal warns (W-LATE §3c) and the operator proceeds;
+                # the move itself says the work is done, so every part
+                # still open is marked done by the acting user, with one
+                # timeline line naming them. Inside the same transaction
+                # as the move: a refused move closes nothing.
+                self._close_open_parts(ticket, user)
+
+                return apply_transition(
+                    ticket=ticket,
+                    user=user,
+                    to_status=self.validated_data["to_status"],
+                    note=self.validated_data.get("note", ""),
+                    is_override=self.validated_data.get("is_override", False),
+                    override_reason=self.validated_data.get("override_reason", ""),
+                )
+        except TransitionError:
+            # P-15 (P-14's S4 refusal-shape finding) — re-raised as-is:
+            # the view renders the machine-standard FLAT
+            # `{"detail", "code"}` body. Converting to a
+            # serializers.ValidationError here wrapped both keys in
+            # one-element lists, the one endpoint whose shape drifted.
+            raise
+
+    #: W-PLANTRUTH §3b — the moves that mean "the work is done", the
+    #: only ones that close open parts. Mirrors the frontend's
+    #: `COMPLETION_TARGETS`, which is the set the warn line is shown for.
+    _COMPLETION_TARGETS = frozenset(
+        {
+            TicketStatus.WAITING_MANAGER_REVIEW,
+            TicketStatus.WAITING_CUSTOMER_APPROVAL,
+            TicketStatus.APPROVED,
+            TicketStatus.CLOSED,
+        }
+    )
+
+    def _close_open_parts(self, ticket, user) -> int:
+        """Mark every open part done as part of a completion move.
+
+        A part is done when every slot filed under it is COMPLETED
+        (`SubTask.is_done`); it has no status column of its own. So
+        closing a part is completing the ASSIGNED slots under it —
+        `completed_by` the actor, a note saying which step closed it —
+        and a part nobody was ever put on cannot be closed this way: it
+        is named in the timeline line as such and left as it is.
+
+        Provider-side actors only: this is the transition MODAL's
+        promise, and a customer approving their ticket should not land
+        as `completed_by` on a cleaner's slot.
+
+        Returns how many slots were completed. The timeline line is one
+        `TicketStatusHistory` annotation row (old == new == the status
+        BEFORE the move, the Sprint 8B pattern), written before the
+        move's own row so the two read in order.
+        """
+        from accounts.permissions import is_staff_role
+
+        from .models import (
+            StaffAssignmentSlotStatus,
+            SubTask,
+            TicketStatusHistory,
+        )
+
+        to_status = str(self.validated_data["to_status"])
+        if to_status not in self._COMPLETION_TARGETS:
+            return 0
+        if not is_staff_role(user):
+            return 0
+        open_parts = [
+            part
+            for part in SubTask.objects.filter(ticket=ticket)
+            .prefetch_related("staff_assignments")
+            .order_by("ordering", "id")
+            if not part.is_done()
+        ]
+        if not open_parts:
+            return 0
+
+        now = timezone.now()
+        closed_titles: list[str] = []
+        nobody_titles: list[str] = []
+        completed = 0
+        for part in open_parts:
+            slots = [
+                slot
+                for slot in part.staff_assignments.all()
+                if slot.slot_status == StaffAssignmentSlotStatus.ASSIGNED
+            ]
+            if not slots:
+                # Nobody ASSIGNED under it: nothing to complete. (A part
+                # nobody was ever put on, or one whose people all
+                # reported unable.)
+                nobody_titles.append(part.title)
+                continue
+            for slot in slots:
+                slot.slot_status = StaffAssignmentSlotStatus.COMPLETED
+                slot.completed_at = now
+                slot.completed_by = user
+                slot.completion_note = (
+                    f"Closed with the step to {to_status}."
+                )
+                # `save()` rather than a queryset update so the audit
+                # receivers fire per row, as every other slot write does.
+                slot.save(
+                    update_fields=[
+                        "slot_status",
+                        "completed_at",
+                        "completed_by",
+                        "completion_note",
+                    ]
+                )
+                completed += 1
+            closed_titles.append(part.title)
+
+        pieces = []
+        if closed_titles:
+            pieces.append(
+                "Parts closed with the step to "
+                f"{to_status}: {', '.join(closed_titles)}."
             )
-        except TransitionError as exc:
-            raise serializers.ValidationError({"detail": str(exc), "code": exc.code})
+        if nobody_titles:
+            pieces.append(
+                "Parts nobody was on, left as they are: "
+                f"{', '.join(nobody_titles)}."
+            )
+        if pieces:
+            TicketStatusHistory.objects.create(
+                ticket=ticket,
+                old_status=ticket.status,
+                new_status=ticket.status,
+                changed_by=user,
+                note=" ".join(pieces),
+                is_override=False,
+                override_reason="",
+            )
+        return completed
+
+    def _apply_transition_answers(self, ticket, user):
+        """Write the modal's answers onto the ticket, if it sent any.
+
+        EVERY write here goes through the SAME authority as the endpoint
+        that owns it. This is a convenience path, not a second set of
+        rules, and a convenience path that skipped a permission check
+        would be a side door: `POST /status/` would let a role schedule
+        or dispatch what `POST /schedule/` and
+        `POST /staff-assignments/` refuse it. H-11 -- a workflow move is
+        not a permission override.
+
+          * the date   -> the schedule action's role set + the same
+                          `osius.ticket.view_building` scope check.
+          * the people -> `views_staff_assignments._gate_actor` (may the
+                          ACTOR dispatch here) AND `_validate_target_staff`
+                          (may this PERSON be dispatched to this ticket).
+        """
+        from accounts.permissions_v2 import user_has_osius_permission
+
+        from .models import TicketStaffAssignment
+        from .views import _SCHEDULE_ALLOWED_ROLES
+        from .views_staff_assignments import (
+            ERR_STAFF_ALREADY_ASSIGNED,
+            _gate_actor,
+            _validate_target_staff,
+            staff_already_assigned,
+        )
+
+        staff_ids = self.validated_data.get("assigned_staff_ids")
+        scheduled_start_at = self.validated_data.get("scheduled_start_at")
+        request = self.context["request"]
+
+        if scheduled_start_at is not None:
+            if user.role not in _SCHEDULE_ALLOWED_ROLES:
+                raise serializers.ValidationError(
+                    {
+                        "scheduled_start_at": "This role cannot schedule tickets.",
+                        "code": "schedule_forbidden_for_role",
+                    }
+                )
+            if user.role != UserRole.SUPER_ADMIN and not user_has_osius_permission(
+                user,
+                "osius.ticket.view_building",
+                building_id=ticket.building_id,
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "scheduled_start_at": (
+                            "You do not have provider-side scope to schedule "
+                            "this ticket."
+                        ),
+                        "code": "schedule_forbidden_scope",
+                    }
+                )
+            # W-FIX1 B2 (audit F24) — the FRONT door. This used to write
+            # `scheduled_start_at` alone: no `schedule_status`, no
+            # `rescheduled_from`, no history row, so the ticket read
+            # UNSCHEDULED with a date and nobody was recorded as having
+            # planned it. `tickets.schedule.set_schedule` is the one
+            # writer now. An unchanged instant is not a write; a moved
+            # one on an already-scheduled ticket needs the reason the
+            # schedule endpoint has always demanded — the modal's note
+            # is that reason.
+            from .schedule import ScheduleError, set_schedule
+
+            if ticket.scheduled_start_at != scheduled_start_at:
+                current_end = ticket.scheduled_end_at
+                kept_end = (
+                    current_end
+                    if current_end is not None and current_end >= scheduled_start_at
+                    else None
+                )
+                try:
+                    set_schedule(
+                        ticket,
+                        actor=user,
+                        scheduled_start_at=scheduled_start_at,
+                        scheduled_end_at=kept_end,
+                        time_window_label=ticket.time_window_label,
+                        reschedule_reason=self.validated_data.get("note", ""),
+                    )
+                except ScheduleError as exc:
+                    raise serializers.ValidationError(
+                        {"scheduled_start_at": exc.detail, "code": exc.code}
+                    )
+
+        if staff_ids:
+            if _gate_actor(request, ticket) is not None:
+                raise serializers.ValidationError(
+                    {
+                        "assigned_staff_ids": (
+                            "Not allowed to assign staff for this building."
+                        )
+                    }
+                )
+            for user_id in staff_ids:
+                target = User.objects.filter(
+                    pk=user_id, is_active=True, deleted_at__isnull=True
+                ).first()
+                if target is None:
+                    raise serializers.ValidationError(
+                        {"assigned_staff_ids": f"User {user_id} is not assignable."}
+                    )
+                if _validate_target_staff(target, ticket) is not None:
+                    raise serializers.ValidationError(
+                        {"assigned_staff_ids": f"User {user_id} is not assignable."}
+                    )
+                # W26.3 — ONE PERSON, ONE BASE SLOT, decided by the SAME
+                # predicate the /staff-assignments/ create uses, asked at
+                # the level this path writes: it creates JOB-level slots
+                # (no `sub_task`), so the default base-level question is
+                # the right one. Someone already on a PART of this job is
+                # necessarily already on the job, so the answer does not
+                # change for them.
+                #
+                # This convenience path used to skip a person who was
+                # already on the ticket, which quietly hid a stale
+                # picker; the picker's source (`assignable-staff`) now
+                # omits them, so naming one here means the client is out
+                # of date and the honest answer is to say so rather than
+                # half-apply the step. Whole request refused — nothing
+                # half-written.
+                if staff_already_assigned(ticket, target):
+                    raise serializers.ValidationError(
+                        {
+                            "assigned_staff_ids": (
+                                "This person is already on this ticket. "
+                                "Edit their slot to change when they work."
+                            ),
+                            "code": ERR_STAFF_ALREADY_ASSIGNED,
+                        }
+                    )
+                TicketStaffAssignment.objects.create(
+                    ticket=ticket, user=target, assigned_by=user
+                )
+                # W-FIX1 C1 (audit F25) — same mirror as the per-slot
+                # door: a person dispatched from the transition modal is
+                # on the extra work's crew too.
+                from .crew_sync import worker_added
+
+                worker_added(ticket, target, actor=user)
+            ticket.refresh_from_db()
 
 
 class TicketBulkStatusChangeSerializer(serializers.Serializer):
@@ -1995,6 +3090,13 @@ class TicketScheduleInputSerializer(serializers.Serializer):
     reschedule_reason = serializers.CharField(
         required=False, allow_blank=True, default=""
     )
+    # W-PLANTRUTH §1a — also move the job's PENDING slots onto this
+    # window (`tickets.schedule.move_pending_slots`).
+    # P-9 ruling 12(e) — ON by default: one plan, one date (P-5). When
+    # the job's day moves, every person's slot on it moves too, so the
+    # manager's board and a worker's own schedule can never disagree
+    # about the day. A caller that means "the job only" says so.
+    apply_to_slots = serializers.BooleanField(required=False, default=True)
 
     def validate(self, attrs):
         start = attrs.get("scheduled_start_at")

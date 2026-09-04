@@ -80,9 +80,11 @@ def billable_quantity(line) -> Decimal:
     everything else bills the ordered `quantity`. NEVER mutates the
     line.
 
-    Legacy `ExtraWorkPricingLineItem` rows intentionally have no
-    `actual_hours` column (Sprint 8B brief), so `getattr` defaults to
-    None and they always bill the ordered quantity."""
+    All three line models carry `actual_hours` since P-13 I (the
+    legacy `ExtraWorkPricingLineItem` deliberately lacked it under the
+    Sprint 8B brief; the owner approved the additive column on
+    2026-09-02). The `getattr` default stays as a guard for any
+    non-model line object handed in by tests."""
     actual_hours = getattr(line, "actual_hours", None)
     if (
         _line_unit_type(line) == ExtraWorkPricingUnitType.HOURS
@@ -246,9 +248,10 @@ def ew_has_unfinalized_hourly_lines(ew: ExtraWorkRequest) -> bool:
     operational ticket for customer approval before the hours are in."""
     _kind, lines = active_priced_lines(ew)
     for line in lines:
-        # Legacy `ExtraWorkPricingLineItem` rows have no `actual_hours`
-        # column (Sprint 8B brief) and no surface to enter it, so they
-        # can never gate the completion transition — skip them.
+        # P-13 I — legacy `ExtraWorkPricingLineItem` rows now carry
+        # `actual_hours` too, so an hourly legacy line gates the
+        # completion transition exactly like its cart/proposal twins.
+        # The hasattr guard stays for non-model line objects in tests.
         if not hasattr(line, "actual_hours"):
             continue
         if (

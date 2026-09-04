@@ -11,6 +11,52 @@ CUSTOMER_NAME_PREVIEW_LIMIT = 3
 
 
 class BuildingSerializer(serializers.ModelSerializer):
+    # P-5 S7 — THE CONNECTED FACTS: which contracts cover this building,
+    # each with one line of context (type, customer, what a period bills,
+    # status). Detail only — `connected` in the context — so the list
+    # pays no query per row.
+    contracts = serializers.SerializerMethodField()
+
+    def get_contracts(self, obj):
+        if not self.context.get("connected"):
+            return None
+        from contracts.billing import money
+        from contracts.models import ContractBuilding
+        from contracts.revisions import active_revision, revision_totals
+
+        out = []
+        links = (
+            ContractBuilding.objects.filter(building_id=obj.id)
+            .select_related("contract", "contract__customer", "contract__contract_type")
+            .order_by("-contract__start_date", "-contract_id")
+        )
+        for link in links:
+            contract = link.contract
+            revision = active_revision(contract)
+            # P-6 V5.3 — quantised to cents BEFORE it becomes text, so the
+            # wire always carries two decimals ("600.00", never "600.0"):
+            # the annotation's scale is the database's, not ours.
+            amount = str(money(revision_totals(revision)["amount"])) if revision else None
+            out.append(
+                {
+                    "id": contract.id,
+                    "contract_no": contract.contract_no,
+                    "contract_type_name": (
+                        contract.contract_type.name if contract.contract_type_id else None
+                    ),
+                    "customer_id": contract.customer_id,
+                    "customer_name": contract.customer.name if contract.customer_id else None,
+                    # `Contract.status` is a METHOD (resolved on a date).
+                    "status": contract.status(),
+                    "lifecycle": contract.lifecycle,
+                    "billing_period": contract.billing_period,
+                    "period_amount": amount,
+                    "start_date": contract.start_date.isoformat() if contract.start_date else None,
+                    "end_date": contract.end_date.isoformat() if contract.end_date else None,
+                }
+            )
+        return out
+
     """Sprint 154 §I.5 — the list row grew four counts and a bounded
     preview of the linked customer names.
 
@@ -58,6 +104,8 @@ class BuildingSerializer(serializers.ModelSerializer):
             "staff_count",
             "contact_count",
             "customer_names",
+            # P-5 S7 — the contracts covering this building (detail only).
+            "contracts",
             "created_at",
             "updated_at",
         ]

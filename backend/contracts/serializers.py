@@ -37,7 +37,12 @@ from .models import (
     MONTHS_PER_PERIOD,
 )
 from .numbering import allocate_contract_number
-from .revisions import display_revision, is_locked, revision_totals
+from .revisions import (
+    contract_has_been_invoiced,
+    display_revision,
+    is_locked,
+    revision_totals,
+)
 from .scope import (
     filter_buildings_for_contracts,
     filter_contract_types_for,
@@ -49,6 +54,9 @@ from .scope import (
 # mapping; do not reword without changing both.
 ERR_CONTRACT_TYPE_NAME_NOT_UNIQUE = "contract_type_name_not_unique"
 ERR_BUILDING_CROSS_COMPANY = "building_cross_company"
+# W20 — a contract line naming a department of ANOTHER customer is a
+# tenant-scoping violation, not a validation nicety.
+ERR_DEPARTMENT_CROSS_CUSTOMER = "department_cross_customer"
 ERR_CUSTOMER_CROSS_COMPANY = "customer_cross_company"
 ERR_CONTRACT_TYPE_CROSS_COMPANY = "contract_type_cross_company"
 ERR_REVISION_LOCKED = "revision_locked"
@@ -71,6 +79,17 @@ DOES_NOT_EXIST_MESSAGE = "Invalid pk - object does not exist."
 # created without one (fixtures, imports, the API used directly).
 DEFAULT_INITIAL_REVISION_LABEL = "Oorspronkelijk contract"
 
+
+
+def _two_places(value) -> str:
+    """P-6 V5.3 — a money or hours figure as text with exactly two
+    decimals, whatever scale the database or an annotation handed us.
+    `SerializerMethodField` hands a raw Decimal to the JSON renderer,
+    which turns it into a float and loses the trailing zero; the
+    frontend types declare these fields as strings."""
+    from decimal import Decimal, ROUND_HALF_UP
+
+    return str(Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 class ContractTypeSerializer(serializers.ModelSerializer):
     """The per-company catalog of contract kinds."""
@@ -121,6 +140,14 @@ class ContractLineSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(
         source="building.name", read_only=True, default=None
     )
+    # The Extra Work has no human-facing number of its own (its list
+    # and detail address it by id), so the register links by id too.
+    extra_work_no = serializers.IntegerField(
+        source="extra_work.id", read_only=True, default=None
+    )
+    department_name = serializers.CharField(
+        source="department.name", read_only=True, default=None
+    )
 
     class Meta:
         model = ContractLine
@@ -133,10 +160,29 @@ class ContractLineSerializer(serializers.ModelSerializer):
             "sort_order",
             "hours",
             "area_m2",
+            # W20 — the three planning fields. `frequency_per_year` is a
+            # count of performances per year, never money; `norm` is the
+            # operator's spec note; `department` must belong to the
+            # contract's OWN customer (validate_department).
+            "frequency_per_year",
+            "norm",
+            "department",
+            "department_name",
             "amount",
             "vat_pct",
+            # W16 — the chargeable job this line MIRRORS, on an extra
+            # work register; NULL on every ordinary contract line.
+            # READ-ONLY: the link is made by
+            # `extra_work_register.sync_extra_work_register`, and a
+            # client that could set it would be claiming one job's money
+            # for another's line.
+            "extra_work",
+            "extra_work_no",
         ]
-        read_only_fields = ["id", "revision"]
+        # W20 — one list. This used to be TWO assignments, and the
+        # second silently replaced the first, which left `extra_work`
+        # writable despite the comment above saying it must not be.
+        read_only_fields = ["id", "revision", "extra_work"]
 
     def validate_name(self, value):
         cleaned = (value or "").strip()
@@ -169,6 +215,29 @@ class ContractLineSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def validate_department(self, value):
+        """W20 — the department must be the contract's OWN customer's.
+
+        `Department` is a per-customer label list; a line naming
+        another customer's label would leak one tenant's vocabulary
+        into another's agreed scope (H-1/H-2 territory). Same
+        revision-resolution shape as `validate_building` above, so the
+        two guards cannot drift apart.
+        """
+        if value is None:
+            return value
+        revision = self.context.get("revision")
+        if revision is None and self.instance is not None:
+            revision = self.instance.revision
+        if revision is None:
+            return value
+        if value.customer_id != revision.contract.customer_id:
+            raise serializers.ValidationError(
+                "This department belongs to another customer.",
+                code=ERR_DEPARTMENT_CROSS_CUSTOMER,
+            )
+        return value
+
 
 class ContractLineNestedSerializer(serializers.ModelSerializer):
     """Read-only projection of a line for the contract list / detail
@@ -179,6 +248,26 @@ class ContractLineNestedSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(
         source="building.name", read_only=True, default=None
     )
+    department_name = serializers.CharField(
+        source="department.name", read_only=True, default=None
+    )
+    # P-12 C3 (§D.24 rule 6) — which recurring work RUNS this line, in
+    # words the page can print: "Runs as recurring work {title} ·
+    # weekly". Bounded (a line realistically has 0 or 1 rules; the cap
+    # keeps a pathological row harmless) and served from the view's
+    # prefetch, so it costs no per-row query.
+    recurring = serializers.SerializerMethodField()
+
+    def get_recurring(self, obj):
+        return [
+            {
+                "id": job.id,
+                "title": job.title,
+                "frequency": job.frequency,
+                "is_active": job.is_active and job.archived_at is None,
+            }
+            for job in list(obj.recurring_jobs.all())[:3]
+        ]
 
     class Meta:
         model = ContractLine
@@ -190,8 +279,15 @@ class ContractLineNestedSerializer(serializers.ModelSerializer):
             "sort_order",
             "hours",
             "area_m2",
+            # W20 — mirrored from the write serializer so the detail
+            # page's `projects` payload can render what was entered.
+            "frequency_per_year",
+            "norm",
+            "department",
+            "department_name",
             "amount",
             "vat_pct",
+            "recurring",
         ]
         read_only_fields = fields
 
@@ -250,7 +346,12 @@ class ContractRevisionSerializer(serializers.ModelSerializer):
         return revision_totals(obj)["line_count"]
 
     def get_is_locked(self, obj) -> bool:
-        return is_locked(obj)
+        # One existence query per CONTRACT, not per revision: the detail
+        # page serializes every revision a contract has.
+        cache = self.context.setdefault("_contract_invoiced", {})
+        if obj.contract_id not in cache:
+            cache[obj.contract_id] = contract_has_been_invoiced(obj.contract_id)
+        return is_locked(obj, contract_invoiced=cache[obj.contract_id])
 
     def get_is_active(self, obj) -> bool:
         """True for the ONE revision currently in force. Computed from
@@ -297,6 +398,15 @@ class ContractSerializer(serializers.ModelSerializer):
     )
     contract_no = serializers.CharField(read_only=True)
     status = serializers.SerializerMethodField()
+    # W20 — READ-ONLY, and a METHOD field rather than the model field:
+    # `Contract` carries a partial UniqueConstraint conditioned on
+    # `kind` (one EXTRA_WORK register per customer), and DRF
+    # auto-attaches a validator for any constraint whose fields all
+    # appear as serializer sources — a validator that then KeyErrors on
+    # every write because a read-only `kind` never reaches `attrs`. A
+    # method field's source is '*', so the constraint stays out of the
+    # write path exactly as it was before `kind` was exposed.
+    kind = serializers.SerializerMethodField()
 
     building_ids = serializers.PrimaryKeyRelatedField(
         many=True,
@@ -306,6 +416,13 @@ class ContractSerializer(serializers.ModelSerializer):
         help_text="The buildings ('locations') this contract covers.",
     )
     buildings = serializers.SerializerMethodField()
+
+    # P-15 §1.2 — money-bearing: this contract has generated invoices,
+    # so the list's Delete cannot take it (the row says why) and the
+    # server refuses (`contract_has_invoices`). Reads the list's
+    # `Exists` annotation; a single-instance read falls back to one
+    # query.
+    has_invoices = serializers.SerializerMethodField()
 
     active_revision = serializers.SerializerMethodField()
     monthly_amount = serializers.SerializerMethodField()
@@ -337,10 +454,19 @@ class ContractSerializer(serializers.ModelSerializer):
             "contract_type_name",
             "contract_type_standard_slot",
             "contract_no",
+            # W20 — the frontend needs to know an EXTRA_WORK register
+            # from a STANDARD contract to hide the planning fields on
+            # register lines (they are projected, not authored). Never
+            # client-writable: registers are created only by
+            # `extra_work_register.get_or_create_register`. See the
+            # method-field declaration for why it is one.
+            "kind",
             "start_date",
             "end_date",
             "lifecycle",
             "status",
+            # P-15 §1.2 — the list's delete gate reads this.
+            "has_invoices",
             "description",
             "notes",
             "billing_period",
@@ -350,6 +476,9 @@ class ContractSerializer(serializers.ModelSerializer):
             "start_proration",
             "building_ids",
             "buildings",
+            # P-5 S7 — connected facts (detail only; null on the list).
+            "visits",
+            "invoice_trail",
             "active_revision",
             "monthly_amount",
             "yearly_amount",
@@ -360,7 +489,19 @@ class ContractSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "contract_no", "created_at", "updated_at"]
+        # P-15 §1.1 — `lifecycle` is READ-ONLY here: every move goes
+        # through POST /contracts/<id>/transition/ and its
+        # ALLOWED_TRANSITIONS guard (`contracts/state_machine.py`).
+        # A writable ChoiceField let any PATCH jump anywhere with a 200
+        # (a CANCELLED contract back to ACTIVE) — P-14's S1 finding.
+        # A new contract is born DRAFT, which is what the UI always did.
+        read_only_fields = [
+            "id",
+            "contract_no",
+            "lifecycle",
+            "created_at",
+            "updated_at",
+        ]
         extra_kwargs = {"company": {"required": False}}
 
     def __init__(self, *args, **kwargs):
@@ -409,15 +550,100 @@ class ContractSerializer(serializers.ModelSerializer):
     def get_status(self, obj) -> str:
         return obj.status()
 
+    def get_kind(self, obj) -> str:
+        return obj.kind
+
+    def get_has_invoices(self, obj) -> bool:
+        annotated = getattr(obj, "annotated_has_invoices", None)
+        if annotated is not None:
+            return bool(annotated)
+        return obj.generated_invoices.exists()
+
     def get_buildings(self, obj):
-        # `.all()` with NO further queryset methods on purpose: the view
-        # prefetches `building_links__building`, and any additional
-        # `.select_related()` / `.filter()` here would bypass that cache
-        # and re-query PER ROW. That is exactly the per-row cost
-        # `tests/test_query_counts.py` exists to catch.
+        # P-5 S7 — THE CONNECTED FACTS. A building on a contract is a
+        # link with one line of context: when a cost split exists on
+        # it, the split is carried ("billed to the building — split
+        # B Amsterdam 60% / Sirket Test 40%"). Read only on the detail
+        # (`connected` in the context): the list has no room for it and
+        # would pay a query per building.
+        connected = bool(self.context.get("connected"))
+        out = []
+        for link in obj.building_links.all():
+            row = {"id": link.building_id, "name": link.building.name}
+            if connected:
+                from buildings.models import BuildingCostShare
+
+                row["cost_shares"] = [
+                    {
+                        "customer_id": share.customer_id,
+                        "customer_name": share.customer.name,
+                        "share_pct": str(share.share_pct),
+                    }
+                    for share in BuildingCostShare.objects.filter(
+                        building_id=link.building_id
+                    )
+                    .select_related("customer")
+                    .order_by("-share_pct", "customer__name")
+                ]
+            out.append(row)
+        return out
+
+    # P-5 S7 — what the contract FEEDS: the visits its recurring jobs run
+    # (occurrence tickets, recent and next) and the invoices it produced.
+    visits = serializers.SerializerMethodField()
+    invoice_trail = serializers.SerializerMethodField()
+
+    def get_visits(self, obj):
+        if not self.context.get("connected"):
+            return None
+        from django.utils import timezone
+
+        from planned_work.models import PlannedOccurrence
+
+        today = timezone.localdate()
+        base = PlannedOccurrence.objects.filter(
+            recurring_job__contract_line__revision__contract_id=obj.id
+        ).select_related("recurring_job", "ticket")
+
+        def row(occ):
+            ticket = getattr(occ, "ticket", None)
+            return {
+                "id": occ.id,
+                "planned_date": occ.planned_date.isoformat(),
+                "status": occ.status,
+                "recurring_job_id": occ.recurring_job_id,
+                "recurring_job_title": occ.recurring_job.title,
+                "ticket_id": ticket.id if ticket else None,
+                "ticket_no": ticket.ticket_no if ticket else None,
+            }
+
+        recent = [
+            row(o)
+            for o in base.filter(planned_date__lte=today).order_by("-planned_date", "-id")[:3]
+        ]
+        upcoming = [
+            row(o)
+            for o in base.filter(planned_date__gt=today).order_by("planned_date", "id")[:3]
+        ]
+        return {"recent": recent, "next": upcoming, "total": base.count()}
+
+    def get_invoice_trail(self, obj):
+        if not self.context.get("connected"):
+            return None
+        rows = obj.generated_invoices.select_related("invoice").order_by(
+            "-invoice_date", "-id"
+        )[:5]
         return [
-            {"id": link.building_id, "name": link.building.name}
-            for link in obj.building_links.all()
+            {
+                "invoice_id": link.invoice_id,
+                "number": link.invoice.number,
+                "status": link.invoice.status,
+                "period_start": link.period_start.isoformat(),
+                "period_end": link.period_end.isoformat(),
+                "invoice_date": link.invoice_date.isoformat(),
+                "total_amount": str(link.invoice.total_amount),
+            }
+            for link in rows
         ]
 
     def get_active_revision(self, obj):
@@ -429,8 +655,11 @@ class ContractSerializer(serializers.ModelSerializer):
             "id": revision.id,
             "label": revision.label,
             "effective_from": revision.effective_from,
-            "amount": totals["amount"],
-            "hours": totals["hours"],
+            # P-6 V5.3 — money and hours leave as two-decimal STRINGS, the
+            # shape `api/contracts.types.ts` declares; a raw Decimal in a
+            # method field renders as a JSON number and drops its scale.
+            "amount": _two_places(totals["amount"]),
+            "hours": _two_places(totals["hours"]),
             "line_count": totals["line_count"],
         }
 
@@ -450,7 +679,7 @@ class ContractSerializer(serializers.ModelSerializer):
         from .billing import money
 
         months = MONTHS_PER_PERIOD[obj.billing_period]
-        return money(self._period_amount(obj) / Decimal(months))
+        return _two_places(money(self._period_amount(obj) / Decimal(months)))
 
     def get_yearly_amount(self, obj) -> Decimal:
         """Twelve months of the active revision at its current price.
@@ -465,13 +694,13 @@ class ContractSerializer(serializers.ModelSerializer):
         from .billing import money
 
         months = MONTHS_PER_PERIOD[obj.billing_period]
-        return money(self._period_amount(obj) * Decimal(12) / Decimal(months))
+        return _two_places(money(self._period_amount(obj) * Decimal(12) / Decimal(months)))
 
-    def get_total_hours(self, obj) -> Decimal:
+    def get_total_hours(self, obj) -> str:
         revision = self._active_revision(obj)
         if revision is None:
-            return Decimal("0.00")
-        return revision_totals(revision)["hours"]
+            return "0.00"
+        return _two_places(revision_totals(revision)["hours"])
 
     def get_line_count(self, obj) -> int:
         revision = self._active_revision(obj)
@@ -684,3 +913,44 @@ def default_effective_from(contract):
     if contract.start_date > today:
         return contract.start_date
     return today + timedelta(days=1)
+
+
+# ---------------------------------------------------------------------------
+# W23 — the year×week planning grid, read side.
+#
+# Plain Serializers over a computed dict (the shape
+# `ContractForecastSerializer` uses): the view buckets the linked
+# recurring jobs' PlannedOccurrences per contract line per ISO week, and
+# nothing here touches the database. The occurrence machinery in
+# `planned_work` stays the ONE planner; this is a projection of it onto
+# the contract, exactly as the register is a projection of extra work.
+# ---------------------------------------------------------------------------
+
+
+class ContractPlanningWeekSerializer(serializers.Serializer):
+    """One filled cell: ISO week number, how many occurrences land in
+    it, the dominant occurrence status, and the recurring job to open
+    when the cell is clicked (per-date editing lives on that job's
+    calendar — the grid never edits)."""
+
+    week = serializers.IntegerField()
+    count = serializers.IntegerField()
+    status = serializers.CharField()
+    job_id = serializers.IntegerField()
+
+
+class ContractPlanningLineSerializer(serializers.Serializer):
+    line_id = serializers.IntegerField()
+    name = serializers.CharField()
+    frequency_per_year = serializers.IntegerField(allow_null=True)
+    # Occurrences in the year that are (or became) real performances —
+    # SKIPPED and CANCELLED dates are not performances and do not count
+    # against `frequency_per_year`.
+    planned_count = serializers.IntegerField()
+    job_ids = serializers.ListField(child=serializers.IntegerField())
+    weeks = ContractPlanningWeekSerializer(many=True)
+
+
+class ContractPlanningSerializer(serializers.Serializer):
+    year = serializers.IntegerField()
+    lines = ContractPlanningLineSerializer(many=True)

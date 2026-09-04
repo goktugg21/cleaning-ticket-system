@@ -419,10 +419,21 @@ class Sprint23AFoundationTests(TestCase):
         data2 = TicketDetailSerializer(
             self.t_a_b1, context={"request": request}
         ).data
-        self.assertEqual(
-            data2["assigned_staff"],
-            [{"anonymous": True, "label_key": "tickets.assigned_team_anonymous"}],
-        )
+        # P-16 repin — the M2 credentials roster made the anonymous
+        # answer ONE ROW PER MEMBER (`assigned_team_member_anonymous`,
+        # each carrying resolver-gated credentials), replacing the old
+        # single collapsed row; test_m2_ticket_payload_credentials pins
+        # the same shape. The policy under test (all three flags off →
+        # no identity) is unchanged: no name/email/phone/id anywhere.
+        rows = data2["assigned_staff"]
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertTrue(row["anonymous"])
+            self.assertEqual(
+                row["label_key"], "tickets.assigned_team_member_anonymous"
+            )
+            for leaked in ("name", "email", "phone", "id", "user_id"):
+                self.assertNotIn(leaked, row)
 
         # OSIUS-side viewer (manager) always sees full record
         # regardless of policy.

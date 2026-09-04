@@ -50,6 +50,8 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+
+from .plan_gate_fixture import make_plan_complete
 from tickets.models import Ticket
 
 
@@ -166,6 +168,15 @@ class AutoStartFixtureMixin:
             "description": "auto-start cart",
             "category": ExtraWorkCategory.DEEP_CLEANING,
             "request_intent": intent,
+            # W-EW1 §2 — ONE DATE FOR THE WHOLE CART. The per-line
+            # `requested_date` stopped being client-supplied in 181708a
+            # (`line_requested_date_not_accepted`); the request-level
+            # `preferred_date` is stamped onto every line by `validate()`
+            # instead. Kept at 2026-06-15 so each line still resolves
+            # against exactly the date these tests were written for — the
+            # fixture contract is `valid_from=2026-01-01, valid_to=None`,
+            # so the agreed-price window is unchanged.
+            "preferred_date": "2026-06-15",
             "line_items": lines,
         }
         return self._api(actor).post(EW_URL, payload, format="json")
@@ -174,7 +185,6 @@ class AutoStartFixtureMixin:
         return {
             "service": service.id,
             "quantity": qty,
-            "requested_date": "2026-06-15",
             "customer_note": "",
         }
 
@@ -182,7 +192,6 @@ class AutoStartFixtureMixin:
         return {
             "custom_description": "Free-text special task",
             "quantity": qty,
-            "requested_date": "2026-06-15",
             "customer_note": "",
         }
 
@@ -200,6 +209,9 @@ class AutoStartFixtureMixin:
         """
         actor = actor or self.admin
         api = self._api(actor)
+        # W-PLAN — pricing is gated on a complete plan now; this
+        # module tests PRICING, so the fixture satisfies the gate.
+        make_plan_complete(ew)
 
         # REQUESTED -> UNDER_REVIEW.
         resp = api.post(
@@ -481,7 +493,10 @@ class RequestQuoteUnchangedTests(AutoStartFixtureMixin, TestCase):
             f"/api/extra-work/{ew.id}/proposals/{proposal_id}/transition/",
             {
                 "to_status": ProposalStatus.CUSTOMER_REJECTED,
-                "customer_reject_reason": "not needed",
+                # P-16 repin — P-8R: the PROPOSAL door reads the reason
+                # from `note`; `customer_reject_reason` belongs to the
+                # EW-transition door.
+                "note": "not needed",
             },
             format="json",
         )

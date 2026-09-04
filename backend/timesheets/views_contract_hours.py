@@ -29,7 +29,7 @@ from config.pagination import UnboundedPagination
 from .contract_hours import in_force_between, in_force_on
 from .models import ContractHours, ContractHoursStatus
 from .permissions import IsTimesheetManager, IsTimesheetUser
-from .scope import filter_contract_hours_for
+from .scope import filter_contract_hours_for, restrict_contract_hours_to_self
 from .serializers_contract_hours import (
     ContractHoursBulkSerializer,
     ContractHoursSerializer,
@@ -42,10 +42,26 @@ ERR_BAD_TRANSITION = "contract_hours_bad_transition"
 
 
 def _base_queryset(user):
-    return filter_contract_hours_for(
+    """The two scoping helpers, applied as the PAIR they are.
+
+    W12 — `restrict_contract_hours_to_self` was missing here.
+    `filter_contract_hours_for` answers the tenant question (H-1) and
+    nothing else, so with only that applied, GET was
+    `IsTimesheetUser` — every provider-side role — over the whole
+    company's standing agreements: a STAFF member could read every
+    colleague's contracted weekly pattern, building and hour type
+    through this endpoint. That is precisely the defect Sprint 182 §1
+    found in `reports`, which is why the self-restriction helper
+    already existed and was already documented as one half of a pair.
+    It had a second caller and now has its third.
+    """
+    return restrict_contract_hours_to_self(
         user,
-        ContractHours.objects.select_related(
-            "employee", "building", "hour_type", "company"
+        filter_contract_hours_for(
+            user,
+            ContractHours.objects.select_related(
+                "employee", "building", "hour_type", "company"
+            ),
         ),
     )
 
@@ -246,7 +262,32 @@ class ContractHoursBulkView(APIView):
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
             created = serializer.save(created_by=request.user)
+        # W10 — the answer takes effect immediately, on the week the
+        # operator is standing in. Every OTHER week fills when it is
+        # opened (`entries/fill-week/`), which is what keeps this
+        # bounded: a `valid_from` two years back must not turn one
+        # assignment into a hundred weeks of writes.
+        _fill_current_week(created, request.user)
         return Response(
             ContractHoursSerializer(created, many=True).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+def _fill_current_week(rows, actor) -> None:
+    """Fill this week for every company an auto-fill row just landed in.
+
+    Per COMPANY, not per row: `fill_week` already walks that company's
+    agreements, so calling it once per created row would do the same
+    work N times for the same answer.
+    """
+    from datetime import date as _date
+
+    from .fill import fill_week
+
+    companies = {r.company_id for r in rows if r.auto_fill}
+    if not companies:
+        return
+    iso_year, iso_week, _ = _date.today().isocalendar()
+    for company_id in companies:
+        fill_week(company_id, iso_year, iso_week, actor=actor)

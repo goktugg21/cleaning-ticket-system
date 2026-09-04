@@ -134,9 +134,12 @@ class _EwLabelFixture(TestCase):
                 {
                     "service": self.service.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
+                    # P-16 repin — the per-line requested_date was
+                    # retired in P-8 §4; the request-level
+                    # preferred_date carries the cart's date.
                 }
             ],
+            "preferred_date": "2026-06-15",
         }
         payload.update(extra)
         return payload

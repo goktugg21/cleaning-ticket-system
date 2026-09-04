@@ -9,7 +9,7 @@ import { loginAs } from "./fixtures/login";
  *
  * Coverage:
  *   1. `/admin/customers/<id>/contacts` renders `CustomerContactsPage`
- *      (the real page) and NOT the Batch 3 `CustomerSubPagePlaceholder`.
+ *      as the Contacts sub-view of the customer's People tab (FE-6).
  *   2. The Add-contact modal exposes phone-book fields only — NO
  *      password / role enum / scope inputs (Contacts vs Users §1 of
  *      `docs/product/meeting-2026-05-15-system-requirements.md`).
@@ -130,10 +130,11 @@ test("Sprint 28 B4 — /admin/customers/:id/contacts renders real page (not plac
     page.locator("[data-testid='customer-contacts-page']"),
   ).toBeVisible({ timeout: 10_000 });
 
-  // Placeholder is NOT.
+  // FE-6 — Contacts is the second sub-view of the customer's People
+  // tab; the tab row marks it as the open one.
   await expect(
-    page.locator("[data-testid='customer-subpage-placeholder']"),
-  ).toHaveCount(0);
+    page.locator("[data-testid='customer-subtab-contacts']"),
+  ).toHaveAttribute("aria-selected", "true");
 
   // Add button is reachable.
   await expect(

@@ -25,7 +25,62 @@ import { loginAs } from "./fixtures/login";
  * Seed discovery probes the API as SUPER_ADMIN — the demo seed has
  * a mix of EW states and the spec walks the list to find suitable
  * candidates rather than assuming a specific id.
+ *
+ * W21 / W-NAV1.2 — for a PROVIDER, a request that has spawned work IS
+ * that work: `/extra-work/:id` redirects to the earliest spawned job
+ * (the old `?full=1` back door is deleted with it), and the Meerwerk
+ * list shows the Quote & price side only (requests with no operational
+ * ticket yet). So the spawned-tickets panel, the cancel dialog's
+ * spawned-tickets warning and the request's own status badge are not
+ * provider surfaces for such a request any more. What IS: the landing
+ * on the job, and the job's `ticket-extra-work-origin` block linking
+ * back to the request. J1 / J3 / J4 assert that contract:
+ *   J1 — the redirect lands on one of the API-resolved spawned tickets
+ *        and the job links back to the request.
+ *   J2 — unchanged: a request without spawned work renders its own
+ *        page, without the panel.
+ *   J3 — with ACTIVE spawned tickets the request page stays out of
+ *        reach even through the retired `?full=1` door.
+ *   J4 — after the CUSTOMER_APPROVED -> IN_PROGRESS transition the API
+ *        carries the operational status, the provider landing is still
+ *        the job, and the quote-side list no longer lists the request.
  */
+
+/** Follow the provider redirect for a spawned request: the job page. */
+async function expectLandingOnSpawnedJob(
+  page: import("@playwright/test").Page,
+  ewId: number,
+  spawnedTickets: TicketLite[],
+  path = `/extra-work/${ewId}`,
+): Promise<number> {
+  await page.goto(path);
+  await page.waitForURL(/\/tickets\/\d+(\?.*)?$/, { timeout: 10_000 });
+  const landedId = Number(
+    new URL(page.url()).pathname.split("/").filter(Boolean).pop(),
+  );
+  expect(
+    spawnedTickets.map((t) => t.id),
+    "the redirect lands on one of the request's spawned tickets",
+  ).toContain(landedId);
+  await expect(page.locator('[data-testid="ticket-facts"]')).toBeVisible({
+    timeout: 10_000,
+  });
+  // P-16 REPIN (the P-13 break): the standalone origin block
+  // (`ticket-extra-work-origin`) was replaced by the W21 agreement
+  // card + the P-13 money card — "everything the request page was
+  // opened for lives here". The landing pin is now the redirect + the
+  // ticket carrying its extra-work MONEY surface: the proof this
+  // ticket IS the spawned job's home.
+  await page
+    .locator('[data-testid="ticket-tab-money"]')
+    .click()
+    .catch(() => {});
+  await expect(
+    page.locator('[data-testid="ticket-extra-work-money"]'),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-testid="extra-work-detail-page"]')).toHaveCount(0);
+  return landedId;
+}
 
 const TERMINAL_TICKET_STATUSES = new Set([
   "APPROVED",
@@ -213,7 +268,7 @@ test.describe("Sprint 29 Batch 29.8 — Extra Work operational segment", () => {
     }
   });
 
-  test("J1 — spawned tickets panel renders for an EW with tickets", async ({
+  test("J1 — a request with spawned tickets lands the provider on the job, which links back", async ({
     page,
   }) => {
     test.skip(
@@ -223,37 +278,7 @@ test.describe("Sprint 29 Batch 29.8 — Extra Work operational segment", () => {
     const target = ewWithActiveTickets!;
 
     await loginAs(page, DEMO_USERS.super);
-    await page.goto(`/extra-work/${target.ew.id}`);
-
-    await expect(
-      page.locator('[data-testid="extra-work-detail-page"]'),
-    ).toBeVisible({ timeout: 10_000 });
-
-    const panel = page.locator(
-      '[data-testid="extra-work-spawned-tickets-panel"]',
-    );
-    await expect(panel).toBeVisible({ timeout: 10_000 });
-
-    // At least one row matches the spawned ticket ids resolved via
-    // the API. The panel is a superset; assert at least one row.
-    const rowCount = await page
-      .locator('[data-testid^="extra-work-spawned-ticket-row-"]')
-      .count();
-    expect(rowCount).toBeGreaterThan(0);
-
-    // At least one of the resolved ticket ids must render a row.
-    for (const ticket of target.spawnedTickets) {
-      const row = page.locator(
-        `[data-testid="extra-work-spawned-ticket-row-${ticket.id}"]`,
-      );
-      if (await row.count()) {
-        await expect(row).toBeVisible();
-        return;
-      }
-    }
-    throw new Error(
-      "None of the API-resolved spawned tickets rendered a row.",
-    );
+    await expectLandingOnSpawnedJob(page, target.ew.id, target.spawnedTickets);
   });
 
   test("J2 — spawned tickets panel does NOT render for an EW with no tickets", async ({
@@ -280,7 +305,7 @@ test.describe("Sprint 29 Batch 29.8 — Extra Work operational segment", () => {
     await expect(panel).toHaveCount(0);
   });
 
-  test("J3 — cancel dialog shows warning when active spawned tickets exist", async ({
+  test("J3 — with active spawned tickets the request page stays out of reach (no ?full=1 door)", async ({
     page,
   }) => {
     test.skip(
@@ -288,58 +313,25 @@ test.describe("Sprint 29 Batch 29.8 — Extra Work operational segment", () => {
       "demo seed has no EW with non-terminal spawned tickets",
     );
     const target = ewWithActiveTickets!;
-    // The cancel button only renders when CANCELLED is in
-    // `allowed_next_statuses` for the actor. SUPER_ADMIN qualifies
-    // from any non-terminal state. Skip if the EW happened to land
-    // in a state where cancellation is no longer allowed (e.g.
-    // already COMPLETED). The button's render gate is the auth
-    // contract; the dialog assertion only runs when the gate opens.
-
-    await loginAs(page, DEMO_USERS.super);
-    await page.goto(`/extra-work/${target.ew.id}`);
-    await expect(
-      page.locator('[data-testid="extra-work-detail-page"]'),
-    ).toBeVisible({ timeout: 10_000 });
-
-    const cancelButton = page.locator(
-      '[data-testid="extra-work-cancel-button"]',
-    );
-    const buttonCount = await cancelButton.count();
-    test.skip(
-      buttonCount === 0,
-      "Cancel transition not allowed from current EW state for SUPER_ADMIN.",
-    );
-
-    await cancelButton.click();
-
-    // The dialog is a native <dialog> opened via showModal(); the
-    // warning panel lives inside it.
-    const warning = page.locator(
-      '[data-testid="extra-work-cancel-spawned-tickets-warning"]',
-    );
-    await expect(warning).toBeVisible({ timeout: 5_000 });
-
-    // The warning lists at least one of the spawned ticket ids
-    // returned by the API helper.
-    const warningText = await warning.innerText();
     const activeSpawned = target.spawnedTickets.filter(
       (t) => !TERMINAL_TICKET_STATUSES.has(t.status),
     );
     expect(activeSpawned.length).toBeGreaterThan(0);
-    const someListed = activeSpawned.some((t) =>
-      warningText.includes(`#${t.id}`),
-    );
-    expect(
-      someListed,
-      "Expected the warning panel to list at least one of the spawned ticket ids.",
-    ).toBe(true);
 
-    // Do NOT confirm — close the dialog instead via the Keep open
-    // button so no destructive transition fires.
-    const keepButton = page.getByRole("button", {
-      name: /Keep open|Openhouden/i,
-    });
-    await keepButton.click();
+    await loginAs(page, DEMO_USERS.super);
+    // W21 — "W18's `?full=1` back door is deleted": the landing is the
+    // job either way, so the request's cancel dialog (and its
+    // spawned-tickets warning) is not a surface a provider can reach
+    // while work is running.
+    await expectLandingOnSpawnedJob(
+      page,
+      target.ew.id,
+      target.spawnedTickets,
+      `/extra-work/${target.ew.id}?full=1`,
+    );
+    await expect(
+      page.locator('[data-testid="extra-work-cancel-button"]'),
+    ).toHaveCount(0);
   });
 
   test("J4 — IN_PROGRESS badge renders after a transition", async ({
@@ -376,24 +368,63 @@ test.describe("Sprint 29 Batch 29.8 — Extra Work operational segment", () => {
       await sa.dispose();
     }
 
-    await loginAs(page, DEMO_USERS.super);
-    await page.goto(`/extra-work/${target.id}`);
-    await expect(
-      page.locator('[data-testid="extra-work-detail-page"]'),
-    ).toBeVisible({ timeout: 10_000 });
+    // The operational status is the API's: the request is now
+    // IN_PROGRESS (or already COMPLETED by the auto-sync hook).
+    const readBack = async (): Promise<{ status: string; spawned: TicketLite[] }> => {
+      const sa2 = await apiAs(DEMO_USERS.super.email);
+      try {
+        const detail = await sa2.get(`/api/extra-work/${target.id}/`);
+        expect(detail.status()).toBe(200);
+        const status = ((await detail.json()) as { status: string }).status;
+        return { status, spawned: await resolveSpawnedTickets(sa2, target) };
+      } finally {
+        await sa2.dispose();
+      }
+    };
+    const { status: statusAfter, spawned } = await readBack();
+    // P-11 F1 — REPINNED to P-8R's rule: once a ticket exists the
+    // OPERATIONAL status follows the TICKET, and the request-level
+    // transition answers 400 (`operational_status_follows_ticket`) —
+    // the request legitimately still reads CUSTOMER_APPROVED while its
+    // spawned ticket carries the work. A legacy row with no ticket
+    // must still move.
+    if (spawned.length > 0) {
+      expect(["IN_PROGRESS", "COMPLETED", "CUSTOMER_APPROVED"]).toContain(
+        statusAfter,
+      );
+    } else {
+      expect(["IN_PROGRESS", "COMPLETED"]).toContain(statusAfter);
+    }
 
-    // The status badge renders in the header meta slot. The locale
-    // is Dutch by default in the demo seed but EN labels are also
-    // accepted — both translate "IN_PROGRESS" to a human label
-    // distinct from "Customer approved" / "Approved".
-    const headerMeta = page.locator(".ew-detail-header-meta");
-    await expect(headerMeta).toBeVisible();
-    const metaText = await headerMeta.innerText();
-    const looksInProgress =
-      /In progress|In uitvoering|Completed|Voltooid/i.test(metaText);
-    expect(
-      looksInProgress,
-      `Expected the EW status badge to show the operational-segment label, got: ${metaText}`,
-    ).toBe(true);
+    await loginAs(page, DEMO_USERS.super);
+    if (spawned.length > 0) {
+      // Started work: the provider's landing is the job, and the
+      // quote-side list no longer carries the request.
+      await expectLandingOnSpawnedJob(page, target.id, spawned);
+      await page.goto("/extra-work");
+      await page.waitForSelector(
+        '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
+        { timeout: 10_000 },
+      );
+      await expect(
+        page.locator('[data-testid="extra-work-row"]', { hasText: target.title }),
+      ).toHaveCount(0);
+    } else {
+      // No operational ticket (legacy row): the request page renders
+      // and its raw status badge, behind the Advanced fold, reads the
+      // operational-segment label in either locale.
+      await page.goto(`/extra-work/${target.id}`);
+      await expect(
+        page.locator('[data-testid="extra-work-detail-page"]'),
+      ).toBeVisible({ timeout: 10_000 });
+      await page.locator('[data-testid="extra-work-advanced-toggle"]').click();
+      const badge = page.locator('[data-testid="extra-work-header-status"]');
+      await expect(badge).toBeVisible({ timeout: 10_000 });
+      const metaText = await badge.innerText();
+      expect(
+        /In progress|In uitvoering|Completed|Voltooid/i.test(metaText),
+        `Expected the EW status badge to show the operational-segment label, got: ${metaText}`,
+      ).toBe(true);
+    }
   });
 });

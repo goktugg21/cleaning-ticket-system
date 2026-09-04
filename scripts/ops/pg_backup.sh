@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Thin wrapper around scripts/backup_postgres.sh that:
+# Thin wrapper around scripts/archive/backup_postgres.sh that:
 #   - defaults COMPOSE_FILE to docker-compose.prod.yml
 #   - prints the resulting dump filename and size
 #   - does NOT prune (that's the operator's cron decision)
@@ -27,7 +27,7 @@ echo "Backup dir:  $BACKUP_DIR"
 
 before_count="$(ls -1 "$BACKUP_DIR" 2>/dev/null | wc -l || echo 0)"
 
-./scripts/backup_postgres.sh
+./scripts/archive/backup_postgres.sh
 
 after_count="$(ls -1 "$BACKUP_DIR" 2>/dev/null | wc -l || echo 0)"
 

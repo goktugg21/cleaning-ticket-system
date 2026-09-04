@@ -16,9 +16,12 @@
 //   * "NEEDS_PROPOSAL"  -> "Custom / needs proposal"  (cart only — backend
 //                          never emits NEEDS_PROPOSAL for proposal/pricing)
 //   * "CUSTOM" + the line carries a non-null OWN unit_price
-//                       -> "Agreed price"             (priced custom line)
+//                       -> "Your price" for the provider who typed it,
+//                          "Quoted price" for the customer reading it
+//                          (P-9 C6 / ruling 12(a): a price the operator
+//                          typed is never called agreed or contract)
 //   * "CUSTOM" + no own unit_price
-//                       -> "Custom / needs proposal"
+//                       -> "Needs a price"
 //
 // "Own unit_price" here means the line's own persisted amount, NOT
 // `contract_unit_price`. For ProposalLine and ExtraWorkPricingLineItem
@@ -67,9 +70,15 @@ const UNIT_TYPE_I18N_KEY: Record<ExtraWorkUnitType | ServiceUnitType, string> =
 interface InvoiceLineRowSharedProps {
   editable?: boolean;
   onEdit?: () => void;
+  /** P-10 B4 — a per-row testid for the Edit button (the proposal
+   *  builder's `pricing-row-edit-<id>`); the default is the shared one. */
+  editTestId?: string;
   onRemove?: () => void;
   rowTestId?: string;
   subLabel?: ReactNode;
+  /** P-9 C6 — who reads the source tag on an operator-priced line:
+   *  the provider sees "Your price", the customer "Quoted price". */
+  audience?: "provider" | "customer";
 }
 
 export type InvoiceLineRowProps =
@@ -193,6 +202,7 @@ function isPositiveDecimalString(value: string | null | undefined): boolean {
 function sourceLabelKey(
   priceSource: PriceSource,
   hasOwnUnitPrice: boolean,
+  audience: "provider" | "customer",
 ): string {
   // CONTRACT always wins.
   if (priceSource === "CONTRACT") {
@@ -210,7 +220,9 @@ function sourceLabelKey(
   // "needs proposal" if a future backend ever did. That's fine.
   // For proposal/pricing kinds the operator-typed snapshot decides:
   if (hasOwnUnitPrice) {
-    return "invoice_row.source.agreed_price";
+    return audience === "customer"
+      ? "invoice_row.source.quoted_price"
+      : "invoice_row.source.own_price";
   }
   return "invoice_row.source.needs_proposal";
 }
@@ -224,7 +236,11 @@ export function InvoiceLineRow(props: InvoiceLineRowProps) {
     normalized.customUnitLabel ??
     t(UNIT_TYPE_I18N_KEY[normalized.unitType] ?? "unit_type.other");
   const sourceLabel = t(
-    sourceLabelKey(normalized.priceSource, normalized.hasOwnUnitPrice),
+    sourceLabelKey(
+      normalized.priceSource,
+      normalized.hasOwnUnitPrice,
+      props.audience ?? "provider",
+    ),
   );
 
   // VAT % is a number, not money. 21.00 must render as "21%", not
@@ -284,7 +300,7 @@ export function InvoiceLineRow(props: InvoiceLineRowProps) {
                 type="button"
                 className="btn btn-ghost btn-sm"
                 onClick={props.onEdit}
-                data-testid="invoice-line-row-edit"
+                data-testid={props.editTestId ?? "invoice-line-row-edit"}
               >
                 {t("invoice_row.action_edit")}
               </button>

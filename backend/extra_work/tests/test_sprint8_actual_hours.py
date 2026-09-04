@@ -50,6 +50,8 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+
+from .plan_gate_fixture import make_plan_complete
 from tickets.models import Ticket, TicketStatus
 
 
@@ -200,6 +202,13 @@ class ActualHoursFixtureMixin:
             "description": "actual hours cart",
             "category": ExtraWorkCategory.DEEP_CLEANING,
             "request_intent": intent,
+            # W-EW1 §2 — ONE DATE FOR THE WHOLE CART. Per-line
+            # `requested_date` stopped being client-supplied in
+            # 181708a (`line_requested_date_not_accepted`); the
+            # request-level `preferred_date` is stamped onto every
+            # line by `validate()`. Date unchanged, so each line
+            # resolves against the same contract window as before.
+            "preferred_date": "2026-06-15",
             "line_items": lines,
         }
         return self._api(actor).post(EW_URL, payload, format="json")
@@ -208,7 +217,6 @@ class ActualHoursFixtureMixin:
         return {
             "service": service.id,
             "quantity": qty,
-            "requested_date": "2026-06-15",
             "customer_note": "",
         }
 
@@ -232,6 +240,9 @@ class ActualHoursFixtureMixin:
         """
         actor = actor or self.admin
         api = self._api(actor)
+        # W-PLAN — pricing is gated on a complete plan now; this
+        # module tests PRICING, so the fixture satisfies the gate.
+        make_plan_complete(ew)
 
         resp = api.post(
             f"/api/extra-work/{ew.id}/transition/",
@@ -303,6 +314,21 @@ class ActualHoursFixtureMixin:
     def _drive_ticket(self, ew, *, to_status, actor=None, note="done"):
         actor = actor or self.admin
         ticket = self._ticket_for(ew)
+        # W13-FIX §1 — starting work needs somebody doing it
+        # (`tickets/transition_requirements.py`). These tests are about
+        # the ACTUAL-HOURS gate, so the helper satisfies the precondition
+        # once here rather than every test restating it. The spawned
+        # ticket already carries a planned date.
+        if to_status == TicketStatus.IN_PROGRESS and ticket.assigned_to_id is None:
+            ticket.assigned_to = self.admin
+            ticket.save(update_fields=["assigned_to", "updated_at"])
+        # P-5 — and a start: since P-1 a spawned ticket carries no seeded
+        # date, and IN_PROGRESS needs WHEN as well as WHO.
+        if to_status == TicketStatus.IN_PROGRESS and ticket.scheduled_start_at is None:
+            from django.utils import timezone
+
+            ticket.scheduled_start_at = timezone.now()
+            ticket.save(update_fields=["scheduled_start_at", "updated_at"])
         return self._api(actor).post(
             f"/api/tickets/{ticket.id}/status/",
             {"to_status": to_status, "note": note},

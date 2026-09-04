@@ -1,0 +1,275 @@
+/* P-9 Part A — the four zones of My schedule (Addendum D §D.21).
+ *
+ * Two sections above the board that are not toggles: "Not planned yet"
+ * and "Waiting for the customer", each titled with its count in the
+ * page's h2 size. Beside the component that owns them, for the same
+ * reason `workplan-day.css` is: the gate walks every .css under src/.
+ */
+.wp-zone { margin-bottom: 18px; padding: 16px 18px; }
+.wp-zone-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.wp-zone-title {
+  font-family: var(--f-head);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  margin: 0;
+  color: var(--text);
+}
+/* The one card fact line: what and where above it, this under it. */
+.wp-fact {
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+.wp-fact-rolled { color: var(--red, #b42318); font-weight: 600; }
+.wp-fact-review { color: var(--amber-text, #92400e); font-weight: 600; }
+.wp-fact-planned_today { color: var(--text); font-weight: 600; }
+.wp-fact-waiting_customer { color: var(--text-muted); }
+.wp-fact-not_planned,
+.wp-fact-planned,
+.wp-fact-finished { color: var(--text-muted); }
+/* The board's header row: the week stepper left, the Filter fold right. */
+.wp-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.wp-filter { margin: 0 0 12px; }
+.wp-filter .filter-fold-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: flex-end;
+}
+.wp-filter .wp-strip { margin: 0; flex: 1 1 100%; }
+.wp-plan-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+  font-size: 13px;
+}
+
+/* ===================================================================
+   P-10 Part A — the strips, the facts list, Details, the check card.
+   =================================================================== */
+/* A3 — a strip: one row, full width, a native <details> closed by
+   default, the zone's colour on the left edge, count pill · title ·
+   one summary sentence · chevron. */
+.wp-strip-zone {
+  margin: 0 0 10px;
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--border-strong, var(--border));
+  border-radius: var(--r-sm, 8px);
+  background: var(--surface);
+}
+.wp-strip-amber { border-left-color: var(--amber); }
+.wp-strip-teal { border-left-color: var(--teal); }
+.wp-strip-violet { border-left-color: var(--violet); }
+.wp-strip-red { border-left-color: var(--red); }
+.wp-strip-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+.wp-strip-head::-webkit-details-marker { display: none; }
+.wp-strip-pill {
+  flex: none;
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  background: var(--text-muted);
+}
+.wp-strip-amber .wp-strip-pill { background: var(--amber); }
+.wp-strip-teal .wp-strip-pill { background: var(--teal); }
+.wp-strip-violet .wp-strip-pill { background: var(--violet); }
+.wp-strip-red .wp-strip-pill { background: var(--red); }
+.wp-strip-title {
+  flex: none;
+  font-family: var(--f-head);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.wp-strip-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wp-strip-chevron { flex: none; color: var(--text-muted); transition: transform 0.15s; }
+.wp-strip-zone[open] > .wp-strip-head .wp-strip-chevron { transform: rotate(180deg); }
+.wp-strip-body { padding: 0 14px 12px; border-top: 1px solid var(--border-soft); }
+.wp-strip-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 0 4px;
+}
+.wp-strip-body .wp-undated-row { padding: 10px 0; }
+@media (max-width: 700px) {
+  .wp-strip-head { flex-wrap: wrap; }
+  .wp-strip-summary { flex-basis: 100%; white-space: normal; }
+}
+
+/* A4 — the facts: one per line, a faint label and a value. Lines wrap
+   inside the card; nothing overflows a column. */
+.wp-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.wp-facts-row {
+  display: grid;
+  grid-template-columns: minmax(64px, auto) 1fr;
+  gap: 0 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.wp-facts-label { color: var(--text-faint, var(--text-muted)); }
+.wp-facts-value { color: var(--text-2, var(--text)); min-width: 0; }
+.wp-facts-value[data-tone="late"] { color: var(--red); font-weight: 650; }
+.wp-facts-value[data-tone="strong"] { color: var(--text); font-weight: 650; }
+.wp-card { min-width: 0; }
+.wp-card-status { display: block; }
+
+/* A4 — Details: a fold on the card. A desk gets a popover anchored to
+   the card; a phone gets a bottom sheet. */
+.wp-details { position: relative; margin-top: 2px; }
+.wp-details-toggle {
+  display: inline-block;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--green);
+}
+.wp-details-toggle::-webkit-details-marker { display: none; }
+.wp-details-toggle::after { content: " ▾"; font-size: 10px; }
+.wp-details[open] > .wp-details-toggle::after { content: " ▴"; }
+.wp-details-panel {
+  position: absolute;
+  z-index: 30;
+  left: -11px;
+  right: -11px;
+  top: calc(100% + 6px);
+  padding: 12px 12px 10px;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: var(--r-sm, 8px);
+  background: var(--surface);
+  box-shadow: 0 10px 30px rgba(15, 32, 25, 0.16);
+}
+.wp-details-panel .wp-facts { gap: 4px; }
+.wp-details-open { margin-top: 10px; width: 100%; justify-content: center; }
+@media (max-width: 700px) {
+  .wp-details-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    border-radius: 14px 14px 0 0;
+    padding: 16px 18px calc(16px + env(safe-area-inset-bottom));
+    box-shadow: 0 -10px 30px rgba(15, 32, 25, 0.22);
+  }
+}
+
+/* A2 — the responsible manager's today card: teal, titled "Check: …". */
+.wp-card-check {
+  border-color: var(--teal);
+  box-shadow: inset 4px 0 0 var(--teal);
+}
+.wp-card-check .wp-card-title { color: var(--teal); }
+
+/* A5 — Plan N: one row per job. */
+.plan-modal-wide { width: min(96vw, 760px); }
+.wp-plan-many {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+.wp-plan-many-row {
+  display: grid;
+  grid-template-columns: 1fr 160px 120px;
+  gap: 10px;
+  align-items: end;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm, 8px);
+}
+.wp-plan-many-row-refused { border-color: var(--red-border); background: var(--red-soft); }
+.wp-plan-many-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wp-plan-many-title { font-weight: 650; overflow-wrap: anywhere; }
+.wp-plan-many-error { font-size: 12px; color: var(--red); }
+.wp-plan-many-field { margin: 0; }
+@media (max-width: 700px) {
+  .wp-plan-many-row { grid-template-columns: 1fr; }
+}
+/* The on-hold fold sits under the board now. */
+.agenda-parked { margin-top: 14px; }
+/* P-11 A1 — the status word under a card's / a strip row's title. The
+   badge is the existing palette (cell-tag / phase-badge); these only
+   place it. */
+.wp-card-badge {
+  display: block;
+  margin: 1px 0 3px;
+}
+.wp-row-badge {
+  display: inline-flex;
+  align-self: flex-start;
+  margin: 1px 0 2px;
+}
+/* P-11 A2 — the Plan-N shared day/time pair, shown in "same day" mode. */
+.wp-plan-many-shared {
+  display: flex;
+  gap: 10px;
+  margin: 8px 0 10px;
+}
+/* P-11 F — a strip expanded to the zone's whole list stays bounded:
+   it scrolls inside itself instead of pushing the board off screen. */
+.wp-strip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wp-strip-list-all {
+  max-height: 420px;
+  overflow-y: auto;
+}

@@ -71,7 +71,8 @@ function formatRelative(iso: string | null | undefined, lang: string): string {
   });
 }
 
-export function InvitationsAdminPage() {
+/** FE-6 — `embedded`: a tab of the Mensen surface (see UsersAdminPage). */
+export function InvitationsAdminPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { me } = useAuth();
   const { t, i18n } = useTranslation("common");
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
@@ -297,12 +298,16 @@ export function InvitationsAdminPage() {
 
   return (
     <div>
-      <div className="page-header">
+      <div className={embedded ? "page-header page-header-embedded" : "page-header"}>
         <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
-          </div>
-          <h2 className="page-title">{t("invitations.title")}</h2>
+          {!embedded && (
+            <>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>
+                {t("nav.admin_group")}
+              </div>
+              <h2 className="page-title">{t("invitations.title")}</h2>
+            </>
+          )}
           <div className="invitations-stats">
             <span>
               {totalCount} {t("invitations.total")}

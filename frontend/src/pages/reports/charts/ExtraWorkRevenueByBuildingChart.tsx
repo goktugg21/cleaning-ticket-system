@@ -14,6 +14,7 @@ import { BoundedList } from "../../../components/BoundedList";
 import { useReport } from "../../../hooks/useReport";
 import { formatMoney } from "../../../lib/intl";
 import { ExportButtons } from "./ExportButtons";
+import { ChartSkeleton } from "./ChartSkeleton";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -70,9 +71,7 @@ export function ExtraWorkRevenueByBuildingChart({
       </p>
 
       {loading && (
-        <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-          <div className="loading-bar-fill" />
-        </div>
+        <ChartSkeleton />
       )}
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 12 }}>
@@ -144,7 +143,7 @@ export function ExtraWorkRevenueByBuildingChart({
                     return `${row.building_name} — ${row.company_name}`;
                   }}
                 />
-                <Bar dataKey="total" fill="#0B6B42" />
+                <Bar isAnimationActive={false} dataKey="total" fill="#0B6B42" />
               </BarChart>
             </ResponsiveContainer>
           </BoundedList>

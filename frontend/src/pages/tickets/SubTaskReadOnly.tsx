@@ -1,5 +1,5 @@
 // Sprint 5 — read-only sub-tasks view for NON-manager roles on the ticket
-// detail. The manager (SA/CA/BM) surface is StaffSlotEditor; this renders the
+// detail. The manager (SA/CA/BM) surface is StaffAssignmentSection; this renders the
 // ticket's nested `sub_tasks` with no write controls.
 //
 // Privacy: the backend serializes `ticket.sub_tasks` WITHOUT the per-role

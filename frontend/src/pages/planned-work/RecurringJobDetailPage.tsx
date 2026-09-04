@@ -1,13 +1,39 @@
-// Sprint 11/12 frontend — RecurringJob detail: read-only job summary +
-// archive/unarchive + generate-occurrences + the per-job occurrence list
-// with skip / cancel / override actions. Provider-only surface.
+// RecurringJob detail. Provider-only surface.
+//
+// W-PW1 — a recurring job is a MEMBERSHIP, and this page says three things
+// in this order and nothing else at first sight:
+//
+//   1. THE AGREEMENT  ONE header card: the agreement sentence on top —
+//                     what was agreed, how often, for whom — and the
+//                     job's facts under it as a label-over-value grid.
+//                     W-P5.1 folded away the "All details" disclosure
+//                     that used to hold those facts: pinned to the
+//                     card's right edge it left the middle of the top
+//                     line empty and, opened, made a 472px card whose
+//                     ink covered 3.8% of it. Facts with no value are
+//                     absent rather than rendered as a dash.
+//   2. THE VISITS     the calendar, the page's primary surface. Every date
+//                     is an occurrence and every date's actions open where
+//                     it was clicked. The occurrence TABLE is gone: it was
+//                     a second list of the dates the calendar already
+//                     shows, with the actions attached to the copy instead
+//                     of to the thing.
+//   3. THE MONEY      one line — the contract line this work is billed
+//                     through, or the picker that links one.
+//
+// Per-visit pricing is gone from this page by the owner's ruling: a
+// recurring job is billed as a membership through its contract line, or it
+// is a single job. The COLUMNS and the API are untouched; stored values are
+// simply no longer displayed or offered as a control.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useLocaleCode } from "../../lib/intl";
 
 import {
   archiveRecurringJob,
   generateOccurrences,
+  updateRecurringJob,
   getRecurringJob,
   listPlannedOccurrences,
   skipOccurrence,
@@ -18,43 +44,73 @@ import type {
   PlannedOccurrence,
   RecurringJob,
   RecurringJobWindow,
+  RecurringJobWritePayload,
 } from "../../api/plannedWork.types";
 import { getApiError } from "../../api/client";
+import { useAuth } from "../../auth/AuthContext";
+import { canAccessContracts } from "../../auth/permissions";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
-import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { RejectReasonDialog } from "../../components/RejectReasonDialog";
 import { StatusBadge } from "../../components/StatusBadge";
 import { useToast } from "../../components/ToastProvider";
-import { formatDate, formatDateTime, formatMoney } from "../../lib/intl";
+import { DoneBanner } from "../../components/guide/DoneBanner";
+import { useDoneBanner } from "../../components/guide/useDoneBanner";
+import { WhatHappens } from "../../components/guide/WhatHappens";
+import { formatDate } from "../../lib/intl";
 import { OccurrenceStatusBadge } from "./OccurrenceStatusBadge";
 import { OccurrenceOverrideDialog } from "./OccurrenceOverrideDialog";
 import { RecurringJobCalendar } from "./RecurringJobCalendar";
 import { customerLabelName } from "../../lib/customerLabelName";
+import { listContracts } from "../../api/contracts";
+import "../../styles/planned-work.css";
+
+// W-PW1 — the contract-line link, declared LOCALLY for the same reason
+// `RecurringJobFormPage` already declares it locally: the backend carries
+// `contract_line` + `contract_line_name` on the read and `contract_line` on
+// the write, but `api/plannedWork.types.ts` belongs to another wave. Fold
+// both into that file and delete these when it is free.
+type ContractLineLinkRead = { contract_line: number | null; contract_line_name: string | null };
+type ContractLineLinkWrite = { contract_line: number | null };
+
+/** One offerable line: the line plus the contract it sits on, because a
+ *  line name repeats across a customer's contracts and only the contract
+ *  number separates them. Same shape the form's picker uses. */
+interface ContractLineOption {
+  id: number;
+  lineName: string;
+  contractNo: string;
+  contractId: number;
+}
 
 type ReasonMode = "skip" | "cancel";
 
-function occurrenceWindow(occ: PlannedOccurrence): string {
-  const parts: string[] = [];
-  if (occ.preferred_start_time) parts.push(occ.preferred_start_time.slice(0, 5));
-  if (occ.time_window_label) parts.push(occ.time_window_label);
-  return parts.length > 0 ? parts.join(" · ") : "—";
-}
-
+/** A window as words, or "" when it carries neither a time nor a label.
+ *  It used to answer "—" for that case, which put a dash in the facts
+ *  grid where the reader wanted a fact: a job CAN hold a window row that
+ *  says nothing, and "—" does not tell an operator whether the window is
+ *  missing or merely blank. The caller turns an all-empty set into "no
+ *  fixed window", which is the actual answer. */
 function formatWindow(window: RecurringJobWindow): string {
   const parts: string[] = [];
   if (window.start_time) parts.push(window.start_time.slice(0, 5));
   if (window.label) parts.push(window.label);
-  return parts.length > 0 ? parts.join(" ") : "—";
+  return parts.join(" ");
 }
 
 export function RecurringJobDetailPage() {
   const { id } = useParams();
   const { push } = useToast();
+  const { me } = useAuth();
   const { t } = useTranslation(["planned_work", "common"]);
+  const locale = useLocaleCode();
 
   const [job, setJob] = useState<RecurringJob | null>(null);
+  // P-12 E2 (§D.24 rule 4) — the page's Done banner: the create's
+  // announcement (written by the form under this rule's key) surfaces
+  // here, and pause/resume/generate announce into the same slot.
+  const jobDone = useDoneBanner(`recurring-${id}`);
   const [occurrences, setOccurrences] = useState<PlannedOccurrence[]>([]);
   const [occCount, setOccCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -64,6 +120,9 @@ export function RecurringJobDetailPage() {
   // Generate dialog state.
   const generateRef = useRef<ConfirmDialogHandle>(null);
   const archiveRef = useRef<ConfirmDialogHandle>(null);
+  // Treatment 1 — each dialog carries its own failure in its own body.
+  const [generateError, setGenerateError] = useState("");
+  const [archiveError, setArchiveError] = useState("");
   const [daysAhead, setDaysAhead] = useState("14");
 
   // Occurrence action dialogs.
@@ -74,14 +133,76 @@ export function RecurringJobDetailPage() {
   const [overrideTarget, setOverrideTarget] = useState<PlannedOccurrence | null>(
     null,
   );
+  // Treatment 1 — the skip/cancel failure, shown in the dialog itself.
+  const [reasonError, setReasonError] = useState("");
+  // Treatment 1 — Unarchive has no dialog, so its failure sits beside it.
+  const [unarchiveError, setUnarchiveError] = useState("");
+
+  // W-PW1 THE MONEY — the customer's offerable contract lines, and the
+  // pending pick while a link is being saved. `null` means NOT LOADED,
+  // which is a different fact from "loaded and empty": only the second
+  // one may be used to conclude the customer has nothing to link to.
+  const [contractLines, setContractLines] = useState<
+    ContractLineOption[] | null
+  >(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+  // Treatment 1 — this renders inside `.pw-money`, never as a toast.
+  const [linkError, setLinkError] = useState("");
+
+  // NO new endpoint: `GET /api/contracts/?customer=<id>` already carries
+  // the contract number and the ACTIVE revision's lines in `projects`.
+  // Paged exhaustively client-side (the Sprint 120 pattern) rather than by
+  // loosening a shared list's pagination — Sprint 134/135's lesson.
+  async function loadContractLines(customerId: number) {
+    const rows: ContractLineOption[] = [];
+    let page = 1;
+    for (let i = 0; i < 100; i++) {
+      const response = await listContracts({
+        customer: customerId,
+        page,
+        page_size: 200,
+      });
+      for (const contract of response.results) {
+        for (const line of contract.projects) {
+          rows.push({
+            id: line.id,
+            lineName: line.name,
+            contractNo: contract.contract_no,
+            contractId: contract.id,
+          });
+        }
+      }
+      if (!response.next) break;
+      page += 1;
+    }
+    return rows;
+  }
+
+  /** W-FIX1 B4 (audit F36) — EVERY occurrence, paged exhaustively (the
+   *  Sprint 120 pattern), so the calendar's day menu never silently
+   *  loses its actions past row 200 of a long-running job. */
+  async function loadAllOccurrences(jobId: string | number) {
+    const rows: PlannedOccurrence[] = [];
+    let page = 1;
+    let count = 0;
+    for (let i = 0; i < 50; i++) {
+      const resp = await listPlannedOccurrences({
+        recurring_job: Number(jobId),
+        page_size: 200,
+        page,
+      });
+      rows.push(...resp.results);
+      count = resp.count;
+      if (!resp.next) break;
+      page += 1;
+    }
+    return { rows, count };
+  }
 
   async function loadOccurrences(jobId: string | number) {
-    const resp = await listPlannedOccurrences({
-      recurring_job: Number(jobId),
-      page_size: 200,
-    });
-    setOccurrences(resp.results);
-    setOccCount(resp.count);
+    const { rows, count } = await loadAllOccurrences(jobId);
+    setOccurrences(rows);
+    setOccCount(count);
   }
 
   useEffect(() => {
@@ -93,11 +214,11 @@ export function RecurringJobDetailPage() {
       try {
         const [jobData, occResp] = await Promise.all([
           getRecurringJob(id),
-          listPlannedOccurrences({ recurring_job: Number(id), page_size: 200 }),
+          loadAllOccurrences(id),
         ]);
         if (cancelled) return;
         setJob(jobData);
-        setOccurrences(occResp.results);
+        setOccurrences(occResp.rows);
         setOccCount(occResp.count);
       } catch (err) {
         if (!cancelled) setError(getApiError(err));
@@ -111,20 +232,52 @@ export function RecurringJobDetailPage() {
     };
   }, [id]);
 
-  function pricingSummary(j: RecurringJob): string {
-    if (j.pricing_mode === "FIXED" && j.fixed_price != null) {
-      return `${formatMoney(j.fixed_price)} ${t("pricing.ex_vat_suffix")}`;
-    }
-    if (j.pricing_mode === "HOURLY") return t("pricing_mode.HOURLY");
-    return t("pricing.included");
-  }
+  // THE MONEY's option list, once the job tells us which customer it is
+  // for. Kept unloaded on failure rather than collapsed to an empty list:
+  // an empty list would read as "this customer has no contract lines",
+  // which is a claim a failed request cannot support.
+  useEffect(() => {
+    const customerId = job?.customer;
+    if (customerId === undefined) return;
+    let cancelled = false;
+    loadContractLines(customerId)
+      .then((rows) => {
+        if (!cancelled) setContractLines(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setContractLines(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [job?.customer]);
 
-  function occurrencePricing(occ: PlannedOccurrence): string {
-    if (occ.pricing_mode === "FIXED" && occ.total_inc_vat != null) {
-      return formatMoney(occ.total_inc_vat);
+  async function handleLinkContractLine(value: string) {
+    if (!job) return;
+    setLinkError("");
+    setLinkBusy(true);
+    try {
+      const payload: ContractLineLinkWrite = {
+        contract_line: value === "" ? null : Number(value),
+      };
+      const updated = await updateRecurringJob(
+        job.id,
+        payload as unknown as Partial<RecurringJobWritePayload>,
+      );
+      setJob(updated);
+      push({
+        variant: "success",
+        title: value === "" ? t("money.toast_unlinked") : t("money.toast_linked"),
+      });
+    } catch (err) {
+      // Treatment 1 — the failure belongs BESIDE the picker that fired
+      // it. A toast for this was wrong twice over: it leaves the money
+      // line looking untouched, and it is gone before the operator has
+      // finished reading the row it was about.
+      setLinkError(getApiError(err));
+    } finally {
+      setLinkBusy(false);
     }
-    if (occ.pricing_mode === "CONTRACT_INCLUDED") return t("pricing.included");
-    return "—";
   }
 
   function replaceOccurrence(updated: PlannedOccurrence) {
@@ -135,15 +288,19 @@ export function RecurringJobDetailPage() {
 
   async function handleArchive() {
     if (!job) return;
+    setArchiveError("");
     setActionBusy(true);
     try {
       const updated = await archiveRecurringJob(job.id);
       setJob(updated);
       archiveRef.current?.close();
-      push({ variant: "success", title: t("archive.toast_archived") });
+      jobDone.announce({
+        title: t("archive.banner_paused_title", { title: job.title }),
+        body: t("archive.banner_paused_body"),
+      });
     } catch (err) {
-      push({ variant: "error", title: getApiError(err) });
-      archiveRef.current?.close();
+      // Treatment 1 — stays open, reports in place.
+      setArchiveError(getApiError(err));
     } finally {
       setActionBusy(false);
     }
@@ -151,13 +308,20 @@ export function RecurringJobDetailPage() {
 
   async function handleUnarchive() {
     if (!job) return;
+    setUnarchiveError("");
     setActionBusy(true);
     try {
       const updated = await unarchiveRecurringJob(job.id);
       setJob(updated);
-      push({ variant: "success", title: t("archive.toast_unarchived") });
+      jobDone.announce({
+        title: t("archive.banner_resumed_title", { title: job.title }),
+        body: t("archive.banner_resumed_body"),
+      });
     } catch (err) {
-      push({ variant: "error", title: getApiError(err) });
+      // Treatment 1 — the only action here with no modal to fall back
+      // on, so its failure renders in the header's actions node, beside
+      // the button that fired it.
+      setUnarchiveError(getApiError(err));
     } finally {
       setActionBusy(false);
     }
@@ -167,17 +331,17 @@ export function RecurringJobDetailPage() {
     if (!job) return;
     const trimmed = daysAhead.trim();
     const value = trimmed === "" ? undefined : Number(trimmed);
+    setGenerateError("");
     setActionBusy(true);
     try {
       const result = await generateOccurrences(job.id, value);
       generateRef.current?.close();
-      push({
-        variant: "success",
-        title: t("generate.result_toast_title"),
-        description: t("generate.result_toast_desc", {
+      jobDone.announce({
+        title: t("generate.banner_title", {
           occurrences: result.occurrences_created,
           tickets: result.tickets_created,
         }),
+        body: t("generate.banner_body"),
       });
       // Refresh both the occurrence list and the job (count changed).
       const [jobData] = await Promise.all([
@@ -186,8 +350,11 @@ export function RecurringJobDetailPage() {
       ]);
       setJob(jobData);
     } catch (err) {
-      push({ variant: "error", title: getApiError(err) });
-      generateRef.current?.close();
+      // Treatment 1 — the dialog STAYS OPEN and carries its own failure.
+      // Closing it and firing a toast threw away the one surface the
+      // operator was looking at, along with the days-ahead value they
+      // had just typed; they could not retry without re-entering it.
+      setGenerateError(getApiError(err));
     } finally {
       setActionBusy(false);
     }
@@ -196,22 +363,158 @@ export function RecurringJobDetailPage() {
   async function handleReasonConfirm(reason: string) {
     if (!reasonDialog) return;
     const { mode, occ } = reasonDialog;
-    setReasonDialog(null);
+    // Treatment 1 — the dialog is NOT dismissed before the write is
+    // known to have landed. It used to close on the first line of this
+    // function, so a rejected skip took the operator's typed reason with
+    // it and answered from a toast on a page that looked unchanged.
+    setReasonError("");
     try {
       const updated =
         mode === "skip"
           ? await skipOccurrence(occ.id, reason)
           : await cancelOccurrence(occ.id, reason);
       replaceOccurrence(updated);
+      setReasonDialog(null);
       push({
         variant: "success",
         title:
           mode === "skip" ? t("skip.toast_title") : t("cancel.toast_title"),
       });
     } catch (err) {
-      push({ variant: "error", title: getApiError(err) });
+      // `RejectReasonDialog` is shared and has no error slot of its own,
+      // so the failure rides its `description` — which IS the open
+      // modal, where Treatment 1 wants it. A real slot on that component
+      // belongs to whoever owns it.
+      setReasonError(getApiError(err));
     }
   }
+
+  // THE VISITS — the occurrences the calendar hands to its date panel,
+  // keyed by the date they fall on. Several windows on one date means
+  // several rows on one key, which is why the value is a list.
+  const occurrencesByDate = useMemo(() => {
+    const map = new Map<string, PlannedOccurrence[]>();
+    for (const occ of occurrences) {
+      const list = map.get(occ.planned_date);
+      if (list) list.push(occ);
+      else map.set(occ.planned_date, [occ]);
+    }
+    return map;
+  }, [occurrences]);
+
+  // THE VISITS — "next up". The calendar opens on the CURRENT month, so a
+  // job whose next visit falls later shows an empty grid and says nothing
+  // about when it next happens. Five dates and their state answer that
+  // without making the operator page through months, which is the whole
+  // reason this strip earns the space it takes.
+  const nextUp = useMemo(() => {
+    // W-FIX1 B4 — LOCAL today (the calendar's own reading), and a visit
+    // that was moved away is not "next up" on its old date.
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    return occurrences
+      .filter(
+        (o) =>
+          o.planned_date >= today &&
+          o.status !== "CANCELLED" &&
+          o.status !== "RESCHEDULED",
+      )
+      .sort((a, b) => a.planned_date.localeCompare(b.planned_date))
+      .slice(0, 5);
+  }, [occurrences]);
+
+  // THE AGREEMENT — the pattern as a sentence fragment an operator reads
+  // rather than a row labelled "Frequency". Weekly and biweekly jobs name
+  // their weekdays; the others have none to name.
+  const patternInWords = useMemo(() => {
+    if (!job) return "";
+    const freq = t(`frequency.${job.frequency}`);
+    const named = job.frequency === "WEEKLY" || job.frequency === "BIWEEKLY";
+    if (!named || job.weekdays.length === 0) return freq;
+    const days = [...job.weekdays]
+      .sort((a, b) => a - b)
+      .map((d) => t(`weekday_short.${d}`))
+      .join(", ");
+    return `${days} · ${freq}`;
+  }, [job, t]);
+
+  // P-2 §6 — THE RULE, AS ONE HUMAN SENTENCE, with the next visit in
+  // it: "Every Monday and Thursday, morning — next visit: Tue 2 Sep".
+  // Day names come from the locale, the window from the first named
+  // one, the next visit from the same list the "next visits" block
+  // prints below the sentence.
+  const ruleSentence = useMemo(() => {
+    if (!job) return "";
+    const dayNames = [...job.weekdays]
+      .sort((a, b) => a - b)
+      .map((d) =>
+        new Date(2024, 0, d).toLocaleDateString(locale, { weekday: "long" }),
+      );
+    const daysText =
+      dayNames.length > 1
+        ? `${dayNames.slice(0, -1).join(", ")} ${t("common:and")} ${dayNames[dayNames.length - 1]}`
+        : dayNames[0] || "";
+    let rule: string;
+    if (job.frequency === "WEEKLY" && daysText) {
+      rule = t("detail.rule_weekly", { days: daysText });
+    } else if (job.frequency === "BIWEEKLY" && daysText) {
+      rule = t("detail.rule_biweekly", { days: daysText });
+    } else if (job.frequency === "MONTHLY") {
+      rule = t("detail.rule_monthly");
+    } else {
+      rule = t(`frequency.${job.frequency}`);
+    }
+    const window = job.windows.map((w) => formatWindow(w)).filter(Boolean)[0];
+    if (window) rule = t("detail.rule_window", { rule, window });
+    const next = nextUp[0];
+    return next
+      ? t("detail.rule_next", {
+          rule,
+          next: new Date(`${next.planned_date}T00:00:00`).toLocaleDateString(locale, {
+            weekday: "short",
+            day: "numeric",
+            month: "short",
+          }),
+        })
+      : t("detail.rule_no_next", { rule });
+  }, [job, nextUp, locale, t]);
+
+  const periodText = useMemo(() => {
+    if (!job) return "";
+    return job.end_date
+      ? t("detail.period_value", {
+          start: formatDate(job.start_date),
+          end: formatDate(job.end_date),
+        })
+      : t("detail.period_open", { start: formatDate(job.start_date) });
+  }, [job, t]);
+
+  // THE MONEY — the stored link, resolved against the fetched options so
+  // the row can offer the way through to the contract. A line the active
+  // revision no longer carries still renders (from the job's own
+  // `contract_line_name`), just without a link: the stored fact is real
+  // even when the option list has moved on.
+  const linkedLine = useMemo(() => {
+    if (!job) return null;
+    const link = job as unknown as ContractLineLinkRead;
+    if (link.contract_line == null) return null;
+    const match = (contractLines ?? []).find(
+      (line) => line.id === link.contract_line,
+    );
+    if (match) {
+      return {
+        label: match.contractNo
+          ? `${match.lineName} — ${match.contractNo}`
+          : match.lineName,
+        contractId: match.contractId as number | null,
+      };
+    }
+    return {
+      label: link.contract_line_name ?? String(link.contract_line),
+      contractId: null,
+    };
+  }, [job, contractLines]);
 
   const daysAheadNum = useMemo(() => {
     const trimmed = daysAhead.trim();
@@ -232,23 +535,51 @@ export function RecurringJobDetailPage() {
   }
 
   if (error || !job) {
+    // Never a void: the page says it cannot show the job, with the way back.
     return (
-      <div>
-        <Link to="/planned-work" className="link-back">
-          {t("detail.back_to_list")}
-        </Link>
-        <div className="alert-error" role="alert" style={{ marginTop: 16 }}>
-          {error || t("errors.load_failed")}
-        </div>
+      <div data-testid="recurring-job-detail-page">
+        <PageHeader
+          backLink={{ to: "/planned-work", label: t("detail.back_to_list") }}
+          eyebrow={t("list.page_title")}
+          title={t("detail.unavailable_title")}
+        />
+        <section className="card" role="alert" style={{ padding: 22 }} data-testid="recurring-job-unavailable">
+          <p className="muted" style={{ margin: 0 }}>{error || t("errors.load_failed")}</p>
+        </section>
       </div>
     );
   }
 
+  const windowsText = job.windows
+    .map((w) => formatWindow(w))
+    .filter(Boolean)
+    .join(", ");
+  const crewParts = [
+    job.default_staff_ids.length > 0
+      ? t("detail.crew_staff", { count: job.default_staff_ids.length })
+      : null,
+    job.default_manager_ids.length > 0
+      ? t("detail.crew_managers", { count: job.default_manager_ids.length })
+      : null,
+  ].filter(Boolean);
+  const whatStrong = job.service_category_name ?? job.price_folder_name ?? job.title;
+  const whatSub = [
+    customerLabelName(job.department_name, t),
+    customerLabelName(job.work_type_name, t),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <div data-testid="recurring-job-detail-page">
+      {/* P-6 V2 — the ticket detail's rhythm: a header that holds no
+          buttons, ONE strip that narrates the rule with the next visit
+          in it and carries the one primary action, four facts, then the
+          machinery (the calendar, the money), and every rare step behind
+          "Geavanceerd". */}
       <PageHeader
         backLink={{ to: "/planned-work", label: t("detail.back_to_list") }}
-        eyebrow={t("common:ops")}
+        eyebrow={t("list.page_title")}
         title={job.title}
         statusPill={
           <StatusBadge
@@ -262,282 +593,359 @@ export function RecurringJobDetailPage() {
           />
         }
         subtitle={`${job.building_name} · ${job.customer_name}`}
-        actions={
-          <>
+      />
+
+      {jobDone.done && (
+        <DoneBanner
+          done={jobDone.done}
+          onDismiss={jobDone.dismiss}
+          testId="recurring-job-done"
+        />
+      )}
+
+      <div
+        className={`phase-banner ${job.is_active ? "phase-banner-progress" : "phase-banner-bad"}`}
+        role="status"
+        data-testid="recurring-job-phase"
+        data-active={job.is_active}
+      >
+        <div className="phase-banner-text">
+          {/* P-2 §6 — the rule in one sentence with the next visit in it. */}
+          <span className="phase-banner-label" data-testid="recurring-job-rule">
+            {ruleSentence}
+          </span>
+          <span className="phase-banner-sub">
+            {job.is_active
+              ? t("detail.phase_active_sub")
+              : t("detail.phase_archived_sub")}
+          </span>
+        </div>
+        <div className="phase-banner-action">
+          {job.is_active ? (
             <Link
-              className="btn btn-secondary btn-sm"
+              className="btn btn-primary btn-sm"
               to={`/planned-work/${job.id}/edit`}
               data-testid="recurring-job-edit-link"
             >
               {t("detail.edit")}
             </Link>
-            {job.is_active ? (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => archiveRef.current?.open()}
-                  disabled={actionBusy}
-                  data-testid="recurring-job-archive"
-                >
-                  {t("detail.archive")}
-                </button>
-                {/* Codex P1 — Generate only on an ACTIVE job. An archived
-                    job must not spawn occurrences/tickets, so its trigger
-                    is hidden (a backend guard on the generate action is a
-                    separate follow-up). */}
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={() => generateRef.current?.open()}
-                  disabled={actionBusy}
-                  data-testid="recurring-job-generate"
-                >
-                  {t("detail.generate")}
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={handleUnarchive}
-                disabled={actionBusy}
-                data-testid="recurring-job-unarchive"
-              >
-                {t("detail.unarchive")}
-              </button>
-            )}
-          </>
-        }
-      />
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleUnarchive}
+              disabled={actionBusy}
+              data-testid="recurring-job-unarchive"
+            >
+              {t("detail.unarchive")}
+            </button>
+          )}
+        </div>
+      </div>
+      {unarchiveError && (
+        <div
+          className="alert-error"
+          role="alert"
+          style={{ marginBottom: 16 }}
+          data-testid="recurring-job-unarchive-error"
+        >
+          {unarchiveError}
+        </div>
+      )}
 
-      {/* Summary */}
-      <div className="card" style={{ padding: "18px 22px", marginBottom: 16 }}>
-        <div className="section-head">
-          <div className="section-head-title">{t("detail.summary_title")}</div>
-        </div>
-        <div className="preview-list" style={{ marginTop: 8 }}>
-          <SummaryRow label={t("detail.field_building")} value={job.building_name} />
-          <SummaryRow label={t("detail.field_customer")} value={job.customer_name} />
-          <SummaryRow label={t("detail.field_company")} value={job.company_name} />
-          {/* Sprint 144 §2 — the three optional classifiers. Always
-              shown, with an em-dash when unset, so the operator can see
-              at a glance that a job is untagged rather than having to
-              open the edit form to find out. */}
-          {/* Sprint 187 §4 — BOTH of these, not just the department:
-              this page said "Algemeen" while `RecurringJobFormPage` —
-              the edit form for this very job — said "General". */}
-          <SummaryRow
-            label={t("detail.field_department")}
-            value={
-              customerLabelName(job.department_name, t) ||
-              t("detail.field_none")
-            }
-          />
-          <SummaryRow
-            label={t("detail.field_work_type")}
-            value={
-              customerLabelName(job.work_type_name, t) ||
-              t("detail.field_none")
-            }
-          />
-          <SummaryRow
-            label={t("detail.field_category")}
-            value={
-              job.service_category_name ??
-              job.price_folder_name ??
-              t("detail.field_none")
-            }
-          />
-          <SummaryRow
-            label={t("detail.field_frequency")}
-            value={t(`frequency.${job.frequency}`)}
-          />
-          <SummaryRow
-            label={t("detail.field_period")}
-            value={
-              job.end_date
-                ? t("detail.period_value", {
-                    start: formatDate(job.start_date),
-                    end: formatDate(job.end_date),
-                  })
-                : t("detail.period_open", { start: formatDate(job.start_date) })
-            }
-          />
-          {(job.frequency === "WEEKLY" || job.frequency === "BIWEEKLY") && (
-            <SummaryRow
-              label={t("detail.field_weekdays")}
-              value={
-                job.weekdays.length > 0
-                  ? job.weekdays
-                      .map((d) => t(`weekday_short.${d}`))
-                      .join(", ")
-                  : t("detail.no_weekdays")
-              }
-            />
-          )}
-          <SummaryRow
-            label={t("detail.field_windows")}
-            value={
-              job.windows.length > 0
-                ? job.windows.map((w) => formatWindow(w)).join(" · ")
-                : t("detail.no_window")
-            }
-          />
-          <SummaryRow label={t("detail.field_pricing")} value={pricingSummary(job)} />
-          {job.pricing_mode === "FIXED" && (
-            <SummaryRow label={t("detail.field_vat")} value={`${job.vat_pct}%`} />
-          )}
-          <SummaryRow
-            label={t("detail.field_default_staff")}
-            value={String(job.default_staff_ids.length)}
-          />
-          <SummaryRow
-            label={t("detail.field_default_managers")}
-            value={String(job.default_manager_ids.length)}
-          />
-          <SummaryRow
-            label={t("detail.field_occurrences_count")}
-            value={String(job.occurrences_count)}
-          />
-          <SummaryRow
-            label={t("detail.field_created_by")}
-            value={job.created_by_email}
-          />
-          <SummaryRow
-            label={t("detail.field_created_at")}
-            value={formatDateTime(job.created_at)}
-          />
-        </div>
-        <p className="muted" style={{ marginTop: 12 }}>
-          {job.description?.trim() ? job.description : t("detail.no_description")}
-        </p>
+      {/* The next few visits and their state — the calendar opens on the
+          current month, so a job whose next visit falls later would
+          otherwise show an empty grid and say nothing. */}
+      <div className="pw-nextup" data-testid="recurring-job-next-up" style={{ marginBottom: 16 }}>
+        <span className="pw-money-label">{t("detail.next_visits")}</span>
+        {nextUp.length === 0 && (
+          <span className="muted small">{t("detail.next_visits_none")}</span>
+        )}
+        {nextUp.map((occ) => (
+          <span
+            key={occ.id}
+            className="pw-nextup-item"
+            data-testid="recurring-job-next-up-item"
+          >
+            {new Date(`${occ.planned_date}T00:00:00`).toLocaleDateString(locale, {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+            })}
+            <OccurrenceStatusBadge status={occ.status} />
+          </span>
+        ))}
+        {occCount > occurrences.length && (
+          <span className="muted small">
+            {t("detail.occurrences_truncated", { count: occurrences.length })}
+          </span>
+        )}
       </div>
 
-      {/* Sprint 6 — occurrence calendar (explicit per-date tick control).
-          Keyed by job id so it remounts + re-seeds on a job change (no
-          resync effect). Read-only when the job is archived. */}
+      {/* FACTS — where, what, when, who. A fact with nothing to say is
+          absent; a crew that is not set yet says so in words. */}
+      <div className="facts" data-testid="recurring-job-facts">
+        <div className="ew-ctx-block" data-testid="recurring-job-fact-where">
+          <div className="ew-ctx-label">{t("detail.fact_where")}</div>
+          <div className="ew-ctx-body">
+            <div className="ew-ctx-strong">
+              <Link to={`/admin/buildings/${job.building}`}>{job.building_name}</Link>
+            </div>
+            <div className="ew-ctx-sub">
+              <Link to={`/admin/customers/${job.customer}`}>{job.customer_name}</Link>
+              {" · "}
+              {job.company_name}
+            </div>
+          </div>
+        </div>
+        <div className="ew-ctx-block" data-testid="recurring-job-fact-what">
+          <div className="ew-ctx-label">{t("detail.fact_what")}</div>
+          <div className="ew-ctx-body">
+            <div className="ew-ctx-strong">{whatStrong}</div>
+            {whatSub && <div className="ew-ctx-sub">{whatSub}</div>}
+            {job.description?.trim() ? (
+              <div className="ew-ctx-sub" data-testid="recurring-job-description">
+                {job.description.trim()}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="ew-ctx-block" data-testid="recurring-job-fact-when">
+          <div className="ew-ctx-label">{t("detail.fact_when")}</div>
+          <div className="ew-ctx-body">
+            <div className="ew-ctx-strong" data-testid="pw-agreement-pattern">
+              {patternInWords}
+            </div>
+            <div className="ew-ctx-sub" data-testid="pw-agreement-window">
+              {periodText}
+            </div>
+            <div className="ew-ctx-sub" data-testid="recurring-job-windows">
+              {t("detail.visits_per_day", { count: Math.max(job.windows.length, 1) })}
+              {" · "}
+              {windowsText || t("detail.visits_time_none")}
+            </div>
+          </div>
+        </div>
+        <div className="ew-ctx-block" data-testid="recurring-job-fact-who">
+          <div className="ew-ctx-label">{t("detail.fact_who")}</div>
+          <div className="ew-ctx-body">
+            <div className={crewParts.length > 0 ? "ew-ctx-strong" : "ew-ctx-strong muted-empty"}>
+              {crewParts.length > 0 ? crewParts.join(" · ") : t("detail.crew_none")}
+            </div>
+            <div className="ew-ctx-sub">
+              {t("detail.visits_planned", { count: job.occurrences_count })}
+            </div>
+            <div className="ew-ctx-sub">
+              {t("detail.created_line", {
+                who: job.created_by_email,
+                date: formatDate(job.created_at),
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ---- THE VISITS — the calendar is the page's primary surface.
+          Keyed by job id so it remounts on a job change; read-only when
+          the job is archived. */}
       <RecurringJobCalendar
         key={job.id}
         jobId={job.id}
         canManage={job.is_active}
+        occurrencesByDate={occurrencesByDate}
+        onOverride={(occ) => setOverrideTarget(occ)}
+        onCancelVisit={(occ) => setReasonDialog({ mode: "cancel", occ })}
+        onChanged={() => {
+          void loadOccurrences(job.id);
+        }}
+        minDate={job.start_date}
       />
 
-      {/* Occurrences */}
-      <div className="card" style={{ overflow: "hidden" }}>
-        <div className="section-head" style={{ padding: "16px 18px 0" }}>
+      {/* ---- THE MONEY — one line. Linked: the line's name and the way to
+          the contract. Unlinked: the picker, inline. */}
+      <section
+        className="card"
+        style={{ padding: "16px 18px", marginBottom: 16 }}
+        data-testid="recurring-job-money-card"
+      >
+        <div className="section-head" style={{ marginBottom: 8 }}>
           <div>
-            <div className="section-head-title">
-              {t("detail.occurrences_title")}
-            </div>
-            <p className="muted small" style={{ marginTop: 2 }}>
-              {t("detail.occurrences_subtitle")}
-            </p>
+            <div className="section-head-title">{t("detail.money_title")}</div>
+            <div className="section-head-sub">{t("detail.money_sub")}</div>
           </div>
         </div>
-
-        {occurrences.length === 0 ? (
-          <div style={{ padding: 16 }}>
-            <EmptyState
-              title={t("detail.occurrences_empty_title")}
-              description={t("detail.occurrences_empty_desc")}
-              testId="planned-work-occurrences-empty"
-            />
-          </div>
+      <div className="pw-money pw-money-in-card" data-testid="recurring-job-money">
+        {linkedLine ? (
+          <>
+            <span className="pw-money-label">{t("money.billed_via")}</span>
+            {linkedLine.contractId != null ? (
+              // The contract's route is `/admin/contracts/:contractId`,
+              // and its Planning tab is component state, not a URL
+              // segment — there is no deep link to the tab itself, and
+              // ContractDetailPage is not this wave's to change. So the
+              // link reaches the contract and Planning is one click
+              // away; a `?tab=planning` that silently did nothing would
+              // be worse than a link that admits where it lands.
+              <Link
+                to={`/admin/contracts/${linkedLine.contractId}`}
+                data-testid="recurring-job-money-link"
+              >
+                {linkedLine.label}
+              </Link>
+            ) : (
+              <strong data-testid="recurring-job-money-link">
+                {linkedLine.label}
+              </strong>
+            )}
+            {/* P-12 E1 (§D.24 rule 6) — HOW it is invoiced, in words:
+                with the contract per period, or per visit. */}
+            <span
+              className="muted small"
+              style={{ display: "block" }}
+              data-testid="recurring-job-money-mode"
+            >
+              {t(
+                job.pricing_mode === "FIXED"
+                  ? "money.mode_per_visit"
+                  : "money.mode_with_contract",
+              )}
+            </span>
+            {job.is_active && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                disabled={linkBusy}
+                onClick={() => void handleLinkContractLine("")}
+                data-testid="recurring-job-money-unlink"
+              >
+                {t("money.unlink")}
+              </button>
+            )}
+          </>
         ) : (
           <>
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>{t("detail.occ_col_date")}</th>
-                    <th>{t("detail.occ_col_status")}</th>
-                    <th>{t("detail.occ_col_window")}</th>
-                    <th>{t("detail.occ_col_pricing")}</th>
-                    <th>{t("detail.occ_col_ticket")}</th>
-                    <th aria-label={t("detail.occ_col_actions")} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {occurrences.map((occ) => {
-                    const canSkip =
-                      occ.status === "PLANNED" && occ.ticket_id == null;
-                    const canCancel =
-                      occ.status === "PLANNED" ||
-                      occ.status === "TICKET_CREATED" ||
-                      occ.status === "RESCHEDULED";
-                    const canOverride = occ.status !== "CANCELLED";
-                    return (
-                      <tr key={occ.id} data-testid="planned-occurrence-row">
-                        <td className="td-date">{formatDate(occ.planned_date)}</td>
-                        <td>
-                          <OccurrenceStatusBadge status={occ.status} />
-                        </td>
-                        <td>{occurrenceWindow(occ)}</td>
-                        <td>{occurrencePricing(occ)}</td>
-                        <td>
-                          {occ.ticket_id != null ? (
-                            <Link to={`/tickets/${occ.ticket_id}`}>
-                              {t("detail.view_ticket", { id: occ.ticket_id })}
-                            </Link>
-                          ) : (
-                            <span className="muted">{t("detail.no_ticket")}</span>
-                          )}
-                        </td>
-                        <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
-                          {canSkip && (
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() =>
-                                setReasonDialog({ mode: "skip", occ })
-                              }
-                              data-testid="occurrence-skip"
-                            >
-                              {t("detail.action_skip")}
-                            </button>
-                          )}
-                          {canCancel && (
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() =>
-                                setReasonDialog({ mode: "cancel", occ })
-                              }
-                              data-testid="occurrence-cancel"
-                            >
-                              {t("detail.action_cancel")}
-                            </button>
-                          )}
-                          {canOverride && (
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => setOverrideTarget(occ)}
-                              data-testid="occurrence-override"
-                            >
-                              {t("detail.action_override")}
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {occCount > occurrences.length && (
-              <p className="muted small" style={{ padding: "10px 18px" }}>
-                {t("detail.occurrences_truncated", {
-                  count: occurrences.length,
-                })}
-              </p>
+            <label className="pw-money-label" htmlFor="pw-contract-line">
+              {t("money.not_linked")}
+            </label>
+            {/* A customer with NO contract at all cannot be helped by a
+                picker — the answer is a contract, not a choice. It says
+                so, and points at Contracts only for a viewer who may
+                open it: `ContractsRoute` bounces everyone else to "/",
+                and a link that silently lands you on the dashboard is a
+                door painted on a wall. `contractLines === null` is NOT
+                LOADED, which is a different fact from loaded-and-empty
+                — only the second may conclude anything. */}
+            {contractLines !== null && contractLines.length === 0 ? (
+              <span
+                className="pw-money-empty"
+                data-testid="recurring-job-money-none"
+              >
+                {t("money.none_available")}
+                {canAccessContracts(me?.role ?? null) && (
+                  <>
+                    {/* T5b — a real separator, not a word space. The
+                        sentence ends in a word and the link starts with
+                        one, so at 13.5px a single space read as the two
+                        touching. The middot is the same divider the
+                        agreement line above already uses, and it is
+                        aria-hidden because it is punctuation, not a
+                        word a screen reader should announce. */}
+                    <span className="pw-agreement-sep" aria-hidden="true">
+                      {" · "}
+                    </span>
+                    <Link to="/admin/contracts">
+                      {t("money.none_available_link")}
+                    </Link>
+                  </>
+                )}
+              </span>
+            ) : (
+              <select
+                id="pw-contract-line"
+                className="field-select"
+                disabled={linkBusy || !job.is_active || contractLines === null}
+                value=""
+                onChange={(event) =>
+                  void handleLinkContractLine(event.target.value)
+                }
+                data-testid="recurring-job-money-picker"
+              >
+                <option value="">
+                  {contractLines === null
+                    ? t("money.loading")
+                    : t("money.pick")}
+                </option>
+                {(contractLines ?? []).map((line) => (
+                  <option key={line.id} value={String(line.id)}>
+                    {line.contractNo
+                      ? `${line.lineName} — ${line.contractNo}`
+                      : line.lineName}
+                  </option>
+                ))}
+              </select>
             )}
           </>
         )}
+        {linkError && (
+          <div
+            className="alert-error pw-money-error"
+            role="alert"
+            data-testid="recurring-job-money-error"
+          >
+            {linkError}
+          </div>
+        )}
       </div>
+      </section>
 
-      {/* Generate occurrences dialog */}
+      {/* Geavanceerd — the rare steps, each with its existing dialog. */}
+      <details className="action-fold" data-testid="recurring-job-advanced">
+        <summary className="form-fold-summary">{t("detail.advanced")}</summary>
+        <p className="muted small" style={{ margin: "8px 0 0" }}>
+          {t("detail.advanced_intro")}
+        </p>
+        {job.is_active && (
+          <div className="action-fold-list">
+            {/* Codex P1 — Generate only on an ACTIVE job. */}
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setGenerateError("");
+                generateRef.current?.open();
+              }}
+              disabled={actionBusy}
+              data-testid="recurring-job-generate"
+            >
+              {t("detail.generate")}
+            </button>
+            <span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setArchiveError("");
+                  archiveRef.current?.open();
+                }}
+                disabled={actionBusy}
+                data-testid="recurring-job-archive"
+              >
+                {t("detail.archive")}
+              </button>
+              {/* P-13 §D.24 rule 8 — the pre-read; the confirm stays. */}
+              <WhatHappens testId="recurring-pause-what">
+                {t("detail.what_pause")}
+              </WhatHappens>
+            </span>
+          </div>
+        )}
+        <dl className="action-fold-raw">
+          <dt>{t("detail.raw_id")}</dt>
+          <dd><code>{job.id}</code></dd>
+        </dl>
+      </details>
+
+      {/* Plan-further-ahead dialog */}
       <ConfirmDialog
         ref={generateRef}
         title={t("generate.dialog_title")}
@@ -561,6 +969,11 @@ export function RecurringJobDetailPage() {
                 {t("generate.field_days_ahead_hint")}
               </div>
             </div>
+            {generateError && (
+              <div className="alert-error" role="alert" data-testid="rj-generate-error">
+                {generateError}
+              </div>
+            )}
           </div>
         }
         confirmLabel={t("generate.confirm")}
@@ -574,7 +987,20 @@ export function RecurringJobDetailPage() {
       <ConfirmDialog
         ref={archiveRef}
         title={t("archive.dialog_title")}
-        body={t("archive.dialog_body")}
+        body={
+          <>
+            {t("archive.dialog_body")}
+            {archiveError && (
+              <div
+                className="alert-error"
+                role="alert"
+                data-testid="rj-archive-error"
+              >
+                {archiveError}
+              </div>
+            )}
+          </>
+        }
         confirmLabel={t("archive.confirm")}
         cancelLabel={t("form.cancel")}
         onConfirm={handleArchive}
@@ -590,9 +1016,10 @@ export function RecurringJobDetailPage() {
             : t("skip.dialog_title")
         }
         description={
-          reasonDialog?.mode === "cancel"
+          reasonError ||
+          (reasonDialog?.mode === "cancel"
             ? t("cancel.dialog_desc")
-            : t("skip.dialog_desc")
+            : t("skip.dialog_desc"))
         }
         placeholder={
           reasonDialog?.mode === "cancel"
@@ -605,7 +1032,10 @@ export function RecurringJobDetailPage() {
             : t("skip.dialog_confirm")
         }
         cancelLabel={t("form.cancel")}
-        onCancel={() => setReasonDialog(null)}
+        onCancel={() => {
+          setReasonError("");
+          setReasonDialog(null);
+        }}
         onConfirm={handleReasonConfirm}
       />
 
@@ -622,15 +1052,6 @@ export function RecurringJobDetailPage() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="preview-row">
-      <span className="preview-key">{label}</span>
-      <span className="preview-val">{value}</span>
     </div>
   );
 }

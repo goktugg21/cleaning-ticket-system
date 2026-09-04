@@ -27,6 +27,7 @@ import type {
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { useToast } from "../../components/ToastProvider";
+import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { ManagedUnitPicker } from "../../components/ManagedUnitPicker";
@@ -145,7 +146,9 @@ function formatDecimal(value: string): string {
 // people should inherit.
 const CATALOG_COMPANY_STORAGE_KEY = "osius.catalog.company";
 
-export function ServicesAdminPage() {
+/** FE-6 — `embedded`: a tab of the Diensten & catalogi surface, which
+ *  owns the title; the page keeps its own inner tabs and everything else. */
+export function ServicesAdminPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { t, i18n } = useTranslation("common");
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
   const { me } = useAuth();
@@ -1181,17 +1184,19 @@ export function ServicesAdminPage() {
 
   return (
     <div data-testid="services-admin-page">
-      <div className="page-header">
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
+      {!embedded && (
+        <div className="page-header">
+          <div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>
+              {t("nav.admin_group")}
+            </div>
+            <h2 className="page-title">{t("services.page_title")}</h2>
           </div>
-          <h2 className="page-title">{t("services.page_title")}</h2>
         </div>
-      </div>
+      )}
 
       <div
-        className="composer-toggle"
+        className="composer-toggle tabs-secondary"
         role="tablist"
         aria-label={t("services.tabs_aria")}
         style={{ marginBottom: 12 }}
@@ -1246,7 +1251,7 @@ export function ServicesAdminPage() {
       {showCompanySelector && (
         <div className="field" style={{ maxWidth: 320, marginBottom: 16 }}>
           <label className="field-label" htmlFor="catalog-company-selector">
-            {t("catalog.company_selector_label")}
+            {t("services.company_selector_label")}
           </label>
           <select
             id="catalog-company-selector"
@@ -1463,7 +1468,19 @@ export function ServicesAdminPage() {
                     </ul>
                   </div>
                 )}
-                <div className="table-wrap">
+                {/* P-16 — the helper pages exhaustively now (the
+                    Sprint 135 picker rule), so the table is BOUNDED
+                    per CLAUDE.md #8: scrolls past the step instead of
+                    growing without limit. Math.max keeps the header
+                    visible on an empty catalog (BoundedList renders
+                    nothing at count 0). */}
+                <BoundedList
+                  size="lg"
+                  count={Math.max(1, services.length)}
+                  ariaLabel={t("services.tab_services")}
+                  testIdPrefix="services-table"
+                  className="table-wrap"
+                >
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -1537,7 +1554,7 @@ export function ServicesAdminPage() {
                     ))}
                   </tbody>
                 </table>
-                </div>
+                </BoundedList>
               </>
             )}
           </div>
@@ -1731,7 +1748,15 @@ export function ServicesAdminPage() {
                 </p>
               </div>
             ) : (
-              <div className="table-wrap">
+              /* P-16 — bounded for the same reason as the Services
+                 table above: the helper reads the WHOLE catalog now. */
+              <BoundedList
+                size="lg"
+                count={Math.max(1, categories.length)}
+                ariaLabel={t("services.tab_categories")}
+                testIdPrefix="services-categories-table"
+                className="table-wrap"
+              >
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -1828,7 +1853,7 @@ export function ServicesAdminPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </BoundedList>
             )}
           </div>
 

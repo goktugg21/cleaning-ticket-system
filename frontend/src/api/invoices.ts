@@ -17,6 +17,8 @@ import type {
 } from "./types";
 
 export interface ListInvoicesParams {
+  /** P-12 §D.24.2 — narrows within scope; never widens (server rule). */
+  company?: number;
   customer?: number;
   building?: number;
   status?: InvoiceStatus;
@@ -64,8 +66,82 @@ export async function getInvoice(id: number | string): Promise<Invoice> {
 
 // GET /api/invoices/due/ — the informational "who's due" list (flat array,
 // NOT paginated).
-export async function getInvoiceDueList(): Promise<InvoiceDueRow[]> {
-  const response = await api.get<InvoiceDueRow[]>("/invoices/due/");
+export async function getInvoiceDueList(
+  params: { company?: number } = {},
+): Promise<InvoiceDueRow[]> {
+  const response = await api.get<InvoiceDueRow[]>("/invoices/due/", { params });
+  return response.data;
+}
+
+// ---- WP-1 G4 — the billing-month guard -------------------------------
+//
+// GET /api/invoices/at-risk/ — work tied to the open billing month (or
+// earlier) whose completion chain is broken, per customer. Read-only:
+// the panel makes a human act, it never writes. Types local for the
+// same reason the preview's are.
+export type AtRiskStage =
+  | "WAITING_REVIEW"
+  | "SLOT_DONE"
+  | "BLOCKED"
+  | "PAST_DEADLINE"
+  | "ON_HOLD"
+  | "NOT_PLANNED";
+
+/** P-13 A (O1) — the job's real state, finer than the stage. The row
+ *  renders a SENTENCE from this, never a category word ("stuck" is
+ *  banned on screen). */
+export type AtRiskReason =
+  | "REVIEW_WAIT"
+  | "DONE_UNMOVED"
+  | "REJECTED"
+  | "CONVERTED"
+  | "CREW_UNABLE"
+  | "ON_HOLD"
+  | "PAST_DEADLINE"
+  | "NOT_PLANNED";
+
+export interface AtRiskRow {
+  kind: "EXTRA_WORK";
+  extra_work_id: number;
+  ticket_id: number | null;
+  ticket_no: string | null;
+  title: string;
+  building_id: number | null;
+  building_name: string | null;
+  stage: AtRiskStage;
+  age_days: number;
+  /** The planned day / deadline that ties this work to the month. */
+  date: string;
+  /** P-13 A (O1) — the sentence's raw material. `reason` may be
+   *  absent from an older server; the stage words are the fallback. */
+  reason?: AtRiskReason;
+  since?: string | null;
+  manager_names?: string[];
+}
+
+export interface AtRiskGroup {
+  customer: number;
+  customer_name: string;
+  company: number;
+  count: number;
+  rows: AtRiskRow[];
+}
+
+export interface AtRiskResponse {
+  period_year: number;
+  period_month: number;
+  total: number;
+  limit: number;
+  truncated: boolean;
+  groups: AtRiskGroup[];
+}
+
+export async function getBillingMonthAtRisk(
+  params: { company?: number } = {},
+): Promise<AtRiskResponse> {
+  const response = await api.get<AtRiskResponse>("/invoices/at-risk/", {
+    params,
+  });
   return response.data;
 }
 
@@ -237,6 +313,11 @@ export interface GenerateInvoicesPayload {
   // Omit to use the customer's billing target + split (resolved
   // server-side per Extra Work row, Sprint 182 §3).
   granularity?: InvoiceGranularity;
+  // P-16 — true asks the THROUGH question (this period or any earlier
+  // one), the same rule the preview and the nightly run use. The
+  // Facturen screen always passes it so the button bills exactly the
+  // list its preview showed.
+  through?: boolean;
 }
 
 // POST /api/invoices/generate/ — returns the created DRAFT invoice(s) (201).

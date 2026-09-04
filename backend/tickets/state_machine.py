@@ -7,6 +7,12 @@ from accounts.models import UserRole
 from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
 
+from .completion_requirements import (
+    ERR_COMPLETION_EVIDENCE,
+    message_for,
+    missing_evidence,
+    requirements_for_ticket,
+)
 from .models import Ticket, TicketStatus, TicketStatusHistory
 
 
@@ -89,6 +95,64 @@ SCOPE_STAFF_ASSIGNED = "staff_assigned"
 
 ALLOWED_TRANSITIONS = {
     (TicketStatus.OPEN, TicketStatus.IN_PROGRESS): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+    },
+    # W10 §1 — ACKNOWLEDGED sits between OPEN and IN_PROGRESS, with ONE
+    # way in and ONE way out, through this table like every other status.
+    # There is no bulk path to it and no endpoint that sets it directly:
+    # it is reached by `apply_transition` and therefore writes a
+    # `TicketStatusHistory` row like every other move.
+    #
+    # The roles are exactly OPEN -> IN_PROGRESS's. Acknowledging is the
+    # same act of taking responsibility for a job, one step earlier, so
+    # anyone who could start it can say they have seen it.
+    (TicketStatus.OPEN, TicketStatus.ACKNOWLEDGED): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+    },
+    (TicketStatus.ACKNOWLEDGED, TicketStatus.IN_PROGRESS): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+        # A staffer who turns up and starts is the person who knows the
+        # work began. They may start an acknowledged job exactly as they
+        # may complete one they are assigned to.
+        UserRole.STAFF: SCOPE_STAFF_ASSIGNED,
+    },
+    # W10 §2 — ON_HOLD. WHICH STATES MAY ENTER AND LEAVE IT, and why
+    # these:
+    #
+    #   IN, from ACKNOWLEDGED and IN_PROGRESS. Those are the two states
+    #   where WE hold the job and can therefore be blocked on somebody
+    #   else. A scheduled job whose access falls through, and a started
+    #   job whose part has not arrived, are the two real cases.
+    #
+    #   OUT, to IN_PROGRESS. One way out, deliberately: whatever the
+    #   hold was, clearing it means the crew is working. Sending it back
+    #   to ACKNOWLEDGED would let a job bounce between two not-started
+    #   states forever, which is the shape a hiding place takes.
+    #
+    #   NOT from WAITING_CUSTOMER_APPROVAL. "Waiting on the customer" is
+    #   what that status already means, and a second status for the same
+    #   fact would be two owners for one thing.
+    #
+    # STAFF cannot park a job. Deciding that work is blocked is a
+    # dispatch decision with a customer consequence, and H-5's principle
+    # — staff do not make the customer-facing call — extends to it.
+    (TicketStatus.ACKNOWLEDGED, TicketStatus.ON_HOLD): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+    },
+    (TicketStatus.IN_PROGRESS, TicketStatus.ON_HOLD): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+    },
+    (TicketStatus.ON_HOLD, TicketStatus.IN_PROGRESS): {
         UserRole.SUPER_ADMIN: SCOPE_ANY,
         UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
         UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
@@ -193,6 +257,16 @@ _SYSTEM_AUTO_TRANSITION_KEYS = {
 # -> APPROVED again) overwrite the value. For first/last/duration analytics use
 # TicketStatusHistory, which records every transition.
 TIMESTAMP_ON_ENTER = {
+    # Sprint W1-B (item 14, the billing cutoff) — `sent_for_approval_at`
+    # is now MONEY, not just analytics. `extra_work.billing.is_earned`
+    # bills work that sits at WAITING_CUSTOMER_APPROVAL with this stamp
+    # set, and `extra_work.billing.earned_at` reads it as the date the
+    # invoice line is anchored on. Removing this entry, or letting a
+    # route into WAITING_CUSTOMER_APPROVAL bypass `apply_transition`,
+    # would silently drop that work out of the billing pool again — the
+    # exact failure the sprint closed. Loop overwrites are correct and
+    # deliberate: a re-submitted ticket bills against the LATEST hand-off
+    # to the customer, not the first one.
     TicketStatus.WAITING_CUSTOMER_APPROVAL: "sent_for_approval_at",
     # Sprint 28 Batch 11 — stamped when a STAFF (or provider operator
     # acting on-behalf) completes work that routes through the manager
@@ -311,6 +385,86 @@ def can_transition(user, ticket, to_status):
 
 
 @transaction.atomic
+def _is_provider_driven_customer_decision(ticket, to_status, user) -> bool:
+    """A provider operator answering the CUSTOMER's question.
+
+    Sprint 27F-B1: SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER
+    driving WAITING_CUSTOMER_APPROVAL -> APPROVED / REJECTED is by
+    definition an override of a decision that is not theirs, even when
+    the client forgot the flag.
+    """
+    return (
+        getattr(user, "role", None)
+        in {
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        }
+        and str(ticket.status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL)
+        and str(to_status)
+        in {str(TicketStatus.APPROVED), str(TicketStatus.REJECTED)}
+    )
+
+
+def _is_out_of_machine_jump(ticket, to_status, user) -> bool:
+    """A move the transition table does not contain.
+
+    Sprint 184 §2. Only a SUPER_ADMIN can reach one (`can_transition`
+    lets that role past any pair). `user is not None` guards the SYSTEM
+    actor, which drives its own `SYSTEM_AUTO_TRANSITIONS` pairs and has
+    nobody to ask for a reason.
+    """
+    return (
+        user is not None
+        and (ticket.status, to_status) not in ALLOWED_TRANSITIONS
+    )
+
+
+def transition_needs_override_reason(ticket, to_status, user) -> bool:
+    """W14 §4 — WILL THIS MOVE BE REFUSED WITHOUT AN `override_reason`?
+
+    ## Why this function exists
+
+    `apply_transition` has always known the answer; nothing else could
+    ask it. So `GET /tickets/<id>/transition-requirements/` — the
+    endpoint the transition modal renders itself from — reported
+    `unmet: []` for a move the very next request would refuse.
+
+    Measured on crmtest, ticket 356, ACKNOWLEDGED, undoing its last
+    step:
+
+        GET  /api/tickets/356/transition-requirements/?to_status=OPEN
+             -> {"requirements": [], "unmet": []}
+        POST /api/tickets/356/status/  {"to_status": "OPEN", ...}
+             -> 400 {"code": "override_reason_required"}
+
+    From the operator's chair, which is where the owner was sitting:
+    press "Undo the last step", get a modal that asks only for an
+    optional note, press its button, and the modal vanishes with no
+    message and no change. His words: "undo and the correction actions
+    do not seem to work. I could not get them to work." They were not
+    hidden and they were not broken — they were being refused silently,
+    for a field the form never offered.
+
+    ## Why a predicate and not a copy of the rule
+
+    Both coercion branches above call the SAME two helpers this does, so
+    the question "does this move need a reason" has exactly one
+    definition. Mirroring `ALLOWED_TRANSITIONS` inside
+    `transition_requirements.py` — or worse, inside the page — is the
+    two-copies-of-one-fact failure CLAUDE.md records twice already.
+
+    Note the asymmetry with the requirements in
+    `transition_requirements.py`: those are DATA a step needs and can
+    already be satisfied by the ticket as it stands. A reason can never
+    be pre-satisfied; it is written fresh for the move, which is why it
+    is always reported unmet when it applies.
+    """
+    return _is_provider_driven_customer_decision(
+        ticket, to_status, user
+    ) or _is_out_of_machine_jump(ticket, to_status, user)
+
+
 def apply_transition(
     ticket,
     user,
@@ -350,16 +504,8 @@ def apply_transition(
     # B1 added BUILDING_MANAGER to this coercion set because the
     # business doc explicitly admits BM to act on behalf of the
     # customer (typical case: customer approves verbally / by phone).
-    provider_driven_customer_decision = (
-        getattr(user, "role", None)
-        in {
-            UserRole.SUPER_ADMIN,
-            UserRole.COMPANY_ADMIN,
-            UserRole.BUILDING_MANAGER,
-        }
-        and str(ticket.status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL)
-        and str(to_status)
-        in {str(TicketStatus.APPROVED), str(TicketStatus.REJECTED)}
+    provider_driven_customer_decision = _is_provider_driven_customer_decision(
+        ticket, to_status, user
     )
     if provider_driven_customer_decision:
         # B6 — BM customer-decision override is revocable per-(BM,
@@ -415,10 +561,7 @@ def apply_transition(
     # `user is not None` guards the SYSTEM actor: it drives its own
     # `SYSTEM_AUTO_TRANSITIONS` pairs and there is nobody to ask for a
     # reason.
-    out_of_machine_jump = (
-        user is not None
-        and (ticket.status, to_status) not in ALLOWED_TRANSITIONS
-    )
+    out_of_machine_jump = _is_out_of_machine_jump(ticket, to_status, user)
     if out_of_machine_jump:
         is_override = True
 
@@ -492,17 +635,40 @@ def apply_transition(
     # completion transition (BM closing out a job on behalf of an
     # absent staff member, SUPER_ADMIN unblocking a stuck ticket)
     # bypass the rule.
+    #
+    # W3-G — WHICH evidence is no longer hardcoded. The rule comes from
+    # `completion_requirements`, which reads W2-D's `file_upload_required`
+    # / `completion_notes_required` off this ticket's extra work and falls
+    # back to Sprint 25C's note-OR-attachment for a ticket that came from
+    # no extra work. This is the transition the plan (§2.3) means by "the
+    # completion transition": the per-slot gate is operational evidence
+    # and does not move the ticket, whereas THIS is what makes the work
+    # billable, so a rule that bound only the slot could be walked around
+    # by moving the ticket instead.
+    #
+    # WHO it applies to is unchanged, deliberately: STAFF only. B1 is a
+    # canonical business decision, not an accident, and widening the gate
+    # to managers would be a different sprint's argument. The consequence
+    # is worth stating: a manager can still complete a job that requires a
+    # photo without one, exactly as they could before.
     if (
         getattr(user, "role", None) == UserRole.STAFF
         and (str(ticket.status), str(to_status))
         in {(str(a), str(b)) for (a, b) in COMPLETION_EVIDENCE_TRANSITIONS}
     ):
-        if not (note and note.strip()) and not _ticket_has_visible_attachment(ticket):
+        requirements = requirements_for_ticket(ticket)
+        missing = missing_evidence(
+            requirements,
+            has_note=bool(note and note.strip()),
+            # The evidence pool is the TICKET's customer-visible
+            # attachments, not one slot's — `_ticket_has_visible_attachment`
+            # is unchanged, including its message-tier exclusions.
+            has_file=_ticket_has_visible_attachment(ticket),
+        )
+        if missing:
             raise TransitionError(
-                "Please leave a completion note or attach a photo of the "
-                "completed work before sending this ticket for customer "
-                "approval.",
-                code="completion_evidence_required",
+                message_for(missing),
+                code=ERR_COMPLETION_EVIDENCE,
             )
 
     # Sprint 8B — hourly Extra Work completion gate. An EW-origin

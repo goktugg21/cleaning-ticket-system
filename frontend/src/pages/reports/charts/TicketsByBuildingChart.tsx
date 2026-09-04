@@ -14,6 +14,8 @@ import { fetchTicketsByBuilding } from "../../../api/reports";
 import type { TicketOrigin } from "../../../api/reports.types";
 import { useReport } from "../../../hooks/useReport";
 import { ExportButtons } from "./ExportButtons";
+import { ChartSkeleton } from "./ChartSkeleton";
+import { BoundedList } from "../../../components/BoundedList";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -71,9 +73,7 @@ export function TicketsByBuildingChart({
       </p>
 
       {loading && (
-        <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-          <div className="loading-bar-fill" />
-        </div>
+        <ChartSkeleton />
       )}
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 12 }}>
@@ -103,6 +103,7 @@ export function TicketsByBuildingChart({
             {t("tickets_by_building_empty")}
           </div>
         ) : (
+          <BoundedList size="lg" count={chartData.length} ariaLabel={t("tickets_by_building_title")} testIdPrefix="tickets-by-building">
           <ResponsiveContainer
             width="100%"
             height={Math.max(160, chartData.length * 36)}
@@ -133,9 +134,10 @@ export function TicketsByBuildingChart({
                   return `${row.building_name} — ${row.company_name}`;
                 }}
               />
-              <Bar dataKey="count" fill="#f59e0b" />
+              <Bar isAnimationActive={false} dataKey="count" fill="#f59e0b" />
             </BarChart>
           </ResponsiveContainer>
+          </BoundedList>
         )
       )}
       {!loading && !error && data && (

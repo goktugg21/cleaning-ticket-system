@@ -17,8 +17,16 @@ from extra_work.billing import billing_month
 
 
 class _FakeTicket:
+    # P-16 repin — `billing.earned_at` reads `ticket.status` since the
+    # W1-B reopen fix (WAITING_CUSTOMER_APPROVAL prefers
+    # sent_for_approval_at over a stale closed_at); this fake predates
+    # that and carried only `closed_at`. A CLOSED status keeps these
+    # tests on the closed_at arm, which is the localtime-bucketing rule
+    # they pin.
     def __init__(self, closed_at):
         self.closed_at = closed_at
+        self.status = "CLOSED"
+        self.sent_for_approval_at = None
 
 
 class _FakeEW:

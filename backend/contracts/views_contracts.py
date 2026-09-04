@@ -21,10 +21,20 @@ exactly what a 2-row page costs.
 """
 from __future__ import annotations
 
+import datetime
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Case, Count, IntegerField, Q, Sum, When
+from django.db.models import (
+    Case,
+    Count,
+    Exists,
+    IntegerField,
+    OuterRef,
+    Q,
+    Sum,
+    When,
+)
 from django.db.models.functions import Coalesce, Lower, Trim
 from django.utils import timezone
 from rest_framework import generics, status
@@ -41,12 +51,15 @@ from .billing import money
 from .models import (
     MONTHS_PER_PERIOD,
     Contract,
+    ContractInvoice,
+    ContractKind,
     ContractLifecycle,
     ContractRevision,
     ContractStatus,
     ContractType,
 )
 from .permissions import IsContractManager, IsContractReader, enforce_contract_management
+from .state_machine import ContractTransitionError, transition_contract
 from .revisions import annotate_revision_totals, display_revision_ids
 from .standard_types import (
     normalise_name as normalise_type_name,
@@ -86,13 +99,28 @@ SORT_FIELDS = {
 }
 
 
+#: P-12 C1 — "Ending" on the contracts road: an ACTIVE contract whose
+#: end date falls within this many days. One constant, read by the
+#: filter, the stats and (through them) the tab that is named after it.
+ENDING_SOON_DAYS = 60
+
+
+def ending_soon_q(today):
+    """ACTIVE and ending within ENDING_SOON_DAYS (end date inclusive)."""
+    horizon = today + datetime.timedelta(days=ENDING_SOON_DAYS)
+    return Q(lifecycle=ContractLifecycle.ACTIVE) & Q(
+        end_date__isnull=False, end_date__gte=today, end_date__lte=horizon
+    )
+
+
 def status_filter_q(value, today):
     """Translate a DERIVED status into a queryset predicate.
 
     The mapping lives here, once, so the list filter, the stat tiles
     and `Contract.status` cannot answer differently about the same row.
     EXPIRED is the interesting one: it is `lifecycle=ACTIVE` plus a
-    past end date, never a stored value.
+    past end date, never a stored value. "ENDING" (P-12 C1) is a road
+    step, not a stored status: ACTIVE with the end inside the horizon.
     """
     if value == ContractStatus.DRAFT:
         return Q(lifecycle=ContractLifecycle.DRAFT)
@@ -102,6 +130,8 @@ def status_filter_q(value, today):
         return Q(lifecycle=ContractLifecycle.ACTIVE) & Q(
             end_date__isnull=False, end_date__lt=today
         )
+    if value == "ENDING":
+        return ending_soon_q(today)
     if value == ContractStatus.ACTIVE:
         return Q(lifecycle=ContractLifecycle.ACTIVE) & (
             Q(end_date__isnull=True) | Q(end_date__gte=today)
@@ -148,6 +178,12 @@ def apply_contract_filters(queryset, params, today):
         else:
             queryset = queryset.filter(predicate)
 
+    # P-12 C1 — the Active TAB excludes the rows the Ending tab owns
+    # (the road's tabs partition, §D.24 rule 3). `?ending=exclude` rides
+    # beside `?status=ACTIVE`; `?status=ENDING` is the other tab.
+    if (params.get("ending") or "").strip().lower() == "exclude":
+        queryset = queryset.exclude(ending_soon_q(today))
+
     return queryset
 
 
@@ -166,7 +202,14 @@ def contract_list_context(contracts, request):
             ContractRevision.objects.filter(id__in=list(resolved.values()))
         )
         .select_related("contract")
-        .prefetch_related("lines__building")
+        .prefetch_related(
+                "lines__building",
+                "lines__department",
+                # P-12 C3 - the line's recurring rules, one prefetch so the
+                # nested serializer's `recurring` field costs no per-row query
+                # (test_query_counts pins the page cost).
+                "lines__recurring_jobs",
+            )
     )
     by_id = {revision.id: revision for revision in revisions}
     return {
@@ -201,7 +244,15 @@ class ContractListCreateView(generics.ListCreateAPIView):
         today = timezone.localdate()
         qs = Contract.objects.select_related(
             "company", "customer", "contract_type"
-        ).prefetch_related("building_links__building")
+        ).prefetch_related("building_links__building").annotate(
+            # P-15 §1.2 — money-bearing rows cannot be deleted from the
+            # list; the row must know WHY its checkbox is off. An
+            # `Exists` rather than a Count: no join, no GROUP BY, safe
+            # beside the search's `.distinct()`.
+            annotated_has_invoices=Exists(
+                ContractInvoice.objects.filter(contract_id=OuterRef("id"))
+            )
+        )
 
         company_id = parse_int_param(self.request.query_params.get("company"))
         if company_id is not None:
@@ -209,6 +260,17 @@ class ContractListCreateView(generics.ListCreateAPIView):
 
         qs = apply_contract_filters(qs, self.request.query_params, today)
         qs = filter_contracts_for(self.request.user, qs)
+        # W16 — the EXTRA WORK registers are not in this list, and not
+        # in these numbers. They are a different kind of object: one per
+        # customer, auto-created, mirroring work that is invoiced by the
+        # Extra Work run. Counting them here would put a "contract" a
+        # nobody signed in the list and add ad-hoc spend to a figure
+        # that means "recurring fees we have agreed". The reference
+        # system hides its own the same way, by excluding `status_id=4`
+        # from `index()` (`ContractController.php:37`) and summing only
+        # ACTIVE rows in `statistics()`.
+        qs = qs.exclude(kind=ContractKind.EXTRA_WORK)
+
 
         sort = (self.request.query_params.get("sort") or "").strip()
         descending = sort.startswith("-")
@@ -285,6 +347,8 @@ class ContractDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
+        # P-5 S7 — the detail carries the connected facts.
+        context["connected"] = True
         obj = getattr(self, "_contract", None)
         if obj is not None:
             context.update(contract_list_context([obj], self.request))
@@ -311,8 +375,72 @@ class ContractDetailView(generics.RetrieveUpdateDestroyAPIView):
                 sync_contract_buildings(serializer.instance, buildings)
 
     def perform_destroy(self, instance):
+        from rest_framework import serializers as drf_serializers
+
         enforce_contract_management(self.request.user, instance.company)
+        # P-15 §1.2 — a money-bearing record cannot be deleted from a
+        # list at all: a contract that has generated invoices is part
+        # of the books. The refusal is a sentence with a stable code,
+        # like every other machine's.
+        if ContractInvoice.objects.filter(contract=instance).exists():
+            raise drf_serializers.ValidationError(
+                {
+                    "detail": [
+                        drf_serializers.ErrorDetail(
+                            "This contract has invoices and cannot be "
+                            "deleted. Cancel it instead — the invoices "
+                            "already made stay.",
+                            code="contract_has_invoices",
+                        )
+                    ]
+                }
+            )
         instance.delete()
+
+
+class ContractTransitionView(APIView):
+    """POST /api/contracts/<id>/transition/ {"lifecycle": "..."}.
+
+    P-15 §1.1 — THE ONE DOOR through which a contract's lifecycle
+    moves. `ALLOWED_TRANSITIONS` in `contracts/state_machine.py` is the
+    authority (exactly the moves the UI's own buttons offer); the
+    serializer's `lifecycle` is read-only, so a PATCH can no longer
+    jump a CANCELLED contract back to ACTIVE with a 200. The history
+    row per move is the generic AuditLog diff `Contract` already
+    writes, stamped with the `contract_transition` reason — a
+    dedicated history model is a migration and this sprint writes
+    none.
+
+    Refusal shape: HTTP 400 `{"detail": <sentence>, "code": <stable>}`
+    — `invalid_transition` / `no_op_transition` / `unknown_lifecycle` /
+    `register_lifecycle_locked`, the machine standard.
+    """
+
+    permission_classes = [IsContractManager]
+
+    def post(self, request, contract_id):
+        contract = generics.get_object_or_404(
+            filter_contracts_for(
+                request.user,
+                Contract.objects.select_related(
+                    "company", "customer", "contract_type"
+                ),
+            ),
+            pk=contract_id,
+        )
+        enforce_contract_management(request.user, contract.company)
+        try:
+            contract = transition_contract(
+                request.user, contract, str(request.data.get("lifecycle"))
+            )
+        except ContractTransitionError as exc:
+            return Response(
+                {"detail": exc.message, "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        context = {"request": request, "connected": True}
+        context.update(contract_list_context([contract], request))
+        return Response(ContractSerializer(contract, context=context).data)
 
 
 class ContractStatsView(APIView):
@@ -336,6 +464,9 @@ class ContractStatsView(APIView):
             qs = qs.filter(company_id=company_id)
         qs = apply_contract_filters(qs, request.query_params, today)
         qs = filter_contracts_for(request.user, qs)
+        # See `ContractListCreateView.get_queryset` — same exclusion, so
+        # the tiles count exactly the rows the list shows.
+        qs = qs.exclude(kind=ContractKind.EXTRA_WORK)
 
         def count_when(predicate):
             return Count(
@@ -351,9 +482,14 @@ class ContractStatsView(APIView):
             cancelled=count_when(
                 status_filter_q(ContractStatus.CANCELLED, today)
             ),
+            # P-12 C1 — the road's Ending step (a subset of active).
+            ending_soon=count_when(ending_soon_q(today)),
         )
 
-        periods = dict(qs.values_list("id", "billing_period"))
+        rows = list(
+            qs.values_list("id", "billing_period", "lifecycle", "end_date")
+        )
+        periods = {row[0]: row[1] for row in rows}
         # Same display rule the list uses, so the tiles total exactly
         # what the table shows rather than quietly dropping the
         # contracts that have not started yet.
@@ -366,15 +502,80 @@ class ContractStatsView(APIView):
             )
             .values_list("id", "total")
         )
+        line_counts = dict(
+            ContractRevision.objects.filter(id__in=list(resolved.values()))
+            .values_list("id")
+            .annotate(n=Count("lines"))
+            .values_list("id", "n")
+        )
+
+        # P-12 C1 — the same bucketing the tabs use, derived in Python
+        # from the same facts `status_filter_q` reads, so a row lands in
+        # exactly one tab's money line.
+        horizon = today + datetime.timedelta(days=ENDING_SOON_DAYS)
+
+        def bucket_of(lifecycle, end_date):
+            if lifecycle == ContractLifecycle.DRAFT:
+                return "draft"
+            if lifecycle == ContractLifecycle.CANCELLED:
+                return "cancelled"
+            if end_date is not None and end_date < today:
+                return "expired"
+            if end_date is not None and end_date <= horizon:
+                return "ending_soon"
+            return "active"
 
         monthly = Decimal("0.00")
-        for contract_id, billing_period in periods.items():
+        monthly_by = {
+            "active": Decimal("0.00"),
+            "ending_soon": Decimal("0.00"),
+            "draft": Decimal("0.00"),
+            "expired": Decimal("0.00"),
+            "cancelled": Decimal("0.00"),
+        }
+        for contract_id, billing_period, lifecycle, end_date in rows:
             revision_id = resolved.get(contract_id)
             if revision_id is None:
                 continue
             period_amount = amounts.get(revision_id, Decimal("0.00"))
             months = MONTHS_PER_PERIOD[billing_period]
-            monthly += period_amount / Decimal(months)
+            per_month = period_amount / Decimal(months)
+            monthly += per_month
+            monthly_by[bucket_of(lifecycle, end_date)] += per_month
+
+        # P-12 C1 — the Start-here facts (§D.24 rule 2): the ONE thing
+        # waiting. A draft with no lines beats a contract ending soon.
+        draft_ids = [
+            row[0] for row in rows if row[2] == ContractLifecycle.DRAFT
+        ]
+        draft_without_lines = [
+            contract_id
+            for contract_id in draft_ids
+            if line_counts.get(resolved.get(contract_id), 0) == 0
+        ]
+
+        def start_here_row(contract):
+            return {
+                "id": contract.id,
+                "contract_no": contract.contract_no,
+                "customer_name": contract.customer.name,
+                "end_date": contract.end_date.isoformat()
+                if contract.end_date
+                else None,
+            }
+
+        draft_no_lines = (
+            qs.filter(id__in=draft_without_lines)
+            .select_related("customer")
+            .order_by("-id")
+            .first()
+        )
+        ending_soonest = (
+            qs.filter(ending_soon_q(today))
+            .select_related("customer")
+            .order_by("end_date", "id")
+            .first()
+        )
 
         return Response(
             {
@@ -383,8 +584,22 @@ class ContractStatsView(APIView):
                 "draft": counts["draft"],
                 "expired": counts["expired"],
                 "cancelled": counts["cancelled"],
+                "ending_soon": counts["ending_soon"],
+                "draft_without_lines": len(draft_without_lines),
                 "monthly_total": money(monthly),
                 "yearly_total": money(monthly * Decimal(12)),
+                "monthly_by_status": {
+                    key: money(value) for key, value in monthly_by.items()
+                },
+                "ending_soon_days": ENDING_SOON_DAYS,
+                "start_here": {
+                    "draft_no_lines": start_here_row(draft_no_lines)
+                    if draft_no_lines
+                    else None,
+                    "ending_soonest": start_here_row(ending_soonest)
+                    if ending_soonest
+                    else None,
+                },
             }
         )
 
@@ -617,3 +832,148 @@ class ContractTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
                     ]
                 }
             )
+
+
+# ---------------------------------------------------------------------------
+# W23 — the year×week planning grid.
+#
+#     GET /api/contracts/<int:contract_id>/planning/?year=2026
+#
+# A READ, shaped like `ContractForecastView`: per active-revision
+# contract line, the linked RecurringJobs' PlannedOccurrences bucketed
+# by ISO week. Editing stays on the job's calendar (`planned_work`'s
+# idempotent per-date actions) — this endpoint computes and writes
+# nothing, which is what keeps the occurrence machinery the ONE
+# planner. Tenant-scoped by construction: `get_scoped_contract` gates
+# the contract, and only lines OF THIS CONTRACT's active revision are
+# walked, so no other tenant's jobs or occurrences are reachable
+# whatever ids are guessed.
+# ---------------------------------------------------------------------------
+
+
+# Dominance order for a week's cell colour when a week holds mixed
+# statuses: the most frequent wins, ties break on this list (done beats
+# pending beats abandoned).
+_PLANNING_STATUS_DOMINANCE = [
+    "COMPLETED",
+    "TICKET_CREATED",
+    "PLANNED",
+    "RESCHEDULED",
+    "MISSED",
+    "SKIPPED",
+    "CANCELLED",
+]
+
+# Dates that are not performances: they fill no cell tint priority and
+# do not count against `frequency_per_year`.
+_PLANNING_NON_PERFORMANCE = {"SKIPPED", "CANCELLED"}
+
+
+class ContractPlanningView(APIView):
+    """The planning grid for one contract and one ISO year."""
+
+    permission_classes = [IsContractReader]
+
+    def get(self, request, contract_id):
+        from datetime import date as date_cls
+
+        from planned_work.models import PlannedOccurrence
+
+        from .revisions import active_revision
+        from .serializers import ContractPlanningSerializer
+        from .views_revisions import get_scoped_contract
+
+        contract = get_scoped_contract(request.user, contract_id)
+        # W23 §3 — a register (kind=EXTRA_WORK) mirrors chargeable jobs;
+        # it has no standing lines to plan. The frontend never asks; a
+        # hand-rolled request gets the reason, not an empty grid that
+        # looks like an unplanned year.
+        if contract.kind == ContractKind.EXTRA_WORK:
+            return Response(
+                {
+                    "detail": "An extra-work register has no planning.",
+                    "code": "register_has_no_planning",
+                },
+                status=400,
+            )
+        year = parse_int_param(request.query_params.get("year"))
+        if year is None or not (1970 <= year <= 2999):
+            year = timezone.localdate().year
+
+        revision = active_revision(contract)
+        lines = (
+            list(revision.lines.order_by("sort_order", "id"))
+            if revision is not None
+            else []
+        )
+        line_ids = [line.id for line in lines]
+
+        # One query for the whole grid. The date window over-fetches the
+        # ISO-year boundary days (Dec 29 – Jan 3) and the isocalendar
+        # check keeps exactly the requested ISO year, so week 1 and week
+        # 52/53 bucket correctly at both edges.
+        rows = PlannedOccurrence.objects.filter(
+            recurring_job__contract_line_id__in=line_ids,
+            planned_date__gte=date_cls(year - 1, 12, 29),
+            planned_date__lte=date_cls(year + 1, 1, 3),
+        ).values_list(
+            "recurring_job__contract_line_id",
+            "recurring_job_id",
+            "planned_date",
+            "status",
+        )
+
+        per_line: dict[int, dict] = {
+            line.id: {"weeks": {}, "jobs": set(), "planned": 0}
+            for line in lines
+        }
+        for line_id, job_id, planned_date, status in rows:
+            iso = planned_date.isocalendar()
+            if iso[0] != year:
+                continue
+            bucket = per_line[line_id]
+            bucket["jobs"].add(job_id)
+            if status not in _PLANNING_NON_PERFORMANCE:
+                bucket["planned"] += 1
+            week = bucket["weeks"].setdefault(
+                iso[1], {"count": 0, "statuses": {}, "job_id": job_id}
+            )
+            week["count"] += 1
+            week["statuses"][status] = week["statuses"].get(status, 0) + 1
+
+        def dominant(statuses: dict) -> str:
+            return min(
+                statuses,
+                key=lambda s: (
+                    -statuses[s],
+                    _PLANNING_STATUS_DOMINANCE.index(s)
+                    if s in _PLANNING_STATUS_DOMINANCE
+                    else len(_PLANNING_STATUS_DOMINANCE),
+                ),
+            )
+
+        payload = {
+            "year": year,
+            "lines": [
+                {
+                    "line_id": line.id,
+                    "name": line.name,
+                    "frequency_per_year": line.frequency_per_year,
+                    "planned_count": per_line[line.id]["planned"],
+                    "job_ids": sorted(per_line[line.id]["jobs"]),
+                    "weeks": [
+                        {
+                            "week": week_no,
+                            "count": data["count"],
+                            "status": dominant(data["statuses"]),
+                            "job_id": data["job_id"],
+                        }
+                        for week_no, data in sorted(
+                            per_line[line.id]["weeks"].items()
+                        )
+                    ],
+                }
+                for line in lines
+            ],
+        }
+        return Response(ContractPlanningSerializer(payload).data)

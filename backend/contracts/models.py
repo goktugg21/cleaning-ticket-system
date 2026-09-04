@@ -85,6 +85,48 @@ class ContractLifecycle(models.TextChoices):
     CANCELLED = "CANCELLED", "Cancelled"
 
 
+class ContractKind(models.TextChoices):
+    """W16 — what a contract row IS. Two things, and they are not the
+    same kind of object.
+
+    `STANDARD` is the recurring agreement: a price per billing period,
+    revisions that version it, and `contracts/invoice_generation.py`
+    raising a DRAFT invoice per period. That is the whole module up to
+    now.
+
+    `EXTRA_WORK` is the **register** the owner's father's system calls
+    an "Extra Works Contract" -- one per customer, auto-created,
+    carrying one line per piece of chargeable work so a customer's
+    ad-hoc spend has a page and a total. His
+    `ContractController::getOrCreateExtraWorksContract` is the shape
+    this copies.
+
+    ## THE REGISTER NEVER RAISES AN INVOICE
+
+    This is the one rule that makes copying his idea safe, and it is
+    why `kind` is a stored column rather than a convention.
+
+    His extra-works lines are hand-typed: an operator retypes a
+    description and an amount, and nothing connects the line to the
+    actual job. Ours are PROJECTED from the real `ExtraWorkRequest`
+    rows through the same `_earned_amounts` the invoice generator uses,
+    so the register cannot disagree with the invoice.
+
+    But our Extra Work ALREADY reaches an invoice, through the unbilled
+    pool in `invoicing/selectors.py` -- a pool whose whole definition is
+    "no live `InvoiceLine` claims this row". If the register also
+    generated invoice lines, every piece of chargeable work would be
+    billed twice: once by the pool, once by the contract run. So
+    `invoice_generation.generate_invoices_for_contract` refuses a
+    register outright and `billing.build_forecast` returns an empty
+    forecast for one. Both refusals are tested. A register is a MIRROR
+    of money that is billed elsewhere, never a second source of it.
+    """
+
+    STANDARD = "STANDARD", "Standard"
+    EXTRA_WORK = "EXTRA_WORK", "Extra work register"
+
+
 class ContractStatus(models.TextChoices):
     """The status an operator SEES. Derived, never stored — see
     `Contract.status` and `annotate_status`."""
@@ -280,6 +322,17 @@ class Contract(models.Model):
         ),
     )
 
+    kind = models.CharField(
+        max_length=16,
+        choices=ContractKind.choices,
+        default=ContractKind.STANDARD,
+        db_index=True,
+        help_text=(
+            "STANDARD is the recurring agreement that raises invoices. "
+            "EXTRA_WORK is the per-customer register of chargeable "
+            "work, which never raises one -- see `ContractKind`."
+        ),
+    )
     start_date = models.DateField(
         help_text="First day the contract is in force."
     )
@@ -379,6 +432,18 @@ class Contract(models.Model):
                 condition=models.Q(end_date__isnull=True)
                 | models.Q(end_date__gte=models.F("start_date")),
                 name="contract_end_after_start",
+            ),
+            # W16 — ONE extra work register per customer, enforced by
+            # the database rather than by the get_or_create that makes
+            # it. Two registers would each show half the customer's
+            # money and neither would look wrong, which is the worst
+            # kind of wrong. Partial (`condition=`) so it constrains
+            # only registers: a customer may hold any number of
+            # STANDARD contracts, and does.
+            models.UniqueConstraint(
+                fields=["company", "customer"],
+                condition=models.Q(kind=ContractKind.EXTRA_WORK),
+                name="uniq_extra_work_register_per_customer",
             ),
         ]
         indexes = [
@@ -585,6 +650,30 @@ class ContractLine(models.Model):
             "to group by; nothing in this sprint reads it for money."
         ),
     )
+    extra_work = models.ForeignKey(
+        "extra_work.ExtraWorkRequest",
+        on_delete=models.CASCADE,
+        related_name="contract_register_lines",
+        null=True,
+        blank=True,
+        help_text=(
+            "W16 -- the chargeable job this line MIRRORS, on an "
+            "EXTRA_WORK register. NULL on every STANDARD contract "
+            "line, where the line is the agreement itself and there is "
+            "no job behind it yet.\n\n"
+            "The reference system's equivalent lines carry no such "
+            "link: an operator retypes a description and an amount, so "
+            "its register can and does disagree with its invoices. "
+            "This FK is what makes ours a projection rather than a "
+            "second set of books -- `sync_extra_work_register` "
+            "rebuilds the amount from `_earned_amounts`, the same rule "
+            "the invoice reads.\n\n"
+            "CASCADE, not PROTECT: a register line is a mirror of the "
+            "job, so a deleted job must take its reflection with it. "
+            "PROTECT would make the register able to block a delete "
+            "that has nothing to do with it."
+        ),
+    )
     sort_order = models.PositiveIntegerField(
         default=0,
         help_text="Ascending display order; ties break on id.",
@@ -612,6 +701,45 @@ class ContractLine(models.Model):
             "system held square metres nowhere before this sprint "
             "(extra_work's SQUARE_METERS is a pricing UNIT, which is a "
             "different thing). NULL means not recorded."
+        ),
+    )
+
+    # W20 — the three planning fields the reference system's contract
+    # lines carry and ours lacked. All additive; none of them is money.
+    frequency_per_year = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "How many times per YEAR this line's work is performed "
+            "(the reference system's `frequency`). NULL means the line "
+            "is not planned by count. The 52-week planning grid of a "
+            "later sprint buckets on exactly this number — it is a "
+            "COUNT of performances, never a divisor or multiplier for "
+            "`amount`, which stays per billing period."
+        ),
+    )
+    norm = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        help_text=(
+            "The operator's norm / spec note for this line, e.g. "
+            "'180 m2/uur'. Free text; nothing computes from it."
+        ),
+    )
+    department = models.ForeignKey(
+        "customers.Department",
+        on_delete=models.SET_NULL,
+        related_name="contract_lines",
+        null=True,
+        blank=True,
+        help_text=(
+            "Optional: which of the CUSTOMER'S department labels this "
+            "line serves (the per-customer list Extra Work already "
+            "uses). The serializer rejects a department of any other "
+            "customer — a cross-customer label on a contract line is a "
+            "tenant-scoping violation. SET_NULL: deleting a label must "
+            "not take agreed scope lines with it."
         ),
     )
 

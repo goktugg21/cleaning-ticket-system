@@ -128,6 +128,21 @@ class _SlotFixture(TestCase):
             self._slots_url(), {"user_id": staff.id, **slot}, format="json"
         )
 
+    def _legacy_slot(self, actor, staff, **slot):
+        """A SECOND row for a staff member who is already on the ticket,
+        written at the ORM layer.
+
+        W26 restored ONE PERSON, ONE SLOT at the validation layer, so the
+        API no longer creates one of these — but the DB constraint stays
+        dropped and tickets in the field already carry such rows. This is
+        how those rows exist, and everything below asserts they keep
+        reading, patching, completing and deleting per slot exactly as
+        before.
+        """
+        return TicketStaffAssignment.objects.create(
+            ticket=self.ticket, user=staff, assigned_by=actor, **slot
+        )
+
 
 class SlotCreateTests(_SlotFixture):
     def test_create_two_slots_same_ticket_different_windows(self):
@@ -340,10 +355,19 @@ class SlotCompletionTests(_SlotFixture):
 
 
 class MultiSlotPerStaffTests(_SlotFixture):
-    """Multi-slot per staff — the SAME staff member may hold several dated
-    slots on one ticket (transcript: Ahmet 09:00-11:00 AND Ahmet
-    15:00-17:00). Each slot is its own row keyed by id; PATCH / DELETE are
-    addressed by the slot id and only ever touch that one row."""
+    """Several rows for the SAME staff member on one ticket — how they
+    BEHAVE, now that they can no longer be CREATED through the API.
+
+    Sprint 14E made these rows via `POST /staff-assignments/` (Ahmet
+    09:00-11:00 AND Ahmet 15:00-17:00). W26 restored ONE PERSON, ONE SLOT
+    at the validation layer, so that POST is now refused
+    (`staff_already_assigned`, pinned in
+    `test_w26_one_person_one_slot.py`). The rows themselves were NOT
+    migrated away — the DB constraint stays dropped and live tickets
+    still hold them — so every per-slot behaviour these tests exist for
+    must keep working. They now seed the second row at the ORM layer,
+    which is exactly the shape a pre-W26 ticket carries.
+    """
 
     def test_same_staff_two_slots_two_rows(self):
         r1 = self._add_slot(
@@ -352,28 +376,34 @@ class MultiSlotPerStaffTests(_SlotFixture):
             scheduled_start_at=self.morning,
             scheduled_end_at=self.morning_end,
         )
-        r2 = self._add_slot(
+        self.assertEqual(r1.status_code, 201, r1.data)
+        legacy = self._legacy_slot(
             self.admin, self.ahmet,
             time_window_label="afternoon",
             scheduled_start_at=self.evening,
         )
-        self.assertEqual(r1.status_code, 201, r1.data)
-        self.assertEqual(r2.status_code, 201, r2.data)
-        self.assertNotEqual(r1.data["id"], r2.data["id"])
+        self.assertNotEqual(r1.data["id"], legacy.id)
         self.assertEqual(
             TicketStaffAssignment.objects.filter(
                 ticket=self.ticket, user=self.ahmet
             ).count(),
             2,
         )
+        # Both rows are readable through the list endpoint.
+        listing = self._api(self.admin).get(self._slots_url())
+        self.assertEqual(listing.status_code, 200, listing.data)
+        self.assertEqual(
+            sorted(row["id"] for row in listing.data["results"]),
+            sorted([r1.data["id"], legacy.id]),
+        )
 
     def test_patch_one_slot_leaves_sibling_unchanged(self):
         s1 = self._add_slot(
             self.admin, self.ahmet, time_window_label="morning"
         ).data["id"]
-        s2 = self._add_slot(
+        s2 = self._legacy_slot(
             self.admin, self.ahmet, time_window_label="afternoon"
-        ).data["id"]
+        ).id
         resp = self._api(self.admin).patch(
             self._slot_detail_url(s1),
             {"time_window_label": "EARLY"},
@@ -394,9 +424,9 @@ class MultiSlotPerStaffTests(_SlotFixture):
         s1 = self._add_slot(
             self.admin, self.ahmet, time_window_label="morning"
         ).data["id"]
-        s2 = self._add_slot(
+        s2 = self._legacy_slot(
             self.admin, self.ahmet, time_window_label="afternoon"
-        ).data["id"]
+        ).id
         resp = self._api(self.admin).delete(self._slot_detail_url(s1))
         self.assertEqual(resp.status_code, 204, getattr(resp, "data", None))
         self.assertFalse(TicketStaffAssignment.objects.filter(pk=s1).exists())
@@ -406,9 +436,9 @@ class MultiSlotPerStaffTests(_SlotFixture):
         s1 = self._add_slot(
             self.admin, self.ahmet, time_window_label="morning"
         ).data["id"]
-        s2 = self._add_slot(
+        s2 = self._legacy_slot(
             self.admin, self.ahmet, time_window_label="afternoon"
-        ).data["id"]
+        ).id
         resp = self._api(self.ahmet).patch(
             self._slot_detail_url(s1),
             {
@@ -445,7 +475,7 @@ class MultiSlotPerStaffTests(_SlotFixture):
             time_window_label="morning",
             scheduled_start_at=self.morning,
         )
-        self._add_slot(
+        self._legacy_slot(
             self.admin, self.ahmet,
             time_window_label="afternoon",
             scheduled_start_at=self.evening,
@@ -496,7 +526,9 @@ class MultiSlotPerStaffTests(_SlotFixture):
         # Without dedup the same user.id would repeat once per slot and the
         # frontend would render duplicate React keys.
         self._add_slot(self.admin, self.ahmet, time_window_label="morning")
-        self._add_slot(self.admin, self.ahmet, time_window_label="afternoon")
+        self._legacy_slot(
+            self.admin, self.ahmet, time_window_label="afternoon"
+        )
         detail = self._api(self.admin).get(f"/api/tickets/{self.ticket.id}/")
         self.assertEqual(detail.status_code, 200, detail.data)
         ahmet_entries = [

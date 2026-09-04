@@ -411,10 +411,9 @@ export function CustomerLabelsPage() {
 
   return (
     <div className="page">
-      <CustomerSubPageHeader
+      <CustomerSubPageHeader tab="settings" subTab="labels"
         customerName={customer?.name ?? ""}
         isActive={customer?.is_active ?? true}
-        eyebrow={t("nav.customer_submenu.labels")}
       />
       {!canWrite && (
         <p className="muted small" data-testid="labels-read-only-note">

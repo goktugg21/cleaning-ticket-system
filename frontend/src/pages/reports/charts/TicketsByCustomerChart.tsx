@@ -14,6 +14,8 @@ import { fetchTicketsByCustomer } from "../../../api/reports";
 import type { TicketOrigin } from "../../../api/reports.types";
 import { useReport } from "../../../hooks/useReport";
 import { ExportButtons } from "./ExportButtons";
+import { ChartSkeleton } from "./ChartSkeleton";
+import { BoundedList } from "../../../components/BoundedList";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -78,9 +80,7 @@ export function TicketsByCustomerChart({
       </p>
 
       {loading && (
-        <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-          <div className="loading-bar-fill" />
-        </div>
+        <ChartSkeleton />
       )}
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 12 }}>
@@ -110,6 +110,7 @@ export function TicketsByCustomerChart({
             {t("tickets_by_customer_empty")}
           </div>
         ) : (
+          <BoundedList size="lg" count={chartData.length} ariaLabel={t("tickets_by_customer_title")} testIdPrefix="tickets-by-customer">
           <ResponsiveContainer
             width="100%"
             height={Math.max(160, chartData.length * 36)}
@@ -144,9 +145,10 @@ export function TicketsByCustomerChart({
                   return `${row.customer_name} (${row.building_name}, ${row.company_name})`;
                 }}
               />
-              <Bar dataKey="count" fill="#8b5cf6" />
+              <Bar isAnimationActive={false} dataKey="count" fill="#8b5cf6" />
             </BarChart>
           </ResponsiveContainer>
+          </BoundedList>
         )
       )}
       {!loading && !error && data && (

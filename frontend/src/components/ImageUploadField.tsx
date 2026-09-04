@@ -2,6 +2,12 @@
 // fallback) + Upload/Replace + Remove. The parent owns the current URL
 // and supplies onUpload/onRemove; on success the parent updates its URL
 // (a new ?v= marker) so the Avatar refetches exactly once.
+//
+// P-8R D — the "badge" variant is the same control folded into an
+// avatar: a pencil badge on the avatar opens the file picker, a quiet
+// text link underneath removes the photo. Same inputs, same test ids,
+// same upload and delete paths; only the chrome differs.
+import { Pencil } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -17,6 +23,7 @@ export function ImageUploadField({
   size = 88,
   disabled = false,
   testId = "image-upload",
+  variant = "default",
 }: {
   imageUrl?: string | null;
   name?: string | null;
@@ -26,6 +33,7 @@ export function ImageUploadField({
   size?: number;
   disabled?: boolean;
   testId?: string;
+  variant?: "default" | "badge";
 }) {
   const { t } = useTranslation("common");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -59,19 +67,61 @@ export function ImageUploadField({
     }
   }
 
+  const fileInput = (
+    <input
+      ref={inputRef}
+      type="file"
+      accept="image/jpeg,image/png,image/webp"
+      hidden
+      onChange={handleFile}
+      data-testid={`${testId}-input`}
+    />
+  );
+
+  if (variant === "badge") {
+    return (
+      <div className="image-upload-badge" data-testid={testId}>
+        <span className="image-upload-badge-avatar">
+          <Avatar imageUrl={imageUrl} name={name} size={size} rounded={rounded} />
+          {fileInput}
+          <button
+            type="button"
+            className="image-upload-badge-btn"
+            onClick={() => inputRef.current?.click()}
+            disabled={busy || disabled}
+            aria-label={t("image_upload.change_photo")}
+            title={t("image_upload.change_photo")}
+            data-testid={`${testId}-upload`}
+          >
+            <Pencil size={12} strokeWidth={2.4} aria-hidden="true" />
+          </button>
+        </span>
+        {imageUrl && (
+          <button
+            type="button"
+            className="image-upload-badge-remove"
+            onClick={handleRemove}
+            disabled={busy || disabled}
+            data-testid={`${testId}-remove`}
+          >
+            {t("image_upload.remove_photo")}
+          </button>
+        )}
+        {error && (
+          <div className="alert-error" role="alert" style={{ marginTop: 6 }}>
+            {error}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="image-upload-field" data-testid={testId}>
       <Avatar imageUrl={imageUrl} name={name} size={size} rounded={rounded} />
       <div className="image-upload-body">
         <div className="image-upload-actions">
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            hidden
-            onChange={handleFile}
-            data-testid={`${testId}-input`}
-          />
+          {fileInput}
           <button
             type="button"
             className="btn btn-secondary btn-sm"

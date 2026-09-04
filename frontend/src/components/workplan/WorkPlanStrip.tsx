@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 
 import type { WorkPlanCounts } from "../../api/workPlan";
-import { CHIPS } from "./chips";
+import { CHIPS, STRIP_KEYS } from "./chips";
 import type { ChipKey } from "./chips";
 
 /**
@@ -41,7 +41,7 @@ export function WorkPlanStrip({
   const { t } = useTranslation("staff_slots");
   return (
     <div className="wp-strip" data-testid="agenda-chips">
-      {CHIPS.map((chip) => {
+      {CHIPS.filter((chip) => STRIP_KEYS.includes(chip.key)).map((chip) => {
         const value = counts ? chip.count(counts) : -1;
         const isActive = chip.key === active;
         const warn = chip.warn && value > 0;

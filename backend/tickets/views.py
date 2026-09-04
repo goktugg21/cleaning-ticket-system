@@ -5,6 +5,7 @@ from django.db.models import Count, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import generics, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ErrorDetail, ValidationError
@@ -32,11 +33,16 @@ from notifications.services import (
 
 from .filters import (
     TicketFilter,
+    apply_archived,
     apply_is_extra_work,
     exclude_finished_extra_work,
     parse_is_extra_work,
 )
+from .attachment_visibility import resolve_upload_visibility
+from .schedule_history import compose_schedule_note
 from .models import (
+    TERMINAL_TICKET_STATUSES,
+    AttachmentVisibility,
     Ticket,
     TicketAttachment,
     TicketMessage,
@@ -46,6 +52,7 @@ from .models import (
     TicketStatus,
     TicketStatusHistory,
     TicketType,
+    UploadVisibilitySource,
 )
 from buildings.models import BuildingManagerAssignment
 from .permissions import (
@@ -59,7 +66,9 @@ from .state_machine import TransitionError, apply_transition
 from .serializers import (
     TicketAssignableManagerSerializer,
     TicketAssignSerializer,
+    TicketAttachmentPolicySerializer,
     TicketAttachmentSerializer,
+    TicketAttachmentVisibilitySerializer,
     TicketAutoCompleteFlagSerializer,
     TicketCategorySerializer,
     TicketConvertToExtraWorkSerializer,
@@ -399,7 +408,15 @@ class TicketViewSet(
             context={"request": request, "ticket": ticket},
         )
         serializer.is_valid(raise_exception=True)
-        updated = serializer.save()
+        try:
+            updated = serializer.save()
+        except TransitionError as exc:
+            # P-15 (P-14's S4 finding) — the machine-standard flat
+            # `{"detail", "code"}` body, like every sibling endpoint.
+            return Response(
+                {"detail": str(exc), "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Sprint 180 §1 — the email describes the transition the ACTOR
         # drove, which is no longer always the ticket's final status.
@@ -618,7 +635,7 @@ class TicketViewSet(
         if resolve_extra_work_origin_core(ticket) is not None:
             return Response(
                 {
-                    "detail": "This ticket was spawned from an Extra Work "
+                    "detail": "This ticket was created from an Extra Work "
                     "request and cannot be converted to Extra Work again.",
                     "code": "ticket_already_extra_work_origin",
                 },
@@ -693,19 +710,20 @@ class TicketViewSet(
     def _schedule_history_note(
         self, *, action: str, old_start, new_start, window_label, reason
     ) -> str:
-        """Sprint 9B — compose the TicketStatusHistory annotation-row note
-        summarizing a schedule set / reschedule / clear."""
-        def _fmt(dt):
-            return dt.isoformat() if dt is not None else "—"
+        """Sprint 9B — the TicketStatusHistory annotation-row note for a
+        schedule set / reschedule / clear.
 
-        if action == "clear":
-            return f"Schedule cleared (was {_fmt(old_start)})."
-        parts = [f"Schedule {action}: {_fmt(old_start)} -> {_fmt(new_start)}"]
-        if window_label:
-            parts.append(f"window={window_label}")
-        if reason:
-            parts.append(f"reason={reason}")
-        return "; ".join(parts)
+        W-H — the composition moved to `tickets/schedule_history.py` so
+        the wording lives with the prefix that identifies it, and the
+        serializer can recognise these rows without knowing their prose.
+        """
+        return compose_schedule_note(
+            action=action,
+            old_start=old_start,
+            new_start=new_start,
+            window_label=window_label,
+            reason=reason,
+        )
 
     @action(detail=True, methods=["post", "delete"], url_path="schedule")
     def schedule(self, request, pk=None):
@@ -778,70 +796,27 @@ class TicketViewSet(
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        old_start = ticket.scheduled_start_at
-        is_reschedule = (
-            ticket.schedule_status != TicketScheduleStatus.UNSCHEDULED
-        )
-        reason = (data.get("reschedule_reason") or "").strip()
+        # W-FIX1 B2 — the write lives in `tickets.schedule.set_schedule`,
+        # shared with the transition modal's side door, so both doors
+        # write the same facts and the same history row.
+        from .schedule import ScheduleError, set_schedule
 
-        if is_reschedule and not reason:
+        try:
+            set_schedule(
+                ticket,
+                actor=request.user,
+                scheduled_start_at=data["scheduled_start_at"],
+                scheduled_end_at=data.get("scheduled_end_at"),
+                time_window_label=data.get("time_window_label", ""),
+                reschedule_reason=data.get("reschedule_reason") or "",
+                # W-PLANTRUTH §1a — the door that means "move the job".
+                # P-9 12(e): the serializer defaults it to True.
+                apply_to_slots=bool(data.get("apply_to_slots", True)),
+            )
+        except ScheduleError as exc:
             return Response(
-                {
-                    "detail": "A reschedule reason is required when "
-                    "changing an existing schedule.",
-                    "code": "reschedule_reason_required",
-                },
+                {"detail": exc.detail, "code": exc.code},
                 status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        with transaction.atomic():
-            ticket.scheduled_start_at = data["scheduled_start_at"]
-            ticket.scheduled_end_at = data.get("scheduled_end_at")
-            ticket.time_window_label = data.get("time_window_label", "")
-            if is_reschedule:
-                ticket.schedule_status = TicketScheduleStatus.RESCHEDULED
-                ticket.rescheduled_from = old_start
-                ticket.reschedule_reason = reason
-                history_action = "rescheduled"
-            else:
-                ticket.schedule_status = TicketScheduleStatus.SCHEDULED
-                # First scheduling leaves rescheduled_from /
-                # reschedule_reason empty.
-                ticket.rescheduled_from = None
-                ticket.reschedule_reason = ""
-                history_action = "set"
-
-            # Explicit update_fields EXCLUDES `status` so the SLA
-            # post_save signal sees no status change.
-            ticket.save(
-                update_fields=[
-                    "scheduled_start_at",
-                    "scheduled_end_at",
-                    "time_window_label",
-                    "schedule_status",
-                    "rescheduled_from",
-                    "reschedule_reason",
-                    "updated_at",
-                ]
-            )
-
-            # Sprint 8B annotation-row pattern: old_status == new_status
-            # == ticket.status; is_override=False. This IS the audit
-            # trail for the schedule change (no generic AuditLog row).
-            TicketStatusHistory.objects.create(
-                ticket=ticket,
-                old_status=ticket.status,
-                new_status=ticket.status,
-                changed_by=request.user,
-                note=self._schedule_history_note(
-                    action=history_action,
-                    old_start=old_start,
-                    new_start=ticket.scheduled_start_at,
-                    window_label=ticket.time_window_label,
-                    reason=reason,
-                ),
-                is_override=False,
-                override_reason="",
             )
 
         return Response(
@@ -953,11 +928,107 @@ class TicketViewSet(
             status=status.HTTP_200_OK,
         )
 
+    @action(
+        detail=True,
+        methods=["patch"],
+        url_path="attachment-visibility-policy",
+    )
+    def attachment_visibility_policy(self, request, pk=None):
+        """
+        Sprint 191 §2.5 — set the per-work photo-visibility setting
+        (`Ticket.staff_uploads_customer_visible`).
+
+        OFF (the default) is the decision: a staff upload on this work
+        lands INTERNAL and waits for a provider to promote it. ON is the
+        opt-in for a customer who has asked to see the work as it
+        happens — staff uploads on THIS work are customer-visible the
+        moment they arrive.
+
+        Flipping it changes only what happens NEXT. It does not
+        retro-promote the photos already stored (those still need the
+        per-attachment promote action) and it does not retro-hide the
+        ones already released, because turning a default off cannot
+        un-say what a manager already decided.
+
+        PA / SA only, blocked on a terminal ticket, one explicit AuditLog
+        row on a real change — deliberately the same shape as
+        `auto_complete_flag` above, which is the closest existing
+        per-work switch.
+        """
+        if request.user.role not in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+        ):
+            return Response(
+                {
+                    "detail": "Only a provider admin can change the "
+                    "attachment visibility setting.",
+                    "code": "attachment_visibility_policy_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ticket = self.get_object()
+
+        if ticket.status in _SCHEDULE_TERMINAL_STATUSES:
+            return Response(
+                {
+                    "detail": "This ticket is in a terminal status; the "
+                    "attachment visibility setting cannot be changed.",
+                    "code": "attachment_visibility_policy_not_allowed_terminal",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ser = TicketAttachmentPolicySerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        new_value = ser.validated_data["staff_uploads_customer_visible"]
+        old_value = ticket.staff_uploads_customer_visible
+
+        if new_value != old_value:
+            ticket.staff_uploads_customer_visible = new_value
+            # Explicit update_fields EXCLUDES `status` so the SLA
+            # post_save signal sees no status change (mirrors the
+            # auto-complete-flag / schedule endpoints).
+            ticket.save(
+                update_fields=[
+                    "staff_uploads_customer_visible",
+                    "updated_at",
+                ]
+            )
+            self._audit_ticket_flag(
+                request,
+                ticket,
+                "staff_uploads_customer_visible",
+                old_value,
+                new_value,
+            )
+
+        return Response(
+            TicketDetailSerializer(ticket, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
     def _audit_auto_complete_flag(self, request, ticket, old_value, new_value):
         """Sprint 4 — explicit AuditLog UPDATE row for the flag flip. Ticket
         is NOT signal-audited (audit/signals.py registers only its
         sub-models), so the flip is recorded here, mirroring the
         perform_create / destroy explicit-audit blocks. Best-effort: a
+        failure is logged but never blocks the flip."""
+        self._audit_ticket_flag(
+            request,
+            ticket,
+            "auto_complete_on_subtasks",
+            old_value,
+            new_value,
+        )
+
+    def _audit_ticket_flag(self, request, ticket, field, old_value, new_value):
+        """Sprint 191 §2.5 — the body of `_audit_auto_complete_flag`, with
+        the field name as a parameter so the second per-work switch
+        (`staff_uploads_customer_visible`) writes an identically shaped
+        row instead of a copy of this block. Ticket is NOT signal-audited,
+        so every flag flip on it has to say so here. Best-effort: a
         failure is logged but never blocks the flip."""
         try:
             _scope = audit_context.get_current_actor_scope() or {}
@@ -971,7 +1042,7 @@ class TicketViewSet(
                 target_model="tickets.Ticket",
                 target_id=ticket.id,
                 changes={
-                    "auto_complete_on_subtasks": {
+                    field: {
                         "before": old_value,
                         "after": new_value,
                     }
@@ -983,7 +1054,8 @@ class TicketViewSet(
             )
         except Exception:  # pragma: no cover — audit must not block the flip
             _audit_logger.exception(
-                "audit: failed to record ticket auto_complete flag flip #%s",
+                "audit: failed to record ticket %s flag flip #%s",
+                field,
                 ticket.id,
             )
 
@@ -1094,13 +1166,25 @@ class TicketViewSet(
                 target_id=ticket.id,
                 changes={
                     "category": {
+                        # W13 — the Dutch label and the slug. The label
+                        # is what a reader recognises; the slug is what
+                        # survives the label being renamed, which is the
+                        # whole reason this row records a name at all.
                         "before": (
-                            {"id": old_category.id, "name": old_category.name}
+                            {
+                                "id": old_category.id,
+                                "slug": old_category.slug,
+                                "name": old_category.label_nl,
+                            }
                             if old_category
                             else None
                         ),
                         "after": (
-                            {"id": new_category.id, "name": new_category.name}
+                            {
+                                "id": new_category.id,
+                                "slug": new_category.slug,
+                                "name": new_category.label_nl,
+                            }
                             if new_category
                             else None
                         ),
@@ -1292,9 +1376,187 @@ class TicketViewSet(
             status=status.HTTP_200_OK,
         )
 
+    def filter_queryset(self, queryset):
+        """W-H §2 — the archive gate, on the LIST and nowhere else.
+
+        DRF resolves a detail route through `filter_queryset` too, so
+        putting this on the FilterSet made an archived ticket 404 on its
+        own page and left it unarchivable. The list is the only place
+        "absent means exclude" belongs: `retrieve`, and every custom
+        action that calls `get_object`, must still reach an archived
+        row.
+
+        `apply_archived` is the same helper `stats` calls, so the chips
+        and the rows are counted from one definition.
+        """
+        queryset = super().filter_queryset(queryset)
+        if self.action != "list":
+            return queryset
+        raw = self.request.query_params.get("archived")
+        return apply_archived(
+            queryset, raw in {"true", "True", "1"}
+        )
+
+    @action(detail=True, methods=["post"], url_path="archive")
+    def archive(self, request, pk=None):
+        """
+        W-H §1 — file finished work away. POST body: {"note": "..."}
+        (optional).
+
+        ONE ACT. The system this closes the gap against carries
+        request / approve / reject columns, but its own reference notes
+        record that no request endpoint exists and that `approveArchive`
+        back-fills the request timestamp with `?? now()` in the same
+        statement — a real row has both stamps equal to the second. The
+        review cycle is an artefact of the approve path, so there is
+        nothing there to copy. What is copied is the INTERACTION: a
+        modal that takes a note before it happens.
+
+        THE SERVER ENFORCES, which is the half that system does not.
+        Two rules, both here and not in the browser:
+          * provider management only, and
+          * the ticket must be in a terminal status. Filing live work
+            away is how work gets lost, so it is refused with the
+            status that refused it.
+        """
+        ticket = self.get_object()
+
+        if not is_provider_management_role(request.user):
+            return Response(
+                {
+                    "detail": "Only provider management can archive a ticket.",
+                    "code": "archive_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if ticket.archived_at is not None:
+            return Response(
+                {
+                    "detail": "This ticket is already archived.",
+                    "code": "already_archived",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if ticket.status not in TERMINAL_TICKET_STATUSES:
+            return Response(
+                {
+                    "detail": (
+                        "Only finished work can be archived. This ticket is "
+                        f"{ticket.get_status_display()}."
+                    ),
+                    "code": "archive_not_finished",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        note = str(request.data.get("note") or "").strip()
+        with transaction.atomic():
+            ticket.archived_at = timezone.now()
+            ticket.archived_by = request.user
+            ticket.archive_note = note
+            # The AuditLog row for these three fields is written by
+            # `audit.signals._on_ticket_archive_post_save_update`, which
+            # is connected to exactly this field set.
+            ticket.save(
+                update_fields=["archived_at", "archived_by", "archive_note"]
+            )
+        return Response(
+            self.get_serializer(ticket).data, status=status.HTTP_200_OK
+        )
+
+    @action(detail=True, methods=["post"], url_path="unarchive")
+    def unarchive(self, request, pk=None):
+        """
+        W-H §1 — bring a ticket back into the working list. POST body:
+        {"reason": "..."} and the reason is REQUIRED.
+
+        Asymmetric on purpose, and it is the one thing the reference
+        system gets right: filing finished work away needs no
+        justification, but pulling something back out of the archive is
+        a decision somebody has to answer for. Its `rejectArchive`
+        requires a reason and appends it to a log; ours puts the reason
+        on the AuditLog row, which is the log this system already has.
+        """
+        ticket = self.get_object()
+
+        if not is_provider_management_role(request.user):
+            return Response(
+                {
+                    "detail": "Only provider management can unarchive a ticket.",
+                    "code": "archive_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if ticket.archived_at is None:
+            return Response(
+                {
+                    "detail": "This ticket is not archived.",
+                    "code": "not_archived",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reason = str(request.data.get("reason") or "").strip()
+        if not reason:
+            return Response(
+                {
+                    "detail": "A reason is required to take a ticket out of the archive.",
+                    "code": "unarchive_reason_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            # The reason rides the AuditLog's own `reason` column — the
+            # same channel every other privileged mutation in this system
+            # uses (Sprint 27F-B2) — rather than a seventh archive column
+            # nobody else reads.
+            audit_context.set_current_reason(reason)
+            ticket.archived_at = None
+            ticket.archived_by = None
+            ticket.archive_note = ""
+            ticket.save(
+                update_fields=["archived_at", "archived_by", "archive_note"]
+            )
+        return Response(
+            self.get_serializer(ticket).data, status=status.HTTP_200_OK
+        )
+
     @action(detail=False, methods=["get"], url_path="stats")
     def stats(self, request):
         scoped = scope_tickets_for(request.user)
+
+        # W-H §2 — the chips count the working list, not the archive.
+        # Same helper the list filter uses, for the reason the two
+        # blocks below already record: a chip counting a different set
+        # from the rows under it is worse than no chip at all. Absent
+        # param means the working list here exactly as it does there.
+        raw_archived = request.query_params.get("archived")
+        scoped = apply_archived(
+            scoped,
+            True if raw_archived in {"true", "True", "1"} else None,
+        )
+
+        # W-H §3 — and the PERIOD, for the same reason. The Tickets page
+        # always sends one (it opens on this month), so without this the
+        # tiles would be permanently blind and every one of them would
+        # render an em dash — the exact defect W8 BUG 2 removed.
+        #
+        # Parsed the same way `TicketFilter.date_from` / `date_to` parse
+        # it: a calendar day compared against the DATE of `created_at`,
+        # inclusive at both ends. An unparseable value is ignored rather
+        # than 400ing a count request that sits beside a list which
+        # would have ignored it too.
+        for param, lookup in (
+            ("date_from", "created_at__date__gte"),
+            ("date_to", "created_at__date__lte"),
+        ):
+            raw = request.query_params.get(param)
+            if not raw:
+                continue
+            parsed = parse_date(raw)
+            if parsed is not None:
+                scoped = scoped.filter(**{lookup: parsed})
 
         # Sprint 180 §2 — the count chips sit directly above the rows
         # they count, so they have to be counting the same thing. When
@@ -1458,6 +1720,52 @@ class TicketViewSet(
 
         return Response(
             TicketAssignableManagerSerializer(managers, many=True).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["get"], url_path="transition-requirements")
+    def transition_requirements(self, request, pk=None):
+        """
+        W13-FIX §1 — WHAT THIS STEP NEEDS, asked before it is taken.
+
+        The workflow modal calls this the moment the operator presses a
+        move, and renders one field per unsatisfied requirement. It
+        returns the SAME `transition_requirements.requirements_for_transition`
+        that `apply_transition` enforces, so the form and the gate can
+        never disagree -- which is the whole reason the rule lives in a
+        module instead of in the page.
+
+        `?to_status=` is required. An unknown status is a 400 rather
+        than an empty list: silently answering "this step needs nothing"
+        for a typo would let the modal wave a bad move through.
+
+        Read-only, and scoped by `get_object` exactly like every other
+        detail action, so it cannot be used to probe tickets the caller
+        may not see.
+        """
+        from .transition_requirements import requirements_for_transition
+
+        ticket = self.get_object()
+        to_status = request.query_params.get("to_status")
+        if not to_status:
+            return Response(
+                {"detail": "to_status is required.", "code": "to_status_required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if to_status not in TicketStatus.values:
+            return Response(
+                {"detail": f"Unknown status '{to_status}'.", "code": "unknown_status"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reqs = requirements_for_transition(ticket, to_status, request.user)
+        return Response(
+            {
+                "from_status": ticket.status,
+                "to_status": to_status,
+                "requirements": [r.as_dict() for r in reqs],
+                "unmet": [r.key for r in reqs if not r.satisfied],
+            },
             status=status.HTTP_200_OK,
         )
 
@@ -1751,6 +2059,14 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
                 qs = qs.exclude(
                     message__message_type=TicketMessageType.STAFF_OPERATIONAL
                 )
+                # Sprint 191 §2.5 — the customer wall. A customer-side
+                # caller sees ONLY what has been released to them: their
+                # own uploads (created CUSTOMER) plus whatever a provider
+                # manager has promoted. `is_staff_role` is the whole
+                # provider side (SA / CA / BM / STAFF), so this branch is
+                # customer-side only and the worker who took the photo
+                # keeps seeing it while it is INTERNAL.
+                qs = qs.filter(visibility=AttachmentVisibility.CUSTOMER)
 
         return qs.order_by("-created_at")
 
@@ -1804,12 +2120,45 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
             )
         return slot
 
+    def _default_visibility(self, ticket, user):
+        """W4-P — the level an upload lands at when the uploader did not
+        choose one, and the rung of the ladder that decided it.
+
+        Sprint 191 §2.5 shipped this as three inline cases. W4-P added
+        two more rungs above the per-work setting (the uploader's
+        per-ticket permission and their standing permission) and moved
+        the whole ladder into `tickets/attachment_visibility.py`, which
+        writes the order out in full:
+
+            per-ticket > standing > per-work setting > default
+
+        This method is now the call site and nothing else. Do not
+        re-implement any rung here — a resolution order with two copies
+        is a resolution order with two answers.
+
+        Provider management can still override at upload time by sending
+        `visibility` (see `TicketAttachmentSerializer.validate_
+        visibility`); STAFF and customer-side cannot, and get the ladder.
+        """
+        return resolve_upload_visibility(ticket, user)
+
     def perform_create(self, serializer):
         ticket = self._get_ticket()
         user = self.request.user
         uploaded_file = serializer.validated_data["file"]
 
         is_hidden = serializer.validated_data.get("is_hidden", False)
+        # W4-P — a value the uploader typed is recorded as such; anything
+        # else runs the ladder and records which rung answered, so the
+        # tile can say WHY it is where it is.
+        chosen = serializer.validated_data.get("visibility")
+        if chosen:
+            visibility = chosen
+            visibility_source = UploadVisibilitySource.UPLOADER_CHOICE
+        else:
+            resolved = self._default_visibility(ticket, user)
+            visibility = resolved.visibility
+            visibility_source = resolved.source
 
         # Sprint 12 — optional per-slot evidence link (pop the write-only
         # input so it is not double-applied via validated_data).
@@ -1828,6 +2177,121 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
             mime_type=getattr(uploaded_file, "content_type", "") or "application/octet-stream",
             file_size=getattr(uploaded_file, "size", 0),
             is_hidden=is_hidden,
+            visibility=visibility,
+            visibility_source=visibility_source,
+        )
+
+
+class TicketAttachmentVisibilityView(generics.GenericAPIView):
+    """
+    Sprint 191 §2.5 — promote ONE attachment across the customer wall,
+    or pull it back.
+
+    `PATCH /api/tickets/<ticket_id>/attachments/<attachment_id>/visibility/`
+    with `{"visibility": "CUSTOMER"}` (or `"INTERNAL"`).
+
+    Provider management only (SUPER_ADMIN / COMPANY_ADMIN /
+    BUILDING_MANAGER). The worker who took the photo cannot publish it,
+    which is the whole decision: a provider decides what the customer
+    sees.
+
+    Tenant scoping is the P0 surface here. The role gate answers 403
+    FIRST (a wrong role learns nothing about which tickets exist), and
+    the ticket is then resolved through `scope_tickets_for(user)`, so a
+    manager of another tenant gets a 404 and cannot promote a photo
+    across a tenant boundary. The attachment is looked up with
+    `ticket=ticket`, so an id from another ticket 404s too.
+
+    The audit row is automatic: `TicketAttachment` is registered in the
+    generic CRUD trio in `audit/signals.py`, whose UPDATE handler diffs
+    only the fields that actually changed — so a promote lands as one
+    AuditLog row reading visibility INTERNAL -> CUSTOMER, with the actor
+    on it (Addendum A §A.3.3: visibility changes are audited).
+
+    It does NOT touch `is_hidden` and it does NOT touch `phase`: this
+    endpoint moves the customer wall and nothing else. Completion
+    evidence is unaffected — the gates count `is_hidden=False` rows.
+    """
+
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def patch(self, request, ticket_id, attachment_id):
+        # Role gate FIRST, before any object lookup, so a wrong role gets
+        # a stable 403 rather than a scope-driven 404 (the shape the
+        # auto-complete-flag / schedule actions already use).
+        if not is_provider_management_role(request.user):
+            return Response(
+                {
+                    "detail": "Only provider management can change an "
+                    "attachment's visibility.",
+                    "code": "attachment_visibility_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ticket = get_object_or_404(Ticket, pk=ticket_id)
+        if not scope_tickets_for(request.user).filter(pk=ticket.pk).exists():
+            raise Http404("Ticket not found.")
+
+        attachment = get_object_or_404(
+            TicketAttachment,
+            pk=attachment_id,
+            ticket=ticket,
+        )
+
+        ser = TicketAttachmentVisibilitySerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        new_visibility = ser.validated_data["visibility"]
+
+        # Releasing a row the OTHER filters would still hide would
+        # produce a lie in the UI: the pill would read "customer
+        # visible" while `is_hidden` / the parent note's tier keeps the
+        # customer from ever seeing it. Refuse instead, and say which
+        # flag is in the way. The two axes stay independent — this is a
+        # consistency check, not one axis deciding the other.
+        if new_visibility == AttachmentVisibility.CUSTOMER:
+            blocked_by_hidden = attachment.is_hidden
+            blocked_by_message = bool(
+                attachment.message_id
+                and (
+                    attachment.message.is_hidden
+                    or attachment.message.message_type
+                    in (
+                        TicketMessageType.INTERNAL_NOTE,
+                        TicketMessageType.STAFF_OPERATIONAL,
+                    )
+                )
+            )
+            if blocked_by_hidden or blocked_by_message:
+                return Response(
+                    {
+                        "detail": (
+                            "This attachment is hidden (moderation flag) "
+                            "and cannot be made customer-visible."
+                            if blocked_by_hidden
+                            else "This attachment belongs to an internal "
+                            "note and cannot be made customer-visible."
+                        ),
+                        "code": "attachment_visibility_conflict",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if attachment.visibility != new_visibility:
+            attachment.visibility = new_visibility
+            # W4-P — a hand change is the one an operator most needs to
+            # tell apart from a rule, so it stamps its own source rather
+            # than leaving the rung that produced the original value.
+            attachment.visibility_source = UploadVisibilitySource.MANUAL
+            attachment.save(
+                update_fields=["visibility", "visibility_source"]
+            )
+
+        return Response(
+            TicketAttachmentSerializer(
+                attachment, context={"request": request, "ticket": ticket}
+            ).data,
+            status=status.HTTP_200_OK,
         )
 
 
@@ -1877,6 +2341,17 @@ class TicketAttachmentDownloadView(generics.GenericAPIView):
                 request, message="Attachment not found in your scope."
             )
         if message_staff_operational and not is_staff_role(request.user):
+            self.permission_denied(
+                request, message="Attachment not found in your scope."
+            )
+        # Sprint 191 §2.5 — the customer wall, mirroring the list
+        # queryset. An INTERNAL row is provider-side only; the download
+        # URL is the second way to reach a file and must refuse the same
+        # rows the list hides, or the wall is decorative.
+        if (
+            attachment.visibility != AttachmentVisibility.CUSTOMER
+            and not is_staff_role(request.user)
+        ):
             self.permission_denied(
                 request, message="Attachment not found in your scope."
             )

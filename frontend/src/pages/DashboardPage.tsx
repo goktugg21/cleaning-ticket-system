@@ -1,60 +1,67 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 // Sprint 180 §3 — `CSSProperties` and `Layers` left with
 // `ExtraWorkOriginPill`; they were only ever used by it.
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw , SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
-import { getMySlots } from "../api/admin";
-import {
-  getExtraWorkStats,
-  listAllExtraWork,
-  listExtraWork,
-} from "../api/extraWork";
-import { getInboxUnreadCount } from "../api/inbox";
-import { listNotifications, notificationHref } from "../api/notifications";
+import { getExtraWorkStats, listAllExtraWork } from "../api/extraWork";
+import { getBillingMonthAtRisk } from "../api/invoices";
+import { getWorkPlan } from "../api/workPlan";
 import type {
   AssignmentCandidate,
   ExtraWorkRequestList,
   ExtraWorkStats,
-  Notification,
   PaginatedResponse,
   TicketList,
   TicketStats,
-  TicketStatsByBuildingResponse,
-  TicketStatsByBuildingRow,
   TicketStatus,
-  WorkCategory,
+  TicketCategory,
 } from "../api/types";
 import {
   bulkAssignTickets,
   bulkConfirmTickets,
   listTicketAssignmentCandidates,
-  listWorkCategories,
+  listTicketCategories,
 } from "../api/tickets";
 import { useAuth } from "../auth/AuthContext";
 import {
   canAccessBilling,
-  canAccessExtraWork,
   isProviderManagementRole,
-  isStaffRole,
 } from "../auth/permissions";
 import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
+import { ClickableRow } from "../components/ClickableRow";
 import { EditModeToggle } from "../components/EditModeToggle";
-import { ExtraWorkOriginPill } from "../components/ExtraWorkOriginPill";
+import { FinancialStrip } from "../components/extra-work/FinancialStrip";
 import { SLABadge } from "../components/sla/SLABadge";
 import { StatusTiles } from "../components/StatusTiles";
+import { PeriodFilter } from "../components/PeriodFilter";
+import { periodParams, periodState, resolvePeriod } from "../lib/period";
+import type { PeriodState } from "../lib/period";
 import { useToast } from "../components/ToastProvider";
 import { useEditMode } from "../lib/useEditMode";
 import { currentMonth, splitOpenInvoiced, sumRows } from "../lib/billing";
 import { ticketStatusLabelKey } from "../lib/enumLabels";
 import {
+  TICKET_ARCHIVE_STATUSES,
   TICKET_LIST_STATUSES,
+  TICKET_TABS,
+  archivedTicketTotal,
+  ticketArchiveStatusParam,
   ticketListStatusParam,
+  ticketTabOf,
+  ticketTabStatuses,
   visibleTicketTotal,
 } from "../lib/ticketStatus";
-import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
+import type { TicketTabKey } from "../lib/ticketStatus";
+import { formatDate, formatDateTime, formatMoney, useLocaleCode } from "../lib/intl";
+import { currentIsoWeek, formatIsoWeek } from "../lib/isoWeek";
 import { StatusBadge } from "../components/StatusBadge";
 
 type SLAFilterValue =
@@ -82,29 +89,192 @@ const AUTO_REFRESH_INTERVAL_MS = 60_000;
 // compiler instead of quietly vanishing from a screen.
 
 /**
- * Sprint 183 §1 — ONE chip, not three segments and a sub-page.
+ * P-10 B3 — EXTRA WORK NEVER APPEARS ON THE TICKETS PAGE.
  *
- * The owner: "there is no need for both a chargeable-work filter on the
- * tickets page AND a chargeable-work sub-page. Just a chip on tickets to
- * show regular tickets only."
- *
- * So the sub-page, its route and its nav entry are gone, and what is
- * left is exactly what he asked for: the list shows everything by
- * default, and one labelled chip narrows it to ordinary tickets. Off is
- * always one click away, which is the house rule — nothing hidden with
- * no way back.
- *
- * `chargeable` survives as a PARSED value with no control that sets it,
- * so a bookmarked `?work=chargeable` still resolves rather than throwing;
- * it renders as "everything", which is the least surprising fallback for
- * a link to a view that no longer exists.
+ * The owner, twice: "Tickets page: no extra work. Ever. It only creates
+ * confusion." P-9 D2 had put every origin on this queue behind an
+ * Origin column and a `?origin=` filter; both are gone again. The list
+ * and its `/tickets/stats/` call pin `is_extra_work=false`; a spawned
+ * ticket is found from Extra work → Approved and on My schedule, and
+ * its deep link (`/tickets/<id>`) keeps working. Recurring visits stay.
+ * The (unrouted) chargeable variant is the same list pinned to the
+ * other half of the partition (`is_extra_work=true`).
  */
-type WorkTypeFilter = "all" | "tickets" | "chargeable";
+/** One tab's count from a stats payload — the same sum the tab shows. */
+function tabCount(source: TicketStats, tab: TicketTabKey): number {
+  return ticketTabStatuses(tab).reduce(
+    (sum, value) => sum + (source.by_status[value] ?? 0),
+    0,
+  );
+}
 
 // (RF-16 removed the dashboard Extra Work status breakdown — the EW
 // status vocabulary now lives with the list on ExtraWorkListPage.)
 
 const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
+
+/**
+ * W9 BUG 1 + BUG 4 — the dashboard had TWO answers to "what needs
+ * doing", and the one with a person's name on it was always zero.
+ *
+ * "Waiting for you" counted `my_managed` — the tickets this person is
+ * the named manager of. W8 chose it over `created_by` and it is the
+ * better predicate, but for the two roles that mostly look at this
+ * screen it is empty by construction: a SUPER_ADMIN and a COMPANY_ADMIN
+ * hand work out, they are not the named manager on it. So all three
+ * chips read 0 for ever, under a heading claiming they were the owner's
+ * work, while the sidebar said B1 Amsterdam had 50 active. "Why are
+ * these 0? What exactly determines these numbers? When do they change?"
+ * — the honest answers were "you are on nothing", "an assignment nobody
+ * makes to you" and "never".
+ *
+ * The block is gone rather than re-predicated, because the dashboard was
+ * already carrying the right answer six inches above it. "Needs
+ * attention" lists the work that will not move until somebody on the
+ * provider side acts, and it is role-correct without a single per-role
+ * branch: every count behind it runs through `scope_tickets_for`, so a
+ * SUPER_ADMIN sees the company's, a COMPANY_ADMIN sees their company's
+ * and a BUILDING_MANAGER sees their buildings'. That IS "waiting for
+ * you", per role, and unlike the chips it is never structurally zero.
+ *
+ * What "waiting for you" means, then, by role and by row:
+ *
+ *   Reported done, needs your check   the cleaner has finished; until
+ *                                     you check it the customer never
+ *                                     sees it and it cannot be invoiced
+ *   Unassigned                        nobody is on it, so nothing at
+ *                                     all happens until you put someone
+ *   Approval overdue                  the customer has gone quiet on
+ *                                     finished work, and chasing them
+ *                                     is the provider's move
+ *
+ * Two blocks became one. Nothing was added.
+ */
+
+/**
+ * W9 BUG 2 — the dashboard row and the page it opens, from ONE table.
+ *
+ * The owner's requirement for a dashboard number, verbatim: clicking it
+ * should make clear why he clicked, what he is looking at, which filter
+ * is on, why these tickets belong there and what to do next. A selected
+ * chip over an empty table answers none of those, and the answer cannot
+ * live on the dashboard because by then he has left it.
+ *
+ * So each queue owns its link AND its destination heading, side by side
+ * in one entry: the row he clicked and the page he lands on say the same
+ * words because they read the same key. `matches` is the same predicate
+ * spelled as a question, so a link and its heading cannot drift — the
+ * defect this file has now produced three times, once per surface that
+ * counted tickets its own way.
+ *
+ * This generalises the review queue, which has had exactly this
+ * treatment since Sprint 158 and was the only queue to get it.
+ */
+/**
+ * The two narrowings the ticket list turns on by ITSELF, switched off.
+ *
+ * Every count behind these queues is over all work in scope: the
+ * unassigned query asks for `status=OPEN&assigned_to__isnull`, and
+ * nothing in it says "ordinary tickets only, and hide finished
+ * chargeable work". The list says both, by default, from an absent
+ * parameter — so a link carrying only the status would land on strictly
+ * fewer rows than the number that was clicked. An absent parameter is a
+ * default, never an opinion, so a queue link states the whole predicate.
+ * This is the same lesson W7 learned on the "My work" links; those links
+ * are gone and the rule outlived them.
+ */
+const QUEUE_WIDE = "finished_extra_work=1";
+
+/** The one place a queue's URL is written. Both the dashboard row and
+ *  the page's own heading resolve through this key. */
+function queueSearch(key: string): string {
+  return TICKET_QUEUES.find((queue) => queue.key === key)?.search ?? "";
+}
+
+interface TicketQueueState {
+  status: string;
+  unassigned: boolean;
+  stalled: boolean;
+}
+
+const TICKET_QUEUES: {
+  key: string;
+  search: string;
+  matches: (state: TicketQueueState) => boolean;
+  /** The queue whose next step is putting somebody on the work. */
+  assigns?: boolean;
+}[] = [
+  {
+    key: "review",
+    search: `status=WAITING_MANAGER_REVIEW&${QUEUE_WIDE}`,
+    matches: (s) =>
+      s.status === "WAITING_MANAGER_REVIEW" && !s.unassigned && !s.stalled,
+  },
+  {
+    key: "unassigned",
+    search: `status=OPEN&unassigned=1&${QUEUE_WIDE}`,
+    matches: (s) => s.status === "OPEN" && s.unassigned,
+    assigns: true,
+  },
+  {
+    key: "approval_overdue",
+    search: `status=WAITING_CUSTOMER_APPROVAL&stalled=1&${QUEUE_WIDE}`,
+    matches: (s) => s.status === "WAITING_CUSTOMER_APPROVAL" && s.stalled,
+  },
+];
+
+/**
+ * The parameters `/tickets/stats/` understands.
+ *
+ * Everything the LIST can send that is not in this set is invisible to
+ * the count endpoint, so a page carrying one of those has tiles that
+ * cannot describe their own rows. `statsAreBlind` below turns that into
+ * an em dash instead of into a confident wrong number — the rule
+ * `StatusTiles` was built around, applied to the four narrowings that
+ * were quietly exempt from it.
+ *
+ * `status` / `status__in` / `page` are deliberately absent: the tiles ARE
+ * the status axis (a tile counts one status, so the request must not
+ * pre-filter by status) and `visibleTicketTotal` already subtracts
+ * exactly the statuses `status__in` hides.
+ */
+const STATS_KNOWN_PARAMS = new Set([
+  "page",
+  "status",
+  "status__in",
+  "customer",
+  "category",
+  "category__isnull",
+  "is_extra_work",
+  "hide_finished_extra_work",
+  // W-H §2/§3 — `/tickets/stats/` learned all three in the same commit
+  // that added them to the list, which is the only way the tiles can go
+  // on counting the rows they sit above. The Tickets page always sends
+  // a period, so leaving these out would have made the tiles blind on
+  // every load rather than in the rare case this set exists for.
+  "archived",
+  "date_from",
+  "date_to",
+]);
+
+/**
+ * W14 §2 — carry a status chip across the working-list / archive toggle
+ * only when the pile being opened actually has that chip.
+ *
+ * Both directions drop something: the tickets page opens on `OPEN`,
+ * which the archive cannot hold (`archive_not_finished`), and the
+ * archive can be sitting on `CONVERTED_TO_EXTRA_WORK`, which the
+ * working list deliberately does not show. Either survivor leaves an
+ * empty list with no chip lit to explain why, so the filter is dropped
+ * to "all" rather than kept as a narrowing nobody can see.
+ */
+function keepStatusFilter(
+  current: TicketStatus | "",
+  axis: readonly TicketStatus[],
+): TicketStatus | "" {
+  if (current === "") return "";
+  return axis.includes(current) ? current : "";
+}
 
 // Sprint 180 §1 — how long a ticket may sit in WAITING_CUSTOMER_APPROVAL
 // before the dashboard calls it overdue. Mirrors
@@ -114,6 +284,21 @@ const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
 // CLOSED, and CLOSED is downstream of the customer's answer — so a
 // silent queue here is lost revenue, not just a stale list.
 const STALLED_APPROVAL_DAYS = 14;
+
+/** P-6 V4 — how many attention rows show before "show all". */
+const ATTENTION_TOP = 5;
+/** P-6 V4 — the urgency order of the attention rows (see the comment at
+ *  the list). Keys not listed sort last. */
+const ATTENTION_URGENCY_ORDER: readonly string[] = [
+  "review",
+  "approval-overdue",
+  "at-risk",
+  "stuck",
+  "awaiting-pricing",
+  "unassigned",
+  "unplanned",
+  "awaiting-customer",
+];
 
 /**
  * Sprint 181 §4 — `historical` is gone from the UI.
@@ -140,6 +325,28 @@ const SLA_FILTER_VALUES: Exclude<SLAFilterValue, "" | "historical">[] = [
 
 function priorityCellClass(priority: string): string {
   return `cell-tag cell-tag-${priority.toLowerCase()}`;
+}
+
+/**
+ * W7 DESIGN 3 — priority as TEXT in the table, not as a fourth pill.
+ *
+ * Every row carried a priority chip, a status chip, a deadline chip and
+ * (on chargeable rows) an origin chip. Four pills across one line is the
+ * "paragraph wearing chips" the owner is describing: the eye reads a
+ * stripe of coloured lozenges and has to decode each one to find out
+ * which of them is the thing it came for.
+ *
+ * A table column has a heading, so the pill was never carrying the
+ * label — only the colour. The colour stays (urgent and high still read
+ * red and amber at a glance); the lozenge goes. NORMAL, which is most
+ * rows, drops to muted text, because "this one is ordinary" does not
+ * deserve to be shouted on every line.
+ *
+ * The phone card keeps the pill: there is no column heading on a card,
+ * so the surface is what says "this is the priority".
+ */
+function priorityTextClass(priority: string): string {
+  return `cell-prio cell-prio-${priority.toLowerCase()}`;
 }
 
 // Sprint 182 §2 — `statusCellClass` is gone with the two cells that
@@ -210,10 +417,39 @@ export function DashboardPage({
   const isChargeableWork = variant === "chargeable-work";
   const isTicketsPage = variant === "tickets-page" || isChargeableWork;
   const navigate = useNavigate();
+  // The ROUTER's location, not the global one: this component is mounted
+  // on two different chargeable routes and the back link has to name the
+  // one the reader is actually on.
+  const routeLocation = useLocation();
   const { me } = useAuth();
   const { push } = useToast();
   const { t } = useTranslation(["dashboard", "common"]);
+  const locale = useLocaleCode();
   const userRole = me?.role ?? null;
+
+  /* W17 §1 — A CHARGEABLE ROW OPENS THE TICKET, for every role.
+   *
+   * W15 sent chargeable clicks to the extra work because the ticket was
+   * "the half of the job WITHOUT the money". That premise is gone: an
+   * EW-origin ticket now carries the Extra Work card group (money,
+   * actual hours, billing month — TicketDetailPage, W17 §2), so the
+   * ticket is the ONE page for the job and every list row opens it —
+   * this one exactly like the ordinary ticket list.
+   *
+   * The W15 STAFF exception dissolves with the redirect: STAFF land on
+   * the ticket like everyone else, and the ticket page never fetches
+   * the EW for them (`scope_extra_work_for` returns `.none()` — the
+   * card group's mount is gated on the same `canAccessExtraWork`
+   * predicate the nav uses). */
+  /* The route this page is mounted on travels with the navigation —
+   * `/tickets/chargeable` and `/admin/customers/<id>/chargeable` both
+   * land on this component, so the ticket page's back link can name the
+   * list the reader actually came from instead of guessing. Absent for
+   * every non-chargeable row, which leaves that link exactly as it was. */
+  const chargeableBackState = isChargeableWork
+    ? { chargeableFrom: `${routeLocation.pathname}${routeLocation.search}` }
+    : undefined;
+
   // Sprint 182 §2 — ONE word per status, from the source every other
   // screen reads.
   //
@@ -242,9 +478,8 @@ export function DashboardPage({
   const [loading, setLoading] = useState(false);
 
   const [stats, setStats] = useState<TicketStats | null>(null);
-  const [byBuilding, setByBuilding] = useState<TicketStatsByBuildingRow[] | null>(
-    null,
-  );
+  // P-9 D1 — the same counts with the period lifted (`loadStatsAllTime`).
+  const [statsAllTime, setStatsAllTime] = useState<TicketStats | null>(null);
   const [extraWorkStats, setExtraWorkStats] = useState<ExtraWorkStats | null>(
     null,
   );
@@ -278,7 +513,7 @@ export function DashboardPage({
   // decides the list params, the stats params and the "filters are
   // active" test, so the three cannot disagree.
   const [categoryFilter, setCategoryFilter] = useState<number | "" | "none">("");
-  const [workCategories, setWorkCategories] = useState<WorkCategory[]>([]);
+  const [categories, setCategories] = useState<TicketCategory[]>([]);
 
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">(() => {
     const raw = new URLSearchParams(window.location.search).get("status");
@@ -286,29 +521,28 @@ export function DashboardPage({
     if (raw && (TICKET_LIST_STATUSES as readonly string[]).includes(raw)) {
       return raw as TicketStatus;
     }
-    return variant === "tickets-page" ? "OPEN" : "";
+    return "";
   });
-  /**
-   * Sprint 183 §1 — `?work=tickets`, URL-backed so the view survives a
-   * refresh and can be linked to. `?work=chargeable` from an old
-   * bookmark parses to "all": the view it named no longer exists, and
-   * showing everything is friendlier than showing nothing.
-   */
-  const [workTypeFilter, setWorkTypeFilter] = useState<WorkTypeFilter>(() => {
-    // The Chargeable work sub-page IS this page pinned to chargeable
-    // work, so the route decides the filter and the chip below never
-    // offers "chargeable" as a third state -- that redundancy is the
-    // thing the owner asked to remove.
-    if (variant === "chargeable-work") return "chargeable";
-    const raw = new URLSearchParams(window.location.search).get("work");
-    if (raw === "all" || raw === "tickets") return raw;
-    // The Tickets page is the ORDINARY tickets page. "Tickets only" was
-    // a confusing name for a chip on a page where everything is already
-    // a ticket -- and chargeable work has its own page, so showing it in
-    // both was the duplication the owner objected to. Default: ordinary
-    // tickets. The chip ADDS chargeable work back for the rare view of
-    // everything at once.
-    return variant === "tickets-page" ? "tickets" : "all";
+  /** FE-6 (§D.7) — which of the four primary tabs is open. "" is
+   *  "everything on the working list". The Tickets page opens on Open
+   *  (Sprint 158 §2's rule, now a tab); a `?status=` deep link lands on
+   *  the tab that status lives on with the precise filter set; `?tab=`
+   *  opens a tab outright. */
+  const [statusTab, setStatusTab] = useState<TicketTabKey | "">(() => {
+    const params = new URLSearchParams(window.location.search);
+    const rawStatus = params.get("status");
+    if (rawStatus === "ALL") return "";
+    if (
+      rawStatus &&
+      (TICKET_LIST_STATUSES as readonly string[]).includes(rawStatus)
+    ) {
+      return ticketTabOf(rawStatus as TicketStatus) ?? "";
+    }
+    const rawTab = params.get("tab");
+    if (rawTab && (TICKET_TABS as readonly string[]).includes(rawTab)) {
+      return rawTab as TicketTabKey;
+    }
+    return variant === "tickets-page" ? "open" : "";
   });
   const [unassignedFilter, setUnassignedFilter] = useState(
     () => new URLSearchParams(window.location.search).get("unassigned") === "1",
@@ -330,12 +564,36 @@ export function DashboardPage({
   //
   // A URL opt-out (`?finished_extra_work=1`) exists so a link can point
   // straight at the unhidden list.
+  // P-9 D2 — OFF on the Tickets page. Sprint 180 §2 hid finished
+  // extra-work rows from a list that had no tabs; since FE-6 finished
+  // work of every origin lives on the Done tab, and a finished meerwerk
+  // missing from Done is a row nobody can find. Only the (unrouted)
+  // chargeable variant keeps the old opt-out.
   const [hideFinishedExtraWork, setHideFinishedExtraWork] = useState(
     () =>
+      variant === "chargeable-work" &&
       new URLSearchParams(window.location.search).get(
         "finished_extra_work",
       ) !== "1",
   );
+  /* W-H §3/§4 — THE PERIOD, and THIS MONTH is what the page opens on.
+   *
+   * The owner: "I need to be able to see this month's jobs." The
+   * default matters more than the filter: a Tickets page that opens on
+   * every ticket ever raised is the pile his father was looking at.
+   * This month is what somebody has to act on today; everything older
+   * is one dropdown away and the archive is one toggle away. */
+  const [period, setPeriod] = useState<PeriodState>(() => {
+    // FE-1 — the retired meerwerk sub-page defaulted WIDE; its redirect
+    // carries `?period=all_time` so the landing is not an empty month.
+    // Only that one value is admitted from the URL; the page's own
+    // default stays this month (W-H §3/§4).
+    const raw = new URLSearchParams(window.location.search).get("period");
+    return periodState(raw === "all_time" ? "all_time" : "this_month");
+  });
+  /* W-H §2 — the working list or the archive. Never both: an archive
+   * that still turns up among live work is a flag, not an archive. */
+  const [showArchive, setShowArchive] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
   const [searchInput, setSearchInput] = useState("");
   const [searchActive, setSearchActive] = useState("");
@@ -391,6 +649,55 @@ export function DashboardPage({
     },
     [searchParams, setSearchParams],
   );
+  /**
+   * W7 BUG 2 — "Showing only your items" is a FILTER, so it turns on as
+   * well as off.
+   *
+   * It used to be a fact-chip whose only control was a `<Link to="/tickets">`.
+   * That is a one-way door twice over: nothing on the page could switch it
+   * back on, and because the link threw the whole query string away it also
+   * silently dropped whatever else was set — the type narrowing, the
+   * deadline filter, the page. Now it is URL-backed state with a labelled
+   * control in the filter bar, and toggling it rewrites one parameter and
+   * leaves the rest alone.
+   */
+  const mineOnly = searchParams.get("mine") === "1";
+
+  /**
+   * W8 BUG 1 + BUG 3 — WHO IS ON THIS, as one control with three
+   * answers.
+   *
+   * There were two dropdowns here: "Created by: anyone / only me" and
+   * "Assigned to: anyone / nobody yet". The first is the whole of BUG 1
+   * — for a SUPER_ADMIN "the ones I happened to open" is not a slice of
+   * work anybody would ask for, and it was the predicate behind the
+   * dashboard's "My work: 7" beside a page reading 78. The second
+   * answered half of the real question.
+   *
+   * The real question is one question, so it is one control: who is on
+   * this ticket — anyone, me, or nobody yet. "Me" is `my_managed`, the
+   * union of the primary-manager FK and the responsible-manager M:N,
+   * i.e. the tickets this person is actually on the hook for. Nothing on
+   * this page filters by author any more.
+   */
+  const assignedFilter: "" | "me" | "nobody" = unassignedFilter
+    ? "nobody"
+    : mineOnly
+      ? "me"
+      : "";
+  const setAssignedFilter = useCallback(
+    (value: "" | "me" | "nobody") => {
+      setPage(1);
+      setSelectedIds(new Set<number>());
+      setUnassignedFilter(value === "nobody");
+      const nextSearch = new URLSearchParams(searchParams);
+      if (value === "me") nextSearch.set("mine", "1");
+      else nextSearch.delete("mine");
+      setSearchParams(nextSearch, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
   const [adminRequiredBanner, setAdminRequiredBanner] = useState(false);
 
   useEffect(() => {
@@ -404,15 +711,36 @@ export function DashboardPage({
 
   const pageCount = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
-  // Sprint 185 E §1 — the catalog behind the filter above. Loaded once
-  // on the tickets page; non-fatal, and the filter is simply not
-  // rendered when the company has no categories yet.
+  // W13 — the catalog behind the filter above. Loaded once on the
+  // tickets page; non-fatal, and the filter is simply not rendered when
+  // the company has no categories yet.
+  //
+  // Deliberately UNFILTERED: an archived category still has last
+  // month's meldingen on it, and a filter that could not ask for them
+  // would make those rows unfindable. The create forms narrow instead
+  // (`is_active` + `available_at_intake`), which is the opposite job.
+  //
+  // W13-FIX §3 — the seven categories are seeded PER COMPANY, so an
+  // unfiltered read returns seven per tenant. An operator who belongs to
+  // exactly one company can only ever file against that company's
+  // seven, so ask for those and the dropdown holds seven rather than
+  // twenty-one.
+  //
+  // A SUPER_ADMIN spanning several companies is the one case where the
+  // list genuinely IS cross-company -- narrowing it would hide other
+  // tenants' meldingen from their own filter. That case keeps every row
+  // and groups them by company below, so the repeated names read as
+  // "Melden, at each of three companies" instead of the same word three
+  // times with no way to tell which is which.
+  const scopeCompanyId =
+    me?.company_ids?.length === 1 ? me.company_ids[0] : undefined;
+
   useEffect(() => {
     if (!isTicketsPage) return;
     let cancelled = false;
-    listWorkCategories()
+    listTicketCategories(scopeCompanyId ? { company: scopeCompanyId } : undefined)
       .then((rows) => {
-        if (!cancelled) setWorkCategories(rows);
+        if (!cancelled) setCategories(rows);
       })
       .catch(() => {
         /* non-fatal: the list still reads without its filter */
@@ -420,7 +748,24 @@ export function DashboardPage({
     return () => {
       cancelled = true;
     };
-  }, [isTicketsPage]);
+  }, [isTicketsPage, scopeCompanyId]);
+
+  /** The dropdown's rows grouped by owning company, in a stable order.
+   *  One group means one tenant, and the render falls back to a flat
+   *  list -- an <optgroup> around the only company on screen would be
+   *  a label nobody needs. */
+  const categoryOptionGroups = useMemo(() => {
+    const byCompany = new Map<string, typeof categories>();
+    for (const row of categories) {
+      const key = row.company_name || String(row.company);
+      const bucket = byCompany.get(key);
+      if (bucket) bucket.push(row);
+      else byCompany.set(key, [row]);
+    }
+    return [...byCompany.entries()]
+      .map(([company, rows]) => ({ company, rows }))
+      .sort((a, b) => a.company.localeCompare(b.company));
+  }, [categories]);
 
   const queryParams = useMemo(() => {
     const params: Record<string, string | number> = { page };
@@ -433,7 +778,17 @@ export function DashboardPage({
     // Server-side via `status__in`, because filtering the current page
     // in the client would leave `count` — and therefore the pager and
     // the "All" tile — describing a different set than the rows.
-    else if (isTicketsPage) params.status__in = ticketListStatusParam();
+    // W14 §2 — and the ROWS follow the same axis the chips do. In the
+    // archive that is the archivable set: sending the working list's
+    // `status__in` would hide an archived CONVERTED_TO_EXTRA_WORK
+    // ticket from the only place it is meant to be findable.
+    else if (isTicketsPage) {
+      params.status__in = showArchive
+        ? ticketArchiveStatusParam()
+        : statusTab
+          ? ticketTabStatuses(statusTab).join(",")
+          : ticketListStatusParam();
+    }
     if (priorityFilter) params.priority = priorityFilter;
     // Sprint 185 E §1 — server-side, so it survives pagination instead
     // of filtering one page while `count` describes another set.
@@ -457,20 +812,32 @@ export function DashboardPage({
     if (isTicketsPage && hideFinishedExtraWork) {
       params.hide_finished_extra_work = "true";
     }
+    /* W-H §2/§3 — both only on the Tickets page. The dashboard widgets
+     * share this fetch helper and count totals; narrowing those to a
+     * month would silently change what every KPI on the landing page
+     * means. */
+    if (isTicketsPage) {
+      if (showArchive) params.archived = "true";
+      Object.assign(params, periodParams(period));
+    }
     // M6.3 — "my work" deep-links. Only applied on the Tickets page
     // (where the clear chip is shown).
     // The fixed customer, when this list is mounted inside one.
     if (customerId !== undefined) params.customer = customerId;
-    // Sprint 183 §1 — the work-type narrowing, server-side
-    // (`TicketFilter.is_extra_work`) so it survives pagination instead
-    // of filtering one page. Sprint 183 §2 sends the SAME parameter to
-    // `/tickets/stats/`, which is what stopped the chips showing dashes.
+    // P-10 B3 — no extra work on the Tickets page, ever. The same
+    // parameter `/tickets/stats/` applies (`apply_is_extra_work`, one
+    // helper for the rows and the counts — Sprint 183 §2's lesson), so
+    // the tabs count the rows under them. The chargeable variant is
+    // the other half of the same partition.
     if (isTicketsPage) {
-      if (workTypeFilter === "chargeable") params.is_extra_work = "true";
-      else if (workTypeFilter === "tickets") params.is_extra_work = "false";
+      params.is_extra_work = isChargeableWork ? "true" : "false";
     }
     if (isTicketsPage) {
-      if (searchParams.get("mine") === "1" && me?.id) params.created_by = me.id;
+      // W8 BUG 1 — "mine" is the work this person is RESPONSIBLE for
+      // (`my_managed` = the primary-manager FK ∪ the responsible-manager
+      // M:N), not the work they happened to create. `created_by` is what
+      // produced the dashboard's 7-beside-78 and nothing asks for it now.
+      if (mineOnly) params.my_managed = "true";
       const typeParam = searchParams.get("type");
       if (typeParam) params.type = typeParam;
       const exclTypeParam = searchParams.get("exclude_type");
@@ -481,6 +848,7 @@ export function DashboardPage({
     customerId,
     page,
     statusFilter,
+    statusTab,
     priorityFilter,
     categoryFilter,
     searchActive,
@@ -488,11 +856,133 @@ export function DashboardPage({
     unassignedFilter,
     stalledApprovalFilter,
     hideFinishedExtraWork,
+    period,
+    showArchive,
     searchParams,
-    me,
+    mineOnly,
     isTicketsPage,
-    workTypeFilter,
+    isChargeableWork,
   ]);
+
+  /* P-11 A5 — search searches the tab you are in (`status__in` above
+   * narrows it); what matches in OTHER tabs is ONE extra ask with the
+   * complement statuses and the same filters, rendered as one line
+   * under the results. Keyed so a stale answer for a different needle
+   * or tab is never shown — no state is cleared synchronously in an
+   * effect, it simply stops matching. */
+  const elsewhereAsk = useMemo(() => {
+    if (!isTicketsPage || showArchive || isChargeableWork || !statusTab) {
+      return null;
+    }
+    const needle = searchActive.trim();
+    if (!needle) return null;
+    const tabStatuses = new Set(ticketTabStatuses(statusTab));
+    const others = TICKET_LIST_STATUSES.filter((s) => !tabStatuses.has(s));
+    if (others.length === 0) return null;
+    const params = { ...queryParams, page: 1, status__in: others.join(",") };
+    return { params, key: JSON.stringify(params) };
+  }, [isTicketsPage, showArchive, isChargeableWork, statusTab, searchActive, queryParams]);
+  const [elsewhereTickets, setElsewhereTickets] = useState<{
+    key: string;
+    count: number;
+    rows: TicketList[];
+  } | null>(null);
+  const [elsewhereOpen, setElsewhereOpen] = useState(false);
+  useEffect(() => {
+    if (!elsewhereAsk) return;
+    let cancelled = false;
+    api
+      .get<PaginatedResponse<TicketList>>("/tickets/", { params: elsewhereAsk.params })
+      .then((response) => {
+        if (cancelled) return;
+        setElsewhereTickets({
+          key: elsewhereAsk.key,
+          count: response.data.count,
+          rows: response.data.results,
+        });
+      })
+      // The line simply does not render; the in-tab list already said
+      // what the search found here.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [elsewhereAsk]);
+  const elsewhereShown =
+    elsewhereAsk !== null &&
+    elsewhereTickets !== null &&
+    elsewhereTickets.key === elsewhereAsk.key &&
+    elsewhereTickets.count > 0
+      ? elsewhereTickets
+      : null;
+
+  /**
+   * W7 BUG 1 — the SAME object, split in two: what the count endpoint can
+   * be told, and what it cannot.
+   *
+   * Derived from `queryParams` rather than re-listed beside it, so a
+   * filter added to the list in future is blind by default. That is the
+   * safe direction to fail: a new filter that nobody remembered to teach
+   * the stats endpoint makes the tiles say "I cannot know", which is
+   * true, instead of leaving them confidently counting the whole company.
+   */
+  // A STRING, not an object: `useCallback` compares dependencies with
+  // Object.is, so a freshly-built object would give `loadStats` a new
+  // identity on every page turn and fire a redundant count request each
+  // time. Sorted, so key order cannot manufacture a change either.
+  const statsParamsKey = useMemo(() => {
+    const known: Record<string, string> = {};
+    for (const [key, value] of Object.entries(queryParams)) {
+      // `status` is the tile axis and `page` is not a narrowing at all.
+      if (key === "page" || key === "status") continue;
+      if (STATS_KNOWN_PARAMS.has(key)) known[key] = String(value);
+    }
+    return JSON.stringify(
+      Object.fromEntries(Object.entries(known).sort(([a], [b]) => (a < b ? -1 : 1))),
+    );
+  }, [queryParams]);
+
+  const statsAreBlind = useMemo(
+    () =>
+      Object.keys(queryParams).some(
+        (key) => key !== "page" && !STATS_KNOWN_PARAMS.has(key),
+      ),
+    [queryParams],
+  );
+
+  /**
+   * P-9 D1 — THE SAME COUNTS WITH THE PERIOD LIFTED.
+   *
+   * The page opens on this month (W-H §3/§4, an owner ruling), so on
+   * the 1st of a month the Open tab is empty by construction while 30
+   * tickets sit one dropdown away. An empty tab therefore says what the
+   * period is hiding, in ALL-TIME numbers — a second `/tickets/stats/`
+   * call, because `stats` is period-narrowed (the endpoint takes
+   * `date_from` / `date_to`; measured on crmtest: 185 without, 3 with
+   * September). P-10 C4 — asked for only when the narrowed list came
+   * back EMPTY (`loadTickets` triggers it), never on every load;
+   * without a period `stats` already is the all-time answer.
+   */
+  const periodNarrows =
+    isTicketsPage && Object.keys(periodParams(period)).length > 0;
+  const statsAllTimeParamsKey = useMemo(() => {
+    const parsed = JSON.parse(statsParamsKey) as Record<string, string>;
+    delete parsed.date_from;
+    delete parsed.date_to;
+    return JSON.stringify(parsed);
+  }, [statsParamsKey]);
+  const loadStatsAllTime = useCallback(async () => {
+    if (!periodNarrows) return;
+    try {
+      const parsed = JSON.parse(statsAllTimeParamsKey) as Record<string, string>;
+      const response = await api.get<TicketStats>("/tickets/stats/", {
+        params: Object.keys(parsed).length ? parsed : undefined,
+      });
+      setStatsAllTime(response.data);
+    } catch {
+      // The empty state then names no numbers; the tabs still count.
+    }
+  }, [statsAllTimeParamsKey, periodNarrows]);
 
   const loadTickets = useCallback(async () => {
     // RF-16 — the ticket LIST only renders on the Tickets page now.
@@ -509,12 +999,15 @@ export function DashboardPage({
       setNext(response.data.next);
       setPrevious(response.data.previous);
       setLastUpdated(new Date());
+      // P-10 C4 — the number behind "Earlier: N open" is fetched only
+      // when this period's list came back empty.
+      if (response.data.results.length === 0) void loadStatsAllTime();
     } catch (err) {
       setError(getApiError(err));
     } finally {
       setLoading(false);
     }
-  }, [queryParams, isTicketsPage]);
+  }, [queryParams, isTicketsPage, loadStatsAllTime]);
 
   useEffect(() => {
     loadTickets();
@@ -684,110 +1177,25 @@ export function DashboardPage({
 
   const loadStats = useCallback(async () => {
     try {
-      // Sprint 180 §2 — the status tiles sit directly above the rows
-      // they count, so they must be counting the same rows. When the
-      // Tickets page is hiding finished Extra Work, the stats request
-      // carries the same flag and the endpoint applies the same
-      // exclusion. The DASHBOARD is a summary of everything and sends
-      // nothing, so its KPI strip is unchanged.
-      // Sprint 183 integration — the chips also carry the WORK-TYPE
-      // narrowing now. Sprint 183 gave `/tickets/stats/` the same
-      // `is_extra_work` the list takes, but the page never sent it and
-      // the tiles kept the old "we cannot know" em-dash fallback. Once
-      // the Tickets page started defaulting to ordinary tickets, that
-      // fallback fired on the DEFAULT view and every chip read as a dash.
-      const statsParams: Record<string, string> = {};
-      if (isTicketsPage && hideFinishedExtraWork)
-        statsParams.hide_finished_extra_work = "true";
-      if (isTicketsPage && workTypeFilter === "chargeable")
-        statsParams.is_extra_work = "true";
-      else if (isTicketsPage && workTypeFilter === "tickets")
-        statsParams.is_extra_work = "false";
-      // The customer's own page pins the list to that customer; the
-      // chips must be pinned to the same thing or they describe the
-      // whole company while sitting above one customer's rows.
-      if (customerId !== undefined) statsParams.customer = String(customerId);
-      // Sprint 187 §5 — the chips count the rows they sit above. Sprint
-      // 185 taught the category dropdown to the LIST only, so choosing a
-      // category narrowed the rows and left the chips describing the
-      // whole company: the same defect as the work-type dash directly
-      // above and the customer's "25" beside it, one filter later.
-      if (isTicketsPage) {
-        if (categoryFilter === "none") statsParams.category__isnull = "true";
-        else if (categoryFilter !== "")
-          statsParams.category = String(categoryFilter);
-      }
+      // W7 BUG 1 — the tiles are asked for exactly the set the rows are
+      // asked for, minus the status axis they themselves select on.
+      //
+      // The four hand-rolled `if` blocks that used to live here
+      // (hide-finished, work type, customer, category) were four separate
+      // memories of what the list sends, added one sprint at a time, each
+      // one after the tiles had already been caught describing a
+      // different set than the rows beneath them. `statsParams` is
+      // derived from the list's own `queryParams`, so there is nothing
+      // left to remember.
+      const parsed = JSON.parse(statsParamsKey) as Record<string, string>;
       const response = await api.get<TicketStats>("/tickets/stats/", {
-        params: Object.keys(statsParams).length ? statsParams : undefined,
+        params: Object.keys(parsed).length ? parsed : undefined,
       });
       setStats(response.data);
     } catch {
       // KPI cards fall back to "—" placeholders if the endpoint fails.
     }
-  }, [
-    isTicketsPage,
-    hideFinishedExtraWork,
-    workTypeFilter,
-    customerId,
-    categoryFilter,
-  ]);
-
-  // M6.3 — "my work" summary counts (provider-management only). Each
-  // count is the PaginatedResponse.count for a created_by=me query;
-  // page_size:1 keeps the payload minimal (count is the full total).
-  const [myCounts, setMyCounts] = useState<{
-    tickets: number | null;
-    meldingen: number | null;
-    extraWork: number | null;
-    quoteRequests: number | null;
-  }>({
-    tickets: null,
-    meldingen: null,
-    extraWork: null,
-    quoteRequests: null,
-  });
-
-  const loadMyCounts = useCallback(async () => {
-    const meId = me?.id;
-    if (!meId || !isProviderManagementRole(userRole)) return;
-    try {
-      const [tk, ml, ew, qr] = await Promise.all([
-        api.get<PaginatedResponse<TicketList>>("/tickets/", {
-          params: { created_by: meId, exclude_type: "REPORT", page_size: 1 },
-        }),
-        api.get<PaginatedResponse<TicketList>>("/tickets/", {
-          params: { created_by: meId, type: "REPORT", page_size: 1 },
-        }),
-        listExtraWork({ created_by: meId, page_size: 1 }),
-        listExtraWork({
-          created_by: meId,
-          request_intent: "REQUEST_QUOTE",
-          page_size: 1,
-        }),
-      ]);
-      setMyCounts({
-        tickets: tk.data.count,
-        meldingen: ml.data.count,
-        extraWork: ew.count,
-        quoteRequests: qr.count,
-      });
-    } catch {
-      // Leave "—" placeholders on failure (mirrors loadStats).
-    }
-  }, [me?.id, userRole]);
-
-  const loadStatsByBuilding = useCallback(async () => {
-    // The by-building side panel renders on the Tickets page only.
-    if (!isTicketsPage) return;
-    try {
-      const response = await api.get<TicketStatsByBuildingResponse>(
-        "/tickets/stats/by-building/",
-      );
-      setByBuilding(response.data);
-    } catch {
-      // Card empties out if the endpoint fails.
-    }
-  }, [isTicketsPage]);
+  }, [statsParamsKey]);
 
   const loadExtraWorkStats = useCallback(async () => {
     try {
@@ -801,6 +1209,11 @@ export function DashboardPage({
   // RF-16 (#106) — attention-card data: the manager-review queue, the
   // unassigned-open queue (count + top rows each, via the established
   // count-query pattern) and the recent-activity feed. Dashboard only.
+  /** P-15 — true once the attention probes have ANSWERED (either way).
+   *  Until then the greeting makes no claim and the card is a
+   *  skeleton: "nothing needs you right now" was rendered while the
+   *  API was still bringing back 24 OPEN tickets (S2). */
+  const [attentionSettled, setAttentionSettled] = useState(false);
   const [attnReview, setAttnReview] = useState<{
     count: number;
     rows: TicketList[];
@@ -820,14 +1233,16 @@ export function DashboardPage({
     count: number;
     rows: TicketList[];
   } | null>(null);
-  const [attnActivity, setAttnActivity] = useState<Notification[] | null>(
-    null,
-  );
+  // WP-1 — the three guard counts. Server-computed over the whole
+  // scope (the work-plan counts block and the at-risk endpoint); the
+  // dashboard only repeats them. Null = not loaded, renders "—".
+  const [attnStuck, setAttnStuck] = useState<number | null>(null);
+  const [attnUnplanned, setAttnUnplanned] = useState<number | null>(null);
+  const [attnAtRisk, setAttnAtRisk] = useState<number | null>(null);
 
   // RF-18 (#107) — info-widget data (dashboard variant only). One fetch
   // per widget on mount (+ the shared auto-refresh); role-ineligible
   // widgets never fetch; failures keep the "—" placeholder.
-  const [inboxUnread, setInboxUnread] = useState<number | null>(null);
   const [billingMonthTotals, setBillingMonthTotals] = useState<{
     openTotal: number;
     invoicedTotal: number;
@@ -838,83 +1253,58 @@ export function DashboardPage({
   const [billingRows, setBillingRows] = useState<
     ExtraWorkRequestList[] | null
   >(null);
-  const [todaySlotCount, setTodaySlotCount] = useState<number | null>(null);
   // #109 Part G — most-recent tickets + extra work for the "Laatste
   // tickets / extra werk" panel (fetched in parallel inside the
   // existing attention loader — no new waterfall).
-  const [recentTickets, setRecentTickets] = useState<TicketList[] | null>(
-    null,
-  );
-  const [recentExtraWork, setRecentExtraWork] = useState<
-    ExtraWorkRequestList[] | null
-  >(null);
 
+  // FE-6 — the one widget fetch left: this month's billing rows, for
+  // the KPI tile and the per-building summary. Management only (the
+  // endpoint refuses everyone else); a failure keeps the em dash.
   const loadWidgets = useCallback(async () => {
-    if (isTicketsPage) return;
-    const localDateKey = (iso: string | null): string | null => {
-      if (!iso) return null;
-      const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return null;
-      const pad = (n: number) => String(n).padStart(2, "0");
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    };
-    const [inbox, billing, slots] = await Promise.allSettled([
-      getInboxUnreadCount(),
-      // Sprint 120 — this used to request page_size=500, but DRF's
-      // max_page_size (config/pagination.py) silently clamps that to 200,
-      // so any month with more than 200 matching EW rows was undercounted
-      // with no error. listAllExtraWork pages exhaustively instead.
-      canAccessBilling(userRole)
-        ? listAllExtraWork({ billing_period: currentMonth() })
-        : Promise.resolve(null),
-      isStaffRole(userRole) ? getMySlots() : Promise.resolve(null),
-    ]);
-    if (inbox.status === "fulfilled") setInboxUnread(inbox.value);
-    if (billing.status === "fulfilled" && billing.value !== null) {
-      setBillingMonthTotals(splitOpenInvoiced(billing.value));
-      setBillingRows(billing.value);
-    }
-    if (slots.status === "fulfilled" && slots.value !== null) {
-      const today = localDateKey(new Date().toISOString());
-      setTodaySlotCount(
-        slots.value.filter(
-          (s) => localDateKey(s.scheduled_start_at) === today,
-        ).length,
-      );
+    if (isTicketsPage || !canAccessBilling(userRole)) return;
+    try {
+      // Sprint 120 — pages exhaustively; DRF clamps page_size at 200.
+      const rows = await listAllExtraWork({ billing_period: currentMonth() });
+      setBillingMonthTotals(splitOpenInvoiced(rows));
+      setBillingRows(rows);
+    } catch {
+      /* the tile and the summary keep their placeholders */
     }
   }, [isTicketsPage, userRole]);
 
+  // FE-6 — the attention list's three ticket counts. COUNTS, not rows:
+  // each row of the list is a link to the queue that holds the work,
+  // and the queue page is where the rows are read (page_size 1 keeps
+  // the payload to the count).
   const loadAttention = useCallback(async () => {
     if (isTicketsPage) return;
     try {
-      const [rev, una, stalled, act, recentTk, recentEw] = await Promise.all([
+      // P-10 B3 — each row opens a Tickets-page queue, and that page
+      // never shows extra work; a count that included it would land on
+      // fewer rows than the number that was clicked.
+      const [rev, una, stalled] = await Promise.all([
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
-          params: { status: "WAITING_MANAGER_REVIEW", page_size: 3 },
+          params: {
+            status: "WAITING_MANAGER_REVIEW",
+            is_extra_work: "false",
+            page_size: 1,
+          },
         }),
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
           params: {
             status: "OPEN",
             assigned_to__isnull: "true",
-            page_size: 3,
+            is_extra_work: "false",
+            page_size: 1,
           },
         }),
-        // Sprint 180 §1 — the approval-overdue queue. The backend
-        // filter already narrows to WAITING_CUSTOMER_APPROVAL, so no
-        // status param is needed here.
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
           params: {
             awaiting_customer_approval_days: STALLED_APPROVAL_DAYS,
-            page_size: 3,
+            is_extra_work: "false",
+            page_size: 1,
           },
         }),
-        listNotifications({ page: 1 }),
-        // #109 Part G — most-recent 5 across the caller's scope (the
-        // backend scopes /tickets/ + /extra-work/ already; default
-        // ordering is newest-first). Parallel with the batch above.
-        api.get<PaginatedResponse<TicketList>>("/tickets/", {
-          params: { page_size: 5 },
-        }),
-        listExtraWork({ page_size: 5 }),
       ]);
       setAttnReview({ count: rev.data.count, rows: rev.data.results });
       setAttnUnassigned({ count: una.data.count, rows: una.data.results });
@@ -922,13 +1312,28 @@ export function DashboardPage({
         count: stalled.data.count,
         rows: stalled.data.results,
       });
-      setAttnActivity(act.results.slice(0, 3));
-      setRecentTickets(recentTk.data.results.slice(0, 5));
-      setRecentExtraWork(recentEw.results.slice(0, 5));
     } catch {
-      // Cards keep their "—" placeholders on failure (mirrors loadStats).
+      // Rows keep their "—" placeholders on failure (mirrors loadStats).
     }
   }, [isTicketsPage]);
+
+  // WP-1 — the guard counts behind the three new attention rows. A
+  // separate loader because both fetches are management-gated (the
+  // at-risk endpoint 403s everyone else) and either may fail without
+  // taking the classic rows down; `allSettled` keeps the "—" on
+  // whichever half did not land.
+  const loadGuardCounts = useCallback(async () => {
+    if (isTicketsPage || !isProviderManagementRole(userRole)) return;
+    const [plan, risk] = await Promise.allSettled([
+      getWorkPlan(formatIsoWeek(currentIsoWeek()), true),
+      getBillingMonthAtRisk(),
+    ]);
+    if (plan.status === "fulfilled") {
+      setAttnStuck(plan.value.counts.stuck);
+      setAttnUnplanned(plan.value.counts.undated);
+    }
+    if (risk.status === "fulfilled") setAttnAtRisk(risk.value.total);
+  }, [isTicketsPage, userRole]);
 
   useEffect(() => {
     // Top KPI row needs BOTH ticket and extra-work stats (it is a
@@ -936,17 +1341,19 @@ export function DashboardPage({
     // The by-building loader is Tickets-page-gated; the attention
     // loader is dashboard-gated.
     loadStats();
-    loadStatsByBuilding();
     loadExtraWorkStats();
-    loadMyCounts();
-    loadAttention();
+    // P-15 — the page may not assert "nothing needs you" before these
+    // two have ANSWERED (success or failure): the settled flag is what
+    // lets the greeting and the attention card stop being skeletons.
+    void Promise.allSettled([loadAttention(), loadGuardCounts()]).then(() =>
+      setAttentionSettled(true),
+    );
     loadWidgets();
   }, [
     loadStats,
-    loadStatsByBuilding,
     loadExtraWorkStats,
-    loadMyCounts,
     loadAttention,
+    loadGuardCounts,
     loadWidgets,
   ]);
 
@@ -954,7 +1361,6 @@ export function DashboardPage({
     const handle = window.setInterval(() => {
       loadTickets();
       loadStats();
-      loadStatsByBuilding();
       loadExtraWorkStats();
       loadAttention();
       loadWidgets();
@@ -965,7 +1371,6 @@ export function DashboardPage({
   }, [
     loadTickets,
     loadStats,
-    loadStatsByBuilding,
     loadExtraWorkStats,
     loadAttention,
     loadWidgets,
@@ -995,23 +1400,102 @@ export function DashboardPage({
     setSearchActive(searchInput);
   }
 
+  /**
+   * W7 DESIGN 3 — one control that puts the list back to showing
+   * everything.
+   *
+   * It used to reset five of the eight narrowings and leave the other
+   * three — "only mine", the approval-overdue preset and the
+   * finished-extra-work hide — still on, with the list still short and
+   * the button gone, which is the worst possible state to leave a
+   * non-developer in. Everything that narrows this list is cleared here,
+   * and the summary line above the table says in words what is still on
+   * until you press it.
+   */
   function clearFilters() {
     setPage(1);
     setStatusFilter("");
+    setStatusTab("");
     setCategoryFilter("");
     setPriorityFilter("");
     setSearchInput("");
     setSearchActive("");
-    setSlaFilter("");
     setUnassignedFilter(false);
+    setStalledApprovalFilter(false);
+    setHideFinishedExtraWork(false);
     // Sprint 7 — clearing filters also leaves the bulk-confirm queue.
     setSelectedIds(new Set<number>());
+
+    // ONE write to the query string.
+    //
+    // `setSlaFilter` and `setMineOnly` each build their next URL from
+    // the same `searchParams` snapshot, so calling both from here would
+    // apply the second and silently discard the first — the reader
+    // would press "Show everything" and watch one filter survive.
+    //
+    // The narrowings that are ON BY DEFAULT have to be written
+    // POSITIVELY rather than deleted: an absent `status` means OPEN, and
+    // an absent `finished_extra_work` means finished work is hidden
+    // (the chargeable variant). Deleting them
+    // would put the page back exactly where it started, and a refresh
+    // would undo the click. This is the same lesson as the "My work"
+    // link at the top of this file: a URL has to state the whole
+    // predicate, because an absent parameter is a default and not an
+    // opinion.
+    const next = new URLSearchParams(searchParams);
+    // P-10 B3 — `work` is a retired parameter (an old bookmark's
+    // origin narrowing); it is dropped with the rest.
+    for (const key of ["sla", "mine", "stalled", "unassigned", "type", "exclude_type", "work"]) {
+      next.delete(key);
+    }
+    next.set("status", "ALL");
+    next.set("finished_extra_work", "1");
+    setSearchParams(next, { replace: true });
   }
 
+  // Narrowings the reader chose. `hideFinishedExtraWork` and the
+  // work-type default are ON when the page opens, so they are described
+  // in the summary line but do not by themselves claim the list is
+  // filtered — otherwise "Show everything" would be lit on arrival and
+  // pressing it would change what the page means by default.
   const hasActiveFilters = Boolean(
     statusFilter || priorityFilter || categoryFilter !== "" ||
       searchActive || slaFilter ||
-      unassignedFilter,
+      unassignedFilter || stalledApprovalFilter || mineOnly,
+  );
+
+  // W8 BUG 3 — the narrowing SENTENCES are gone with the line that
+  // rendered them; every control that sets one now says what it does.
+
+
+  /**
+   * W7 DESIGN 7 — the manager-review queue explains itself on arrival.
+   *
+   * "Manager review queue" names the queue after the role that owns it,
+   * which tells the reader nothing about what is in it or why it is
+   * costing them anything. What is in it: work a cleaner has reported
+   * finished. Why it matters: until somebody checks it the customer
+   * never sees it and it cannot be invoiced.
+   */
+  /**
+   * W9 BUG 2 — which named queue this page is currently showing, if any.
+   *
+   * Read from the page's own filter state rather than from the URL, so a
+   * queue reached by working the filters by hand explains itself exactly
+   * as one reached from the dashboard. The heading, the reason and the
+   * empty message all key off this, which is why a link and its
+   * destination cannot say different things.
+   */
+  const activeQueue = useMemo(
+    () =>
+      TICKET_QUEUES.find((queue) =>
+        queue.matches({
+          status: statusFilter,
+          unassigned: unassignedFilter,
+          stalled: stalledApprovalFilter,
+        }),
+      ) ?? null,
+    [statusFilter, unassignedFilter, stalledApprovalFilter],
   );
 
   // Sprint 28 Batch 13 (rework) — operations-level KPI summary. Derived
@@ -1077,47 +1561,206 @@ export function DashboardPage({
   // #108 Option A — count badge for the "Aandacht nodig" rows. Rows the
   // provider must act on get the warning tint as soon as the count is
   // positive; rows waiting on someone else stay neutral.
+  const [attentionExpanded, setAttentionExpanded] = useState(false);
   const attnBadge = (value: number | null, actionable: boolean): string =>
     actionable && value !== null && value > 0
       ? "attn-count attn-count-warn"
       : "attn-count";
 
-  const focusItems = useMemo(
-    () =>
-      tickets
-        .filter((t) => t.priority === "URGENT" || t.priority === "HIGH")
-        .filter(
-          (t) =>
-            t.status !== "CLOSED" &&
-            t.status !== "APPROVED" &&
-            t.status !== "REJECTED",
-        )
-        .slice(0, 4),
-    [tickets],
-  );
+  // P-2 §2 — the attention rows, hoisted so the greeting and the list
+  // count the same thing. A row with nothing to say does not render
+  // (no "—", no eight rows of mostly nothing); with every row silent
+  // the list says so in one sentence.
+  const allAttentionRows = [
+    {
+      key: "review",
+      to: `/tickets?${queueSearch("review")}`,
+      label: t("queue.review.title"),
+      value: attnReview?.count ?? null,
+      actionable: true,
+    },
+    {
+      key: "unassigned",
+      to: `/tickets?${queueSearch("unassigned")}`,
+      label: t("queue.unassigned.title"),
+      value: attnUnassigned?.count ?? null,
+      actionable: true,
+    },
+    {
+      key: "approval-overdue",
+      to: `/tickets?${queueSearch("approval_overdue")}`,
+      label: t("queue.approval_overdue.title", {
+        days: STALLED_APPROVAL_DAYS,
+      }),
+      value: attnStalledApproval?.count ?? null,
+      actionable: true,
+    },
+    {
+      key: "awaiting-pricing",
+      to: "/extra-work?status=UNDER_REVIEW",
+      label: t("attention.awaiting_pricing_title"),
+      value: extraWorkStats?.awaiting_pricing ?? null,
+      actionable: true,
+    },
+    {
+      key: "awaiting-customer",
+      to: "/extra-work?status=PRICING_PROPOSED",
+      label: t("attention.awaiting_customer_title"),
+      value:
+        extraWorkStats?.awaiting_customer_approval ?? null,
+      actionable: false,
+    },
+    {
+      key: "stuck",
+      to: "/agenda",
+      label: t("attention.stuck_title"),
+      value: attnStuck,
+      actionable: true,
+    },
+    {
+      key: "unplanned",
+      to: "/agenda",
+      label: t("attention.unplanned_title"),
+      value: attnUnplanned,
+      actionable: true,
+    },
+    {
+      key: "at-risk",
+      to: "/invoices",
+      label: t("attention.at_risk_title"),
+      value: attnAtRisk,
+      actionable: true,
+    },
+  ] as const
+  // P-6 V4 — the five most urgent rows first, the rest behind "show all".
+  // Urgency is the ORDER of consequence, not the size of the count:
+  //   1. review            finished work waits on YOUR check; the customer
+  //                        and the invoice wait behind it
+  //   2. approval-overdue  the customer has gone silent on finished work;
+  //                        money that will never bill unless chased
+  //   3. at-risk           work that will miss this billing month
+  //   4. stuck             a promise broken — planned, never done
+  //   5. awaiting-pricing  the customer waits on your price
+  //   6. unassigned        nobody is on it yet
+  //   7. unplanned         no day chosen yet
+  //   8. awaiting-customer the customer's decision, not yours
+  const attentionRowsAll = allAttentionRows
+    .filter((row) => (row.value ?? 0) > 0)
+    .slice()
+    .sort(
+      (a, b) =>
+        ATTENTION_URGENCY_ORDER.indexOf(a.key) -
+        ATTENTION_URGENCY_ORDER.indexOf(b.key),
+    );
+  const attentionRows = attentionExpanded
+    ? attentionRowsAll
+    : attentionRowsAll.slice(0, ATTENTION_TOP);
+  const needsYouCount = allAttentionRows
+    .filter((row) => row.actionable)
+    .reduce((sum, row) => sum + (row.value ?? 0), 0);
+  // P-2 §3 — what the Filter fold is narrowing by, as chips on its
+  // summary. Labels, not values: the value is one click away inside.
+  const activeFilterLabels = [
+    categoryFilter !== "" ? t("common:ticket_categories.field_label") : null,
+    statusFilter ? t("common:status") : null,
+    priorityFilter ? t("common:priority") : null,
+    slaFilter ? t("common:sla") : null,
+    assignedFilter ? t("filters.assigned") : null,
+    showArchive ? t("archive.show") : null,
+  ].filter((label): label is string => Boolean(label));
+  /* P-9 D1/D2 — WHAT AN EMPTY TAB SAYS. Only the working list's tabs
+   * with nothing else narrowing them: a queue, a chosen filter and the
+   * archive keep their own words. `allTimeStats` is the period-free
+   * count (`stats` itself when no period narrows). */
+  const tabsEmptyEligible =
+    isTicketsPage && !showArchive && !activeQueue && !hasActiveFilters && !statsAreBlind;
+  const allTimeStats = periodNarrows ? statsAllTime : stats;
+  const tabHere: TicketTabKey | null = statusTab || null;
+  const tabHereAllTime = allTimeStats
+    ? tabHere
+      ? tabCount(allTimeStats, tabHere)
+      : visibleTicketTotal(allTimeStats)
+    : 0;
+  const tabParts = (tabs: readonly TicketTabKey[]): string =>
+    allTimeStats
+      ? tabs
+          .map((tab) => ({ tab, n: tabCount(allTimeStats, tab) }))
+          .filter(({ n }) => n > 0)
+          .map(({ tab, n }) => t(`tabs_empty.part.${tab}`, { n }))
+          .join(" · ")
+      : "";
+  // P-10 C4 — THIS tab's all-time number, for the one-sentence period
+  // empty state ("Earlier: 28 open").
+  const tabPartHere = t(`tabs_empty.part.${tabHere ?? "all"}`, { n: tabHereAllTime });
+  const tabsEmptyKind: "loading" | "period" | "other-tabs" | null = !tabsEmptyEligible
+    ? null
+    : periodNarrows && statsAllTime === null
+      ? "loading"
+      : periodNarrows && tabHereAllTime > 0
+        ? "period"
+        : allTimeStats && visibleTicketTotal(allTimeStats) > 0
+          ? "other-tabs"
+          : null;
+  // The period, as words a sentence can hold: "in September", "in 2026",
+  // "in the last 3 months", "between 1 Jun and 30 Jun".
+  const periodPhrase = (() => {
+    const now = new Date();
+    switch (period.key) {
+      case "this_month":
+        return t("tabs_empty.period.this_month", {
+          month: new Intl.DateTimeFormat(locale, { month: "long" }).format(now),
+        });
+      case "this_year":
+        return t("tabs_empty.period.this_year", { year: now.getFullYear() });
+      case "last_3_months":
+        return t("tabs_empty.period.last_3_months");
+      case "custom": {
+        const { from, to } = resolvePeriod(period);
+        return t("tabs_empty.period.custom", {
+          from: from ? formatDate(from, locale) : "…",
+          to: to ? formatDate(to, locale) : "…",
+        });
+      }
+      case "all_time":
+        return "";
+    }
+  })();
+  const greetingHour = new Date().getHours();
+  const greetingKey =
+    greetingHour < 12 ? "greeting.morning" : greetingHour < 18 ? "greeting.afternoon" : "greeting.evening";
+  // P-3 §D — the account's OWN first name, else the whole display name.
+  // Never a split of the display name: "Super Admin" greeted "Super".
+  const greetingName =
+    (me?.first_name || "").trim() || (me?.full_name || "").trim() || me?.email || "";
 
   return (
     <div>
       {!hideHeader && (
       <div className="page-header">
         <div>
-          <nav className="breadcrumb" aria-label="Breadcrumb">
-            <span>{t("breadcrumb_site")}</span>
-            <span className="breadcrumb-sep">›</span>
-            <span>{t("breadcrumb_operations")}</span>
-            <span className="breadcrumb-sep">›</span>
-            <span className="breadcrumb-current">
-              {isTicketsPage
-                ? t("tickets_page.breadcrumb_current")
-                : t("breadcrumb_current")}
-            </span>
-          </nav>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {isTicketsPage ? t("tickets_page.eyebrow") : t("eyebrow")}
-          </div>
+          {isTicketsPage ? (
+            <div className="eyebrow" style={{ marginBottom: 8 }}>
+              {t("tickets_page.eyebrow")}
+            </div>
+          ) : (
+            <p className="dash-greeting" data-testid="dashboard-greeting">
+              {t(greetingKey, { name: greetingName })}
+              {/* P-15 — the greeting claims nothing until the probes
+                  have answered; "nothing needs you" was asserted while
+                  24 open tickets were still loading. */}
+              {attentionSettled ? (
+                <>
+                  {" — "}
+                  {needsYouCount > 0
+                    ? t("greeting.count", { count: needsYouCount })
+                    : t("greeting.clear")}
+                </>
+              ) : null}
+            </p>
+          )}
           <h2 className="page-title">
             {isChargeableWork
-              ? t("common:chargeable_work.title")
+              ? t("common:chargeable_work.pill")
               : isTicketsPage
                 ? t("tickets_page.title")
                 : t("title")}
@@ -1138,15 +1781,28 @@ export function DashboardPage({
                   {t("pointer.extra_work")}
                 </Link>
               </>
-            ) : loading ? (
-              t("loading_data")
+            ) : loading && tickets.length === 0 ? (
+              ""
             ) : (
-              t("subtitle_counts", {
-                count,
-                visible: tickets.length,
-                page,
-                pages: pageCount,
-              })
+              <>
+                {t("subtitle_counts", {
+                  count,
+                  visible: tickets.length,
+                  page,
+                  pages: pageCount,
+                })}
+                {/* P-15 (P-14's S2 finding) — every number on this page
+                    is silently period-scoped while the period select
+                    sits in a COLLAPSED fold. The header says the scope
+                    out loud; the stranger never has to open a fold to
+                    learn the numbers are month-only. */}
+                {periodNarrows && periodPhrase ? (
+                  <span data-testid="tickets-subtitle-period">
+                    {" · "}
+                    {t("subtitle_period", { period: periodPhrase })}
+                  </span>
+                ) : null}
+              </>
             )}
           </p>
         </div>
@@ -1169,10 +1825,38 @@ export function DashboardPage({
             <RefreshCw size={14} strokeWidth={2.5} />
             {t("common:refresh")}
           </button>
-          <Link className="btn btn-primary btn-sm" to="/tickets/new">
-            <Plus size={14} strokeWidth={2.5} />
-            {t("new_ticket")}
-          </Link>
+          {/* W-NAV1.5 — no New ticket button on Chargeable work.
+              A chargeable ticket is not something you create here: it
+              is SPAWNED when a customer approves an Extra Work quote.
+              The button offered a blank melding form, which produces a
+              ticket that would never appear on this list — an action
+              whose result vanishes. The Tickets page keeps it. */}
+          {!isChargeableWork && (
+            <Link className="btn btn-primary btn-sm" to="/tickets/new">
+              <Plus size={14} strokeWidth={2.5} />
+              {t("new_ticket")}
+            </Link>
+          )}
+          {/* W-UX1 §1 — One-off work gets its own create button back.
+              The note above explains why "New ticket" does NOT belong
+              here (a chargeable ticket is SPAWNED, never typed), and
+              that argument leaves this page with no way to start the
+              thing it lists. "New extra work" is that way.
+
+              Provider management only. `canAccessExtraWork` is the
+              WRONG gate here — it admits CUSTOMER_USER, who reaches
+              extra work through the quote-request page and would land
+              on a provider create form. STAFF are excluded by both. */}
+          {isChargeableWork && isProviderManagementRole(userRole) && (
+            <Link
+              className="btn btn-primary btn-sm"
+              to="/extra-work/new"
+              data-testid="chargeable-new-extra-work"
+            >
+              <Plus size={14} strokeWidth={2.5} />
+              {t("new_extra_work")}
+            </Link>
+          )}
         </div>
       </div>
       )}
@@ -1239,7 +1923,7 @@ export function DashboardPage({
                   <div className="kpi-value">
                     {billingMonthTotals
                       ? formatMoney(billingMonthTotals.openTotal)
-                      : "—"}
+                      : t("hero.month_none")}
                   </div>
                 </div>
                 <div className="kpi-meta">
@@ -1279,6 +1963,12 @@ export function DashboardPage({
               className="attention-layout"
               data-testid="dashboard-attention"
             >
+              {/* FE-6 (§D.7) — ONE "needs attention" list. Every row is
+                  a count and a link to the queue that holds the work;
+                  the WP-1 guard rows, the unassigned queue and the two
+                  meerwerk waits sit in the same list. Rows waiting on
+                  the customer stay neutral; rows the provider must act
+                  on tint as soon as the count is positive. */}
               <div
                 className="card attention-card"
                 data-testid="attention-needed"
@@ -1288,298 +1978,74 @@ export function DashboardPage({
                     {t("attention_panel.title")}
                   </span>
                 </div>
+                {/* P-15 (P-14's S2 finding) — no confident zero before
+                    data exists: while the probes are in flight the card
+                    is a skeleton, never "nothing needs you". */}
+                {!attentionSettled && attentionRows.length === 0 ? (
+                  <p className="muted attn-clear" data-testid="attention-loading">
+                    <span className="skeleton-line skeleton-inline" aria-hidden="true" />
+                  </p>
+                ) : attentionRows.length === 0 ? (
+                  <p className="muted attn-clear" data-testid="attention-all-clear">
+                    {t("attention.all_clear")}
+                  </p>
+                ) : (
+                <>
                 <ul className="attn-list">
-                  <li className="attn-item">
-                    <Link
-                      to="/tickets?status=WAITING_MANAGER_REVIEW"
-                      className="attn-row"
-                      data-testid="attention-review"
-                    >
-                      <span className="attn-row-label">
-                        {t("attention.review_title")}
-                      </span>
-                      <span
-                        className={attnBadge(
-                          stats?.by_status?.WAITING_MANAGER_REVIEW ?? null,
-                          true,
-                        )}
+                  {attentionRows.map((row) => (
+                    <li className="attn-item" key={row.key}>
+                      <Link
+                        to={row.to}
+                        className="attn-row"
+                        data-testid={`attention-${row.key}`}
                       >
-                        {fmt(stats?.by_status?.WAITING_MANAGER_REVIEW ?? null)}
-                      </span>
-                    </Link>
-                  </li>
-                  <li className="attn-item">
-                    <Link
-                      to="/tickets?status=OPEN&unassigned=1"
-                      className="attn-row"
-                      data-testid="attention-unassigned"
-                    >
-                      <span className="attn-row-label">
-                        {t("attention.unassigned_title")}
-                      </span>
-                      <span
-                        className={attnBadge(
-                          attnUnassigned?.count ?? null,
-                          true,
-                        )}
-                      >
-                        {fmt(attnUnassigned?.count ?? null)}
-                      </span>
-                    </Link>
-                    {(attnUnassigned?.rows ?? []).length > 0 && (
-                      <ul className="attn-sublist">
-                        {(attnUnassigned?.rows ?? []).slice(0, 3).map(
-                          (ticket) => (
-                            <li key={ticket.id}>
-                              <Link
-                                to={`/tickets/${ticket.id}`}
-                                className="attention-row"
-                              >
-                                <span className="attention-row-title">
-                                  {ticket.title}
-                                </span>
-                                <span className="muted small">
-                                  {formatDate(ticket.created_at)}
-                                </span>
-                              </Link>
-                            </li>
-                          ),
-                        )}
-                      </ul>
-                    )}
-                  </li>
-                  {/* Sprint 180 §1 — finished work the customer never
-                      answered on. Unlike the row below it, this one IS
-                      provider-actionable (chase the customer, or record
-                      the approval on their behalf through the existing
-                      reasoned override), and unlike the rest of the
-                      list it is money: none of it can be invoiced until
-                      it closes. So it gets the warning tint. */}
-                  <li className="attn-item">
-                    <Link
-                      to={`/tickets?status=WAITING_CUSTOMER_APPROVAL&stalled=1`}
-                      className="attn-row"
-                      data-testid="attention-approval-overdue"
-                    >
-                      <span className="attn-row-label">
-                        {t("attention.approval_overdue_title", {
-                          days: STALLED_APPROVAL_DAYS,
+                        <span className="attn-row-label">
+                          {row.label}
+                          {/* P-16 (P-14 S4) — the one row the greeting
+                              does NOT count says so: the move is the
+                              customer's, so its number stays out of
+                              "N dingen hebben u nodig". */}
+                          {!row.actionable && (
+                            <span className="muted small">
+                              {" · "}
+                              {t("attention.not_your_turn")}
+                            </span>
+                          )}
+                        </span>
+                        <span className={attnBadge(row.value, row.actionable)}>
+                          {fmt(row.value)}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                {attentionRowsAll.length > ATTENTION_TOP && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm attn-show-all"
+                    onClick={() => setAttentionExpanded((value) => !value)}
+                    aria-expanded={attentionExpanded}
+                    data-testid="attention-show-all"
+                  >
+                    {attentionExpanded
+                      ? t("attention.show_less")
+                      : /* P-16 (P-14 S4) — the greeting's number
+                           reappears HERE, so the visible five plus this
+                           line reconcile with "N dingen hebben u
+                           nodig" without expanding. */
+                        t("attention.show_all", {
+                          count: attentionRowsAll.length,
+                          total: needsYouCount,
                         })}
-                      </span>
-                      <span
-                        className={attnBadge(
-                          attnStalledApproval?.count ?? null,
-                          true,
-                        )}
-                      >
-                        {fmt(attnStalledApproval?.count ?? null)}
-                      </span>
-                    </Link>
-                    {(attnStalledApproval?.rows ?? []).length > 0 && (
-                      <ul className="attn-sublist">
-                        {(attnStalledApproval?.rows ?? [])
-                          .slice(0, 3)
-                          .map((ticket) => (
-                            <li key={ticket.id}>
-                              <Link
-                                to={`/tickets/${ticket.id}`}
-                                className="attention-row"
-                              >
-                                <span className="attention-row-title">
-                                  {ticket.title}
-                                </span>
-                                <span className="muted small">
-                                  {formatDate(ticket.created_at)}
-                                </span>
-                              </Link>
-                            </li>
-                          ))}
-                      </ul>
-                    )}
-                  </li>
-                  <li className="attn-item">
-                    <Link
-                      to="/extra-work?status=UNDER_REVIEW"
-                      className="attn-row"
-                      data-testid="attention-awaiting-pricing"
-                    >
-                      <span className="attn-row-label">
-                        {t("attention.awaiting_pricing_title")}
-                      </span>
-                      <span
-                        className={attnBadge(
-                          extraWorkStats?.awaiting_pricing ?? null,
-                          true,
-                        )}
-                      >
-                        {fmt(extraWorkStats?.awaiting_pricing ?? null)}
-                      </span>
-                    </Link>
-                  </li>
-                  <li className="attn-item">
-                    <Link
-                      to="/extra-work?status=PRICING_PROPOSED"
-                      className="attn-row"
-                      data-testid="attention-awaiting-customer"
-                    >
-                      <span className="attn-row-label">
-                        {t("attention.awaiting_customer_title")}
-                      </span>
-                      {/* Waiting on the CUSTOMER — not provider-actionable,
-                          so this row never gets the warning tint. */}
-                      <span className="attn-count">
-                        {fmt(
-                          extraWorkStats?.awaiting_customer_approval ?? null,
-                        )}
-                      </span>
-                    </Link>
-                  </li>
-                </ul>
+                  </button>
+                )}
+                </>
+                )}
               </div>
 
+              {/* The billing summary: this month, per building. */}
               <div
-                className="card attention-card"
-                data-testid="dashboard-today"
-              >
-                <div className="attention-card-head">
-                  <span className="attention-card-title">
-                    {t("today.title")}
-                  </span>
-                </div>
-                <ul className="attn-list">
-                  <li className="attn-item">
-                    <Link
-                      to="/agenda"
-                      className="attn-row"
-                      data-testid="today-slots"
-                    >
-                      <span className="attn-row-label">{t("today.slots")}</span>
-                      <span className="attn-count">{fmt(todaySlotCount)}</span>
-                    </Link>
-                  </li>
-                  <li className="attn-item">
-                    <Link
-                      to="/inbox"
-                      className="attn-row"
-                      data-testid="today-inbox"
-                    >
-                      <span className="attn-row-label">
-                        {t("widgets.inbox")}
-                      </span>
-                      <span className="attn-count">{fmt(inboxUnread)}</span>
-                    </Link>
-                  </li>
-                </ul>
-                <div className="attention-card-head">
-                  <span className="attention-card-title">
-                    {t("attention.activity_title")}
-                  </span>
-                </div>
-                <ul
-                  className="attention-card-list"
-                  data-testid="attention-activity"
-                >
-                  {(attnActivity ?? []).map((item) => {
-                    const href = notificationHref(item);
-                    const body = (
-                      <>
-                        <span className="attention-row-title">
-                          {item.summary}
-                        </span>
-                        <span className="muted small">
-                          {formatDate(item.created_at)}
-                        </span>
-                      </>
-                    );
-                    return (
-                      <li key={item.id}>
-                        {href ? (
-                          <Link to={href} className="attention-row">
-                            {body}
-                          </Link>
-                        ) : (
-                          <span className="attention-row">{body}</span>
-                        )}
-                      </li>
-                    );
-                  })}
-                  {attnActivity !== null && attnActivity.length === 0 && (
-                    <li className="muted small">{t("attention.empty")}</li>
-                  )}
-                </ul>
-                <Link
-                  to="/notifications"
-                  className="attention-card-link"
-                  data-testid="attention-activity-link"
-                >
-                  {t("attention.view_all")}
-                </Link>
-              </div>
-            </section>
-
-            {me?.id && (
-              <section
-                className="mywork-section"
-                data-testid="dashboard-my-work"
-              >
-                <div className="section-head" style={{ marginBottom: 10 }}>
-                  <div className="section-head-title">{t("my_work.title")}</div>
-                </div>
-                <div className="mywork-chips">
-                  <Link
-                    to="/tickets?mine=1&exclude_type=REPORT"
-                    className="mywork-chip"
-                    data-testid="dashboard-my-tickets"
-                  >
-                    <span>{t("my_work.chip_tickets")}</span>
-                    <span className="mywork-chip-count">
-                      {fmt(myCounts.tickets)}
-                    </span>
-                  </Link>
-                  <Link
-                    to="/tickets?mine=1&type=REPORT"
-                    className="mywork-chip"
-                    data-testid="dashboard-my-meldingen"
-                  >
-                    <span>{t("my_work.chip_meldingen")}</span>
-                    <span className="mywork-chip-count">
-                      {fmt(myCounts.meldingen)}
-                    </span>
-                  </Link>
-                  <Link
-                    to="/extra-work?mine=1"
-                    className="mywork-chip"
-                    data-testid="dashboard-my-extra-work"
-                  >
-                    <span>{t("my_work.chip_extra_work")}</span>
-                    <span className="mywork-chip-count">
-                      {fmt(myCounts.extraWork)}
-                    </span>
-                  </Link>
-                  <Link
-                    to="/extra-work?mine=1&request_intent=REQUEST_QUOTE"
-                    className="mywork-chip"
-                    data-testid="dashboard-my-quote-requests"
-                  >
-                    <span>{t("my_work.chip_quotes")}</span>
-                    <span className="mywork-chip-count">
-                      {fmt(myCounts.quoteRequests)}
-                    </span>
-                  </Link>
-                </div>
-              </section>
-            )}
-
-            {/* #109 Part G — bottom density band (management view only):
-                a Facturatie mini per-building panel + a compact
-                Laatste-tickets/extra-werk list. Both reuse
-                already-loaded data / the existing parallel loaders. */}
-            <section
-              className="dashboard-bottom-band"
-              data-testid="dashboard-bottom-band"
-            >
-              <div
-                className="card attention-card"
+                className="card attention-card dashboard-billing-card"
                 data-testid="dashboard-billing-panel"
               >
                 <div className="attention-card-head">
@@ -1595,7 +2061,11 @@ export function DashboardPage({
                   </Link>
                 </div>
                 {billingByBuilding === null ? (
-                  <p className="muted small">{t("loading")}</p>
+                  <div className="skeleton-lines" aria-hidden="true">
+                    <span className="skeleton-line" />
+                    <span className="skeleton-line" />
+                    <span className="skeleton-line short" />
+                  </div>
                 ) : billingByBuilding.length === 0 ? (
                   <p className="muted small">{t("bottom.billing_empty")}</p>
                 ) : (
@@ -1618,288 +2088,26 @@ export function DashboardPage({
                   </table>
                 )}
               </div>
-
-              <div
-                className="card attention-card"
-                data-testid="dashboard-recent-panel"
-              >
-                <div className="attention-card-head">
-                  <span className="attention-card-title">
-                    {t("bottom.recent_title")}
-                  </span>
-                </div>
-                <ul className="attention-card-list">
-                  {(recentTickets ?? []).map((tk) => (
-                    <li key={`t-${tk.id}`}>
-                      <Link
-                        to={`/tickets/${tk.id}`}
-                        className="attention-row"
-                      >
-                        <span className="attention-row-title">
-                          {tk.ticket_no} · {tk.title}
-                        </span>
-                        <span className="muted small">
-                          {formatDate(tk.created_at)}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                  {(recentExtraWork ?? []).map((ew) => (
-                    <li key={`e-${ew.id}`}>
-                      <Link
-                        to={`/extra-work/${ew.id}`}
-                        className="attention-row"
-                      >
-                        <span className="attention-row-title">
-                          {t("ops_type_extra_work")} · {ew.title}
-                        </span>
-                        <span className="muted small">
-                          {ew.building_name}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                  {recentTickets !== null &&
-                    recentExtraWork !== null &&
-                    recentTickets.length === 0 &&
-                    recentExtraWork.length === 0 && (
-                      <li className="muted small">{t("attention.empty")}</li>
-                    )}
-                </ul>
-              </div>
             </section>
           </>
         )}
 
-        {/* The STAFF + customer dashboard at "/" is preserved as-is —
-            #108 rebuilt only the provider-management view above. (The
-            management-only billing widget and "Mijn werk" cards never
-            rendered for these roles, so they are absent here.) */}
-        {!isTicketsPage && !isProviderManagementRole(userRole) && (
-          <>
-        {/* Top KPI strip — five cards, single visual block. Derived
-            from existing stats endpoints; never aggregated from a
-            single page of /tickets/ results. */}
-        <div
-          className="operations-kpi-grid"
-          data-testid="dashboard-ops-kpi-row"
-        >
-          <div className="kpi-card" data-testid="dashboard-ops-kpi-total">
-            <div className="kpi-label">{t("ops_kpi_total_open_label")}</div>
-            <div className="kpi-row-2">
-              <div className="kpi-value">{fmt(opsKpis.totalOpen)}</div>
-            </div>
-            <div className="kpi-meta">{t("ops_kpi_total_open_meta")}</div>
-          </div>
-          <div className="kpi-card" data-testid="dashboard-ops-kpi-tickets">
-            <div className="kpi-label">{t("ops_kpi_tickets_label")}</div>
-            <div className="kpi-row-2">
-              <div className="kpi-value">{fmt(opsKpis.ticketsActive)}</div>
-            </div>
-            <div className="kpi-meta">{t("ops_kpi_tickets_meta")}</div>
-          </div>
-          <div className="kpi-card" data-testid="dashboard-ops-kpi-extra-work">
-            <div className="kpi-label">{t("ops_kpi_extra_work_label")}</div>
-            <div className="kpi-row-2">
-              <div className="kpi-value">{fmt(opsKpis.ewActive)}</div>
-            </div>
-            <div className="kpi-meta">{t("ops_kpi_extra_work_meta")}</div>
-          </div>
-          <div className="kpi-card" data-testid="dashboard-ops-kpi-awaiting">
-            <div className="kpi-label">{t("ops_kpi_awaiting_label")}</div>
-            <div className="kpi-row-2">
-              <div className="kpi-value">{fmt(opsKpis.awaiting)}</div>
-            </div>
-            <div className="kpi-meta">{t("ops_kpi_awaiting_meta")}</div>
-          </div>
-          <div
-            className="kpi-card kpi-urgent"
-            data-testid="dashboard-ops-kpi-urgent"
-          >
-            <div className="kpi-label">{t("ops_kpi_urgent_label")}</div>
-            <div className="kpi-row-2">
-              <div className="kpi-value">{fmt(opsKpis.urgent)}</div>
-            </div>
-            <div className="kpi-meta">{t("ops_kpi_urgent_meta")}</div>
-          </div>
-        </div>
+        {/* W1-C §2.4 — the money strip, on the Chargeable work page.
 
-        {/* RF-18 (#107) — compact info widgets: count/euro + label +
-            deep link with the right preset. Role-aware (a widget the
-            role cannot act on never renders or fetches); complements
-            the KPI hero and attention cards. */}
-        <section
-          className="widget-row"
-          data-testid="dashboard-widget-row"
-          style={{ marginTop: 12 }}
-        >
-          <Link to="/inbox" className="info-widget" data-testid="widget-inbox">
-            <span className="info-widget-value">{fmt(inboxUnread)}</span>
-            <span className="info-widget-label">{t("widgets.inbox")}</span>
-          </Link>
-          {canAccessExtraWork(userRole) && (
-            <Link
-              to="/extra-work?status=UNDER_REVIEW"
-              className="info-widget"
-              data-testid="widget-awaiting-pricing"
-            >
-              <span className="info-widget-value">
-                {fmt(extraWorkStats?.awaiting_pricing ?? null)}
-              </span>
-              <span className="info-widget-label">
-                {t("widgets.awaiting_pricing")}
-              </span>
-            </Link>
-          )}
-          {canAccessExtraWork(userRole) && (
-            <Link
-              to="/extra-work?status=PRICING_PROPOSED"
-              className="info-widget"
-              data-testid="widget-awaiting-customer"
-            >
-              <span className="info-widget-value">
-                {fmt(extraWorkStats?.awaiting_customer_approval ?? null)}
-              </span>
-              <span className="info-widget-label">
-                {t("widgets.awaiting_customer")}
-              </span>
-            </Link>
-          )}
-          {isStaffRole(userRole) && (
-            <Link
-              to="/agenda"
-              className="info-widget"
-              data-testid="widget-today-slots"
-            >
-              <span className="info-widget-value">{fmt(todaySlotCount)}</span>
-              <span className="info-widget-label">
-                {t("widgets.today_slots")}
-              </span>
-            </Link>
-          )}
-        </section>
+            Only there, and not on the ordinary Tickets page: the
+            figures are Extra Work money, and a page about meldingen has
+            no money on it to explain. `isChargeableWork` rather than
+            `isTicketsPage` is the whole difference. Provider management
+            only — the component returns null for anybody else, and the
+            endpoint refuses them as well.
 
-        {/* RF-16 (#106) — attention cards replace the dashboard's big
-            lists (which now live exclusively on the Tickets / Extra
-            Work pages). Each card: count + top rows + a deep link into
-            the full page with the right preset applied. */}
-        <section
-          className="attention-grid"
-          data-testid="dashboard-attention"
-          style={{ marginTop: 12 }}
-        >
-          <div className="card attention-card" data-testid="attention-review">
-            <div className="attention-card-head">
-              <span className="attention-card-title">
-                {t("attention.review_title")}
-              </span>
-              <span className="attention-card-count">
-                {fmt(stats?.by_status?.WAITING_MANAGER_REVIEW ?? null)}
-              </span>
-            </div>
-            <ul className="attention-card-list">
-              {(attnReview?.rows ?? []).map((ticket) => (
-                <li key={ticket.id}>
-                  <Link to={`/tickets/${ticket.id}`} className="attention-row">
-                    <span className="attention-row-title">{ticket.title}</span>
-                    <span className="muted small">
-                      {formatDate(ticket.created_at)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-              {attnReview !== null && attnReview.rows.length === 0 && (
-                <li className="muted small">{t("attention.empty")}</li>
-              )}
-            </ul>
-            <Link
-              to="/tickets?status=WAITING_MANAGER_REVIEW"
-              className="attention-card-link"
-              data-testid="attention-review-link"
-            >
-              {t("attention.view_all")}
-            </Link>
-          </div>
-
-          <div
-            className="card attention-card"
-            data-testid="attention-unassigned"
-          >
-            <div className="attention-card-head">
-              <span className="attention-card-title">
-                {t("attention.unassigned_title")}
-              </span>
-              <span className="attention-card-count">
-                {attnUnassigned === null ? "—" : attnUnassigned.count}
-              </span>
-            </div>
-            <ul className="attention-card-list">
-              {(attnUnassigned?.rows ?? []).map((ticket) => (
-                <li key={ticket.id}>
-                  <Link to={`/tickets/${ticket.id}`} className="attention-row">
-                    <span className="attention-row-title">{ticket.title}</span>
-                    <span className="muted small">
-                      {formatDate(ticket.created_at)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-              {attnUnassigned !== null && attnUnassigned.rows.length === 0 && (
-                <li className="muted small">{t("attention.empty")}</li>
-              )}
-            </ul>
-            <Link
-              to="/tickets?status=OPEN&unassigned=1"
-              className="attention-card-link"
-              data-testid="attention-unassigned-link"
-            >
-              {t("attention.view_all")}
-            </Link>
-          </div>
-
-          <div className="card attention-card" data-testid="attention-activity">
-            <div className="attention-card-head">
-              <span className="attention-card-title">
-                {t("attention.activity_title")}
-              </span>
-            </div>
-            <ul className="attention-card-list">
-              {(attnActivity ?? []).map((item) => {
-                const href = notificationHref(item);
-                const body = (
-                  <>
-                    <span className="attention-row-title">{item.summary}</span>
-                    <span className="muted small">
-                      {formatDate(item.created_at)}
-                    </span>
-                  </>
-                );
-                return (
-                  <li key={item.id}>
-                    {href ? (
-                      <Link to={href} className="attention-row">
-                        {body}
-                      </Link>
-                    ) : (
-                      <span className="attention-row">{body}</span>
-                    )}
-                  </li>
-                );
-              })}
-              {attnActivity !== null && attnActivity.length === 0 && (
-                <li className="muted small">{t("attention.empty")}</li>
-              )}
-            </ul>
-            <Link
-              to="/notifications"
-              className="attention-card-link"
-              data-testid="attention-activity-link"
-            >
-              {t("attention.view_all")}
-            </Link>
-          </div>
-        </section>
-          </>
+            W-NAV1.2b — the THREE execution figures, not four. Work has
+            started on everything this page lists, so "Quoted, not yet
+            started" is about rows that are NOT here; it belongs to the
+            Extra Work Quote list and renders there. Selection only —
+            none of the three is computed differently. */}
+        {isChargeableWork && (
+          <FinancialStrip variant="execution" customerId={customerId} />
         )}
 
         {isTicketsPage && (
@@ -1929,221 +2137,348 @@ export function DashboardPage({
             precisely why these come from the stats endpoint and
             not from `tickets`. Until it resolves, `-1` renders
             an em dash rather than a wrong number. */}
-        {/* Sprint 183 — ONE chip: "Tickets only". Pressed = ordinary
-            tickets; unpressed = everything, the default, always one click
-            away. The owner asked for the redundant CHARGEABLE chip to go,
-            not the Chargeable work sub-page — that page is the only way to
-            see chargeable work as a group and it stays. Sprint 183 read
-            the instruction the other way round and deleted the page; the
-            integration restored it. */}
-        {!isChargeableWork && (
-        <div className="work-strip" style={{ marginBottom: 12 }}>
-          <div className="work-strip-toggle" data-testid="tickets-work-type">
-            <button
-              type="button"
-              className={`btn btn-sm ${
-                workTypeFilter === "all" ? "btn-primary" : "btn-secondary"
-              }`}
-              aria-pressed={workTypeFilter === "all"}
-              data-testid="tickets-work-type-tickets"
-              onClick={() => {
-                const next_value =
-                  workTypeFilter === "all" ? "tickets" : "all";
-                setPage(1);
-                setSelectedIds(new Set<number>());
-                setWorkTypeFilter(next_value);
-                const next = new URLSearchParams(searchParams);
-                if (next_value === "tickets") next.delete("work");
-                else next.set("work", next_value);
-                setSearchParams(next, { replace: true });
-              }}
-            >
-              {t("work_type.include_chargeable")}
-            </button>
-          </div>
-        </div>
-        )}
+        {/* W7 DESIGN 3 — the work-type control moved into the filter bar.
 
-        {/* Sprint 182 §1/§4 — the counts and the rows describe the same
-            set, or the counts say they cannot know.
+            It was a lone pressed/unpressed button floating in its own
+            strip above the tiles, which reads as a chip stating a fact
+            rather than as the filter it is. It is a labelled dropdown
+            beside the other filters now: same parameter, same URL, same
+            testids, but a person looking for "how do I change what this
+            list shows" finds it where every other answer to that
+            question already lives. */}
 
-            The stats request carries the SAME work-type and
-            hide-finished flags as the list, so the tiles count exactly
-            the rows beneath them. The em dash is now reserved for its
-            real meaning: the stats call itself failed. */}
-        <StatusTiles
-          tiles={TICKET_LIST_STATUSES.map((value) => ({
-            value,
-            // The page's OWN status label helper, the same one
-            // the dropdown below uses — a second labelling path
-            // here rendered raw enum names.
-            label: tStatus(value),
-            count: stats ? (stats.by_status[value] ?? 0) : -1,
-          }))}
-          active={statusFilter}
-          onChange={(value: string) => {
-            setStatusFilter(value as TicketStatus | "");
-            setPage(1);
-            setSelectedIds(new Set<number>());
-          }}
-          // "All" counts what the chips count: the same stats response,
-          // minus exactly the statuses this list does not show.
-          //
-          // It used to fall back to the list's own `count` under a
-          // work-type narrowing, and to an em dash when a status chip was
-          // also active — because the stats endpoint could not then be
-          // asked for a narrowed total. It can now (the request carries
-          // the same `is_extra_work`), so the fallbacks are gone: once the
-          // Tickets page began defaulting to ordinary tickets, "All" was
-          // reading a dash on the default view with a status selected.
-          totalCount={visibleTicketTotal(stats)}
-          testIdPrefix="tickets-status"
-        />
+        {/* W7 BUG 1 — the counts describe the rows beneath them, or they
+            say they cannot know. There is no third option, and there is
+            certainly no option where they describe a different set in the
+            same type size as the number the reader came here for.
 
-          <section
-            className="work-layout"
-            data-testid="dashboard-tickets-section"
-          >
-            <div className="dash-main">
-              <div className="card" style={{ overflow: "hidden" }}>
-                <div className="section-head">
-                  <div>
-                    <div className="section-head-title">
-                      {t("section_recent_title")}
-                    </div>
-                    <div className="section-head-sub">
-                      {t("section_recent_sub")}
-                    </div>
-                  </div>
-                  {searchParams.get("mine") === "1" && (
-                    <div
-                      className="active-filter-chip"
-                      data-testid="dashboard-mine-filter-chip"
-                    >
-                      <span>{t("my_work.filter_chip")}</span>
-                      <Link to="/tickets" className="active-filter-clear">
-                        {t("my_work.filter_clear")}
-                      </Link>
-                    </div>
-                  )}
-                  {unassignedFilter && (
-                    <div
-                      className="active-filter-chip"
-                      data-testid="dashboard-unassigned-filter-chip"
-                    >
-                      <span>{t("attention.unassigned_chip")}</span>
-                      <button
-                        type="button"
-                        className="active-filter-clear"
-                        onClick={() => {
-                          setPage(1);
-                          setUnassignedFilter(false);
-                        }}
-                      >
-                        {t("my_work.filter_clear")}
-                      </button>
-                    </div>
-                  )}
-                  {/* Sprint 180 §1 — approval-overdue preset chip. */}
-                  {stalledApprovalFilter && (
-                    <div
-                      className="active-filter-chip"
-                      data-testid="dashboard-stalled-approval-chip"
-                    >
-                      <span>
-                        {t("attention.approval_overdue_chip", {
-                          days: STALLED_APPROVAL_DAYS,
-                        })}
-                      </span>
-                      <button
-                        type="button"
-                        className="active-filter-clear"
-                        onClick={() => {
-                          setPage(1);
-                          setStalledApprovalFilter(false);
-                        }}
-                      >
-                        {t("my_work.filter_clear")}
-                      </button>
-                    </div>
-                  )}
-                  {/* Sprint 180 §2 — the escape hatch for the hide.
-                      Rendered whenever the hide is ON, so the list
-                      never quietly omits rows: it says what it is
-                      holding back and undoes it in one click. */}
-                  {hideFinishedExtraWork && (
-                    <div
-                      className="active-filter-chip"
-                      data-testid="dashboard-hide-finished-ew-chip"
-                    >
-                      <span>{t("finished_extra_work.hidden_chip")}</span>
-                      <button
-                        type="button"
-                        className="active-filter-clear"
-                        onClick={() => {
-                          setPage(1);
-                          setHideFinishedExtraWork(false);
-                        }}
-                        data-testid="dashboard-hide-finished-ew-show"
-                      >
-                        {t("finished_extra_work.show_all")}
-                      </button>
-                    </div>
-                  )}
-                  {/* ...and the way back to hiding, so the control is
-                      a toggle rather than a one-way door. */}
-                  {!hideFinishedExtraWork && (
-                    <div
-                      className="active-filter-chip"
-                      data-testid="dashboard-show-finished-ew-chip"
-                    >
-                      <span>{t("finished_extra_work.shown_chip")}</span>
-                      <button
-                        type="button"
-                        className="active-filter-clear"
-                        onClick={() => {
-                          setPage(1);
-                          setHideFinishedExtraWork(true);
-                        }}
-                        data-testid="dashboard-hide-finished-ew-hide"
-                      >
-                        {t("finished_extra_work.hide_again")}
-                      </button>
-                    </div>
-                  )}
-                  <span
-                    style={{
-                      fontFamily: "var(--f-head)",
-                      fontSize: 11,
-                      fontWeight: 800,
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      color: "var(--green-2)",
+            `statsAreBlind` is true when the list carries a narrowing the
+            count endpoint has never been taught — "only mine" is the one
+            that produced the owner's 21 above two rows, but a search
+            term, a priority and the two attention-card presets were all
+            equally invisible to it. When it is true the per-status tiles
+            show no number at all, and the "All" tile falls back to the
+            list's OWN `count`, which is the one number on the page that
+            is exact by construction: it is what the server said when it
+            returned these rows. That fallback only holds with no status
+            chosen, because with one chosen `count` describes that status
+            rather than the whole list. */}
+        {/* W8 BUG 2 — the counts follow the filter, or the row does
+            not claim to count.
+
+            The old third option was the worst of the two: "All" kept a
+            number (from the list's own `count`, a different source) and
+            the eight status tiles beside it each showed an em dash, with
+            a paragraph in the side column apologising for it. Eight
+            dashes read as eight empty buckets, and no wording rescues
+            that — a reader who has to be told what a control means is
+            looking at a broken control.
+
+            So when `/tickets/stats/` cannot describe these rows, the
+            whole row drops its numbers and goes on being what it also
+            always was: the status filter. Nothing to explain. */}
+        {/* W-H §2/§3 — the period, and which pile you are looking at.
+            Above the status tiles because they narrow WHICH ROWS the
+            tiles count, and the tiles already follow this filter (the
+            stats call carries `archived` and the period the same way
+            the list does).
+
+            Two controls, no prose. "Working list / Archive" is a pair
+            of states, not a verb, so it reads as a place you are rather
+            than a thing you do. */}
+        {/* W14 §2 — THE CHIPS BELONG TO THE PILE THAT IS OPEN.
+            The archive gate (`filters.apply_archived`) was clean and the
+            counts followed it, but the row above the list went on
+            drawing the WORKING LIST's ten statuses over it. The owner:
+            "why am I seeing normal ticket status chips while the archive
+            chip is selected?" — and he was right to ask: the server
+            refuses to archive anything that is not terminal
+            (`archive_not_finished`), so seven of those ten chips could
+            only ever read 0. Measured on crmtest with `?archived=true`:
+            `by_status` came back `{}` for all ten.
+            One axis, chosen by which pile is open. */}
+        {showArchive ? (
+          <StatusTiles
+            tiles={TICKET_ARCHIVE_STATUSES.map((value) => ({
+              value,
+              label: tStatus(value),
+              count: stats ? (stats.by_status[value] ?? 0) : -1,
+            }))}
+            active={statusFilter}
+            onChange={(value: string) => {
+              setStatusFilter(value as TicketStatus | "");
+              setPage(1);
+              setSelectedIds(new Set<number>());
+            }}
+            totalCount={archivedTicketTotal(stats)}
+            showCounts={!statsAreBlind}
+            testIdPrefix="tickets-status"
+          />
+        ) : (
+          /* FE-6 (§D.7) — FOUR primary tabs. Each counts the statuses
+             it holds (from the same `/tickets/stats/` response the
+             chips read, blind when the list carries a narrowing the
+             count endpoint cannot follow); every other status is the
+             precise filter in the bar below. The FE-1 "Reopened" chip
+             behaviour stays: it appears only while there IS reopened
+             work, or while it is the filter, so it can be cleared. */
+          <div className="ticket-tabs-row" data-testid="tickets-tabs">
+            {/* P-15 — the cards say WHAT they count ("Counts in
+                September") whenever the period narrows them. */}
+            {periodNarrows && periodPhrase && (
+              <span
+                className="muted small"
+                data-testid="tickets-tabs-period"
+                style={{ alignSelf: "center" }}
+              >
+                {t("subtitle_period", { period: periodPhrase })}
+              </span>
+            )}
+            <div className="status-tile-row ticket-tabs" role="tablist">
+              {([...TICKET_TABS, ""] as (TicketTabKey | "")[]).map((tab) => {
+                const statuses = tab ? ticketTabStatuses(tab) : TICKET_LIST_STATUSES;
+                const count =
+                  stats && !statsAreBlind
+                    ? statuses.reduce(
+                        (sum, value) => sum + (stats.by_status[value] ?? 0),
+                        0,
+                      )
+                    : null;
+                const active = statusTab === tab;
+                return (
+                  <button
+                    key={tab || "all"}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    className={`status-tile${active ? " status-tile-active" : ""}`}
+                    data-testid={`tickets-tab-${tab || "all"}`}
+                    onClick={() => {
+                      setStatusTab(tab);
+                      // A precise status that is not on the new tab
+                      // would leave an empty list with no chip lit.
+                      setStatusFilter((current) =>
+                        current &&
+                        (tab === "" || ticketTabOf(current) === tab)
+                          ? current
+                          : "",
+                      );
+                      setPage(1);
+                      setSelectedIds(new Set<number>());
                     }}
                   >
-                    {t("rows_label", { count: tickets.length })}
+                    <span className="status-tile-label">
+                      {t(`tickets_tabs.${tab || "all"}`)}
+                    </span>
+                    <span className="status-tile-count">
+                      {count === null ? (
+                        <span className="skeleton-line skeleton-inline" aria-hidden="true" />
+                      ) : (
+                        count
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {(statusFilter === "REOPENED_BY_ADMIN" ||
+              (stats ? (stats.by_status.REOPENED_BY_ADMIN ?? 0) > 0 : false)) && (
+              <button
+                type="button"
+                className={`btn btn-sm ${
+                  statusFilter === "REOPENED_BY_ADMIN"
+                    ? "btn-primary"
+                    : "btn-secondary"
+                }`}
+                aria-pressed={statusFilter === "REOPENED_BY_ADMIN"}
+                data-testid="tickets-status-REOPENED_BY_ADMIN"
+                onClick={() => {
+                  const on = statusFilter === "REOPENED_BY_ADMIN";
+                  setStatusFilter(on ? "" : "REOPENED_BY_ADMIN");
+                  if (!on) setStatusTab("open");
+                  setPage(1);
+                  setSelectedIds(new Set<number>());
+                }}
+              >
+                {t("tickets_tabs.reopened")}
+                {stats && !statsAreBlind && (
+                  <span className="pricing-chip-count">
+                    {stats.by_status.REOPENED_BY_ADMIN ?? 0}
                   </span>
-                  {isProviderManagementRole(userRole) && (
-                    <EditModeToggle
-                      editMode={edit.editMode}
-                      onToggle={edit.toggleMode}
-                      disabled={bulkSubmitting || assignBusy}
-                      testId="dashboard-tickets-edit-toggle"
-                    />
-                  )}
+                )}
+              </button>
+            )}
+          </div>
+        )}
+
+          <section data-testid="dashboard-tickets-section">
+            <div className="dash-main">
+              <div className="card" style={{ overflow: "hidden" }}>
+                {/* W7 DESIGN 3 + DESIGN 7 — the head says what this list
+                    is, and nothing else. The five fact-chips that used to
+                    stack here (only yours / only unassigned / awaiting
+                    approval 14+ days / finished extra work hidden /
+                    finished extra work shown) are one sentence below the
+                    filters, and each of them now has a labelled control
+                    among the filters instead of a pill with an × on it. */}
+                {/* W9 BUG 2 — what you are looking at, why these
+                    tickets are here, and the next step, in the words of
+                    the dashboard row you clicked to get here. */}
+                <div className="section-head">
+                  <div>
+                    <div
+                      className="section-head-title"
+                      data-testid="tickets-queue-title"
+                    >
+                      {activeQueue
+                        ? t(`queue.${activeQueue.key}.title`)
+                        : t("section_recent_title")}
+                    </div>
+                    {/* W10 — WHY THESE ROWS. Tickets, Chargeable work
+                        and this page's own defaults are three filters
+                        over one set of records, and the line here used
+                        to read "Everything you are allowed to see" on a
+                        page showing open ordinary tickets with
+                        chargeable work excluded. Derived from the same
+                        state the query is built from, so it cannot
+                        describe a different list than the one below.
+                        A dashboard queue keeps its own wording: it is
+                        more specific than anything derivable here. */}
+                    {/* P-2 §3 — the generic scope caption ("Ordinary
+                        tickets. Work that came from Extra work shows
+                        behind the work filter above.") is gone: the
+                        Filter fold explains itself where it is. A
+                        dashboard queue keeps its own one-line why. */}
+                    {activeQueue && (
+                      <div
+                        className="section-head-sub"
+                        data-testid="tickets-scope-sentence"
+                      >
+                        {t(`queue.${activeQueue.key}.why`)}
+                      </div>
+                    )}
+                  </div>
+                  {isProviderManagementRole(userRole) &&
+                    (activeQueue?.assigns && !edit.editMode ? (
+                      /* W9 — BRING THE ACTION TO WHERE THE USER IS. The
+                         next step in the unassigned queue is putting
+                         somebody on the work, and it was behind a button
+                         called "Edit". Same control, named for the job
+                         it does here. The house rule still holds: the
+                         screen edits nothing until this is pressed. */
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={edit.start}
+                        disabled={bulkSubmitting || assignBusy}
+                        data-testid="tickets-queue-action"
+                      >
+                        {t("queue.unassigned.action")}
+                      </button>
+                    ) : (
+                      <EditModeToggle
+                        editMode={edit.editMode}
+                        onToggle={edit.toggleMode}
+                        disabled={bulkSubmitting || assignBusy}
+                        testId="dashboard-tickets-edit-toggle"
+                      />
+                    ))}
                 </div>
 
                 <form className="filter-bar" onSubmit={handleSearchSubmit}>
+                  {/* P-2 §3 — the seven always-open controls fold behind
+                      ONE "Filter" button; the period and the working /
+                      archive pair live inside it too (the tabs above are
+                      the primary choice). The summary names what is
+                      active, so a narrowed list never looks like a short
+                      one. */}
+                  <details
+                    className="filter-fold"
+                    open={activeFilterLabels.length > 0}
+                    data-testid="tickets-filter-fold"
+                  >
+                    <summary className="filter-fold-summary" data-testid="tickets-filter-toggle">
+                      <SlidersHorizontal size={14} strokeWidth={2.4} aria-hidden="true" />
+                      {t("filters.fold_label")}
+                      {activeFilterLabels.length > 0 && (
+                        <span className="filter-fold-count">
+                          {t("filters.fold_active", { count: activeFilterLabels.length })}
+                        </span>
+                      )}
+                      {activeFilterLabels.map((label) => (
+                        <span className="filter-fold-chip" key={label}>
+                          {label}
+                        </span>
+                      ))}
+                    </summary>
+                    <div className="filter-fold-body">
+                  <div className="list-scope-row" data-testid="tickets-scope-row">
+                    <PeriodFilter
+                      idPrefix="tickets"
+                      value={period}
+                      onChange={(next) => {
+                        setPeriod(next);
+                        setPage(1);
+                      }}
+                    />
+                    <div className="composer-toggle" role="tablist" aria-label={t("period.label")}>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={!showArchive}
+                        className={`composer-toggle-btn ${!showArchive ? "active" : ""}`}
+                        onClick={() => {
+                          setShowArchive(false);
+                          setPage(1);
+                          setStatusTab("open");
+                          // W14 §2 — the two piles do not share a status axis, so
+                          // a chip selected in one must not survive into the
+                          // other. Carrying `CLOSED` back into the working list is
+                          // harmless; carrying `OPEN` into the archive is not — it
+                          // narrows the rows to a status the archive cannot hold
+                          // and leaves an empty list with no chip lit to explain
+                          // it. Cleared in BOTH directions so the rule is one rule.
+                          setStatusFilter((current) =>
+                            keepStatusFilter(current, TICKET_LIST_STATUSES),
+                          );
+                        }}
+                        data-testid="tickets-show-working"
+                      >
+                        {t("archive.show_working")}
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={showArchive}
+                        className={`composer-toggle-btn ${showArchive ? "active" : ""}`}
+                        onClick={() => {
+                          setShowArchive(true);
+                          setPage(1);
+                          setStatusTab("");
+                          // See the sibling above. The tickets page opens on
+                          // `OPEN`, so without this every first press of Archive
+                          // showed an empty archive.
+                          setStatusFilter((current) =>
+                            keepStatusFilter(current, TICKET_ARCHIVE_STATUSES),
+                          );
+                        }}
+                        data-testid="tickets-show-archive"
+                      >
+                        {t("archive.show")}
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Sprint 185 E §1 — WHICH KIND OF WORK. Rendered only
                       when the company has a catalog: an empty dropdown is
                       a control that looks broken, and the Catalogs tab's
                       empty state is what explains where it comes from
                       (the Sprint 178 rule for the building-type filter,
                       restated here rather than re-decided). */}
-                  {workCategories.length > 0 && (
+                  {categories.length > 0 && (
                     <div className="filter-field">
                       <span className="filter-label">
-                        {t("common:work_categories.field_label")}
+                        {t("common:ticket_categories.field_label")}
                       </span>
                       <select
                         className="filter-control"
@@ -2163,7 +2498,7 @@ export function DashboardPage({
                         }}
                       >
                         <option value="">
-                          {t("common:work_categories.filter_all")}
+                          {t("common:ticket_categories.filter_all")}
                         </option>
                         {/* Sprint 187 §5 — the backend has been able to
                             list "not yet categorised" since the catalog
@@ -2173,38 +2508,57 @@ export function DashboardPage({
                             was the one they could only find by reading
                             every row. */}
                         <option value="none">
-                          {t("common:work_categories.filter_uncategorised")}
+                          {t("common:ticket_categories.filter_uncategorised")}
                         </option>
-                        {workCategories.map((row) => (
-                          <option key={row.id} value={row.id}>
-                            {row.name}
+                        {categoryOptionGroups.length > 1
+                          ? categoryOptionGroups.map((group) => (
+                              <optgroup key={group.company} label={group.company}>
+                                {group.rows.map((row) => (
+                                  <option key={row.id} value={row.id}>
+                                    {row.label}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ))
+                          : categories.map((row) => (
+                              <option key={row.id} value={row.id}>
+                                {row.label}
+                              </option>
+                            ))}
+                      </select>
+                    </div>
+                  )}
+                  {/* FE-6 — the PRECISE status, inside the filter: the
+                      statuses the open tab holds (every working-list
+                      status when no tab is on). The tabs are the
+                      coarse control; this is the fine one. */}
+                  {!showArchive && (
+                    <div className="filter-field">
+                      <span className="filter-label">{t("common:status")}</span>
+                      <select
+                        className="filter-control"
+                        value={statusFilter}
+                        data-testid="tickets-filter-status"
+                        onChange={(event) => {
+                          const value = event.target.value as TicketStatus | "";
+                          setStatusFilter(value);
+                          if (value) setStatusTab(ticketTabOf(value) ?? "");
+                          setPage(1);
+                          setSelectedIds(new Set<number>());
+                        }}
+                      >
+                        <option value="">{t("filters.status_all")}</option>
+                        {(statusTab
+                          ? ticketTabStatuses(statusTab)
+                          : TICKET_LIST_STATUSES
+                        ).map((value) => (
+                          <option key={value} value={value}>
+                            {tStatus(value)}
                           </option>
                         ))}
                       </select>
                     </div>
                   )}
-                  <div className="filter-field">
-                    <span className="filter-label">{t("common:status")}</span>
-                    <select
-                      className="filter-control"
-                      value={statusFilter}
-                      onChange={(event) => {
-                        setPage(1);
-                        // Sprint 7 — a status change leaves the
-                        // bulk-confirm queue; drop any selection so it
-                        // can't carry across filters.
-                        setSelectedIds(new Set<number>());
-                        setStatusFilter(event.target.value as TicketStatus | "");
-                      }}
-                    >
-                      <option value="">{t("common:all_statuses")}</option>
-                      {TICKET_LIST_STATUSES.map((status) => (
-                        <option key={status} value={status}>
-                          {tStatus(status)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
                   <div className="filter-field">
                     <span className="filter-label">{t("common:priority")}</span>
                     <select
@@ -2240,6 +2594,37 @@ export function DashboardPage({
                       ))}
                     </select>
                   </div>
+                  {/* W8 BUG 1 + BUG 3 — WHO IS ON THIS, once.
+
+                      Was two dropdowns: "Created by: anyone / only me"
+                      and "Assigned to: anyone / nobody yet". Author is
+                      not a slice of work anybody asks for — it is the
+                      predicate that made the dashboard say 7 over a page
+                      of 78 — and the other half of the real question was
+                      already here. One control, three answers. */}
+                  <div className="filter-field">
+                    <span className="filter-label">
+                      {t("filters.assigned")}
+                    </span>
+                    <select
+                      className="filter-control"
+                      value={assignedFilter}
+                      data-testid="tickets-filter-assigned"
+                      onChange={(event) =>
+                        setAssignedFilter(
+                          event.target.value as "" | "me" | "nobody",
+                        )
+                      }
+                    >
+                      <option value="">{t("filters.assigned_anyone")}</option>
+                      <option value="me">{t("filters.assigned_me")}</option>
+                      <option value="nobody">
+                        {t("filters.assigned_nobody")}
+                      </option>
+                    </select>
+                  </div>
+                    </div>
+                  </details>
                   <div className="filter-field search">
                     <span className="filter-label">{t("common:search")}</span>
                     <input
@@ -2254,21 +2639,12 @@ export function DashboardPage({
                     <button type="submit" className="btn btn-secondary btn-sm">
                       {t("common:apply")}
                     </button>
-                    {isProviderManagementRole(userRole) &&
-                      statusFilter !== "WAITING_MANAGER_REVIEW" && (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          data-testid="dashboard-manager-review-preset"
-                          onClick={() => {
-                            setPage(1);
-                            setSelectedIds(new Set<number>());
-                            setStatusFilter("WAITING_MANAGER_REVIEW");
-                          }}
-                        >
-                          {t("bulk_confirm.queue_preset")}
-                        </button>
-                      )}
+                    {/* W8 BUG 3 — "Reported done, needs a check" is
+                        gone. It set one status, which is what the tile
+                        of that name above the list does in one click,
+                        and a button that duplicates a filter is the
+                        third thing on this bar a person could not name.
+                        The tile keeps the wording. */}
                     {hasActiveFilters && (
                       <button
                         type="button"
@@ -2280,6 +2656,36 @@ export function DashboardPage({
                     )}
                   </div>
                 </form>
+
+                {/* W7 DESIGN 3 — the facts, as one line of text.
+                    A count the reader can trust, then what is being held
+                    back and why, then the single control that undoes all
+                    of it. No pills: every one of these is a statement,
+                    and the things that FILTER are the dropdowns above. */}
+                {/* W8 BUG 3 — the count, and nothing else.
+
+                    This line used to carry up to five sentences naming
+                    the narrowings that were on ("only the ones you
+                    created", "chargeable work left out", ...) plus a
+                    second reset button beside the Clear button six
+                    inches above it. Every one of those sentences existed
+                    because the control that set it did not say what it
+                    did; each of those controls now does, so there is
+                    nothing left for the sentence to explain. */}
+                <p
+                  className="list-summary"
+                  data-testid="tickets-list-summary"
+                  aria-live="polite"
+                >
+                  <span className="list-summary-count">
+                    {loading && tickets.length === 0
+                      ? ""
+                      : t("filter_summary.count", {
+                          visible: tickets.length,
+                          count,
+                        })}
+                  </span>
+                </p>
 
                 {assignOpen && (
                   <AssignPeopleDialog
@@ -2354,14 +2760,42 @@ export function DashboardPage({
                   </div>
                 )}
 
-                {loading && (
+                {loading && tickets.length > 0 && (
                   <div className="loading-bar" style={{ margin: 0 }}>
                     <div className="loading-bar-fill" />
                   </div>
                 )}
+                {/* §D.6.10 / §D.8.2 — the first load is DESIGNED: rows
+                    the shape of the table, never "Loading…" text over
+                    an empty console. A refresh with rows on screen
+                    keeps the rows and shows the thin bar above. */}
+                {loading && tickets.length === 0 && (
+                  <div
+                    className="skeleton-table"
+                    aria-hidden="true"
+                    data-testid="tickets-skeleton"
+                  >
+                    {[0, 1, 2, 3, 4, 5].map((row) => (
+                      <div className="skeleton-row" key={row}>
+                        <span className="skeleton-line" />
+                        <span className="skeleton-line" />
+                        <span className="skeleton-line" />
+                        <span className="skeleton-line short" />
+                        <span className="skeleton-line" />
+                        <span className="skeleton-line short" />
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-                <div className="table-wrap ticket-list-wrap">
-                  {/* Sprint 188 — Chargeable work carries two columns the
+                <div
+                  className="table-wrap ticket-list-wrap"
+                  hidden={loading && tickets.length === 0}
+                >
+                  {/* P-9 D2 — the Origin column makes it ten columns on the
+                      Tickets page too, so the dense + fit variant applies
+                      there as well (measured after deploy, walk9d).
+                      Sprint 188 — Chargeable work carries two columns the
                       tickets page does not (Extra work + Route, in place of
                       its single Priority), so at the same cell padding the
                       table was wider than its track and the list scrolled
@@ -2370,7 +2804,7 @@ export function DashboardPage({
                       columns, tighter cells. */}
                   <table
                     className={`data-table${
-                      isChargeableWork
+                      isTicketsPage
                         ? " data-table-dense data-table-fit"
                         : ""
                     }`}
@@ -2403,7 +2837,18 @@ export function DashboardPage({
                             <th>{t("chargeable.col_route")}</th>
                           </>
                         ) : (
-                          <th>{t("common:priority")}</th>
+                          <>
+                            {/* W13 — "you have to show all of it: is it
+                                a complaint, a request, a compliment?"
+                                The list could FILTER by category since
+                                Sprint 185 and never printed it, so the
+                                answer was reachable only by opening
+                                every row. Not on Chargeable work, which
+                                spends these two columns on the extra
+                                work a row came from. */}
+                            <th>{t("common:ticket_categories.field_label")}</th>
+                            <th>{t("common:priority")}</th>
+                          </>
                         )}
                         <th>{t("common:status")}</th>
                         <th className="td-sla">{t("common:sla")}</th>
@@ -2414,18 +2859,21 @@ export function DashboardPage({
                     </thead>
                     <tbody>
                       {tickets.map((ticket) => (
-                        <tr
+                        /* W14 §3 — ONE CLICK, ONE HISTORY ENTRY: the
+                           anchors stay anchors; the row handles only
+                           the cells that are not one. P-13 D (O3) —
+                           the hand-rolled copy of that guard folded
+                           onto the ONE hook (`useRowLink`, via
+                           ClickableRow); `onActivate` carries the
+                           back-state the plain `to` cannot. */
+                        <ClickableRow
                           key={ticket.id}
                           className="ticket-row-clickable"
-                          role="link"
-                          tabIndex={0}
-                          onClick={() => navigate(`/tickets/${ticket.id}`)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              navigate(`/tickets/${ticket.id}`);
-                            }
-                          }}
+                          onActivate={() =>
+                            navigate(`/tickets/${ticket.id}`, {
+                              state: chargeableBackState,
+                            })
+                          }
                         >
                           {bulkMode && (
                             <td
@@ -2446,23 +2894,24 @@ export function DashboardPage({
                           <td>
                             <Link
                               to={`/tickets/${ticket.id}`}
+                              state={chargeableBackState}
                               className="td-id"
                             >
                               {ticket.ticket_no}
                             </Link>
-                            {ticket.extra_work_origin && (
-                              <ExtraWorkOriginPill
-                                ewId={
-                                  ticket.extra_work_origin
-                                    .extra_work_request_id
-                                }
-                                testId="ticket-row-extra-work-origin"
-                                style={{ marginLeft: 8 }}
-                              />
-                            )}
                           </td>
                           <td className="td-subject">
-                            <Link to={`/tickets/${ticket.id}`}>
+                            {/* W15 §1 — the subject goes WHERE THE ROW
+                                GOES. An anchor inside a clickable row
+                                that lands somewhere else is the row
+                                lying about itself: the pointer says one
+                                destination and the rest of the row does
+                                another. The ticket number beside it is
+                                the labelled door to the ticket. */}
+                            <Link
+                              to={`/tickets/${ticket.id}`}
+                              state={chargeableBackState}
+                            >
                               {ticket.title}
                             </Link>
                             {userRole === "STAFF" &&
@@ -2478,19 +2927,90 @@ export function DashboardPage({
                                 </span>
                               )}
                           </td>
+                          {!isChargeableWork && (
+                            <td>
+              {/* W13-FIX §4 — REVERTED to the row's own chip.
+                                  The owner: "who told you to change them,
+                                  revert them, they look terrible."
+
+                                  W13 gave this one cell an outlined pill
+                                  with the catalog colour painted onto its
+                                  border AND its text, which no other tag
+                                  in this table does. It is `.cell-tag`
+                                  again, exactly like the cells beside it,
+                                  and the category's colour rides on the
+                                  `<i>` dot that `.cell-tag` has always
+                                  used for precisely this -- so nothing is
+                                  restyled and no colour is lost. */}
+                              {ticket.category_name ? (
+                                <span
+                                  className="cell-tag"
+                                  data-testid="ticket-row-category"
+                                >
+                                  <i
+                                    style={
+                                      ticket.category_color
+                                        ? { background: ticket.category_color }
+                                        : undefined
+                                    }
+                                  />
+                                  {ticket.category_name}
+                                </span>
+                              ) : (
+                                /* Shown, not hidden. "Not classified
+                                   yet" is the state an operator works
+                                   through, and a blank cell reads as a
+                                   rendering fault rather than a job. */
+                                <span
+                                  className="muted-empty"
+                                  data-testid="ticket-row-category-none"
+                                >
+                                  {t("common:ticket_categories.none")}
+                                </span>
+                              )}
+                            </td>
+                          )}
                           {isChargeableWork ? (
                             <>
+                              {/* W15 §1 (surviving W17 §1) — the extra
+                                  work is NAMED here, not linked, and
+                                  both halves of that are deliberate.
+
+                                  The row opens the ticket, which now
+                                  CARRIES the extra work's money and
+                                  keeps its own door to the EW page — so
+                                  an anchor in this cell is a duplicate
+                                  route to what the row already reaches
+                                  — and this table has already been bitten
+                                  by that exact shape (W14 §3: a link
+                                  inside a clickable row logged
+                                  `PUSH /tickets/343` twice, so one press
+                                  of Back went nowhere).
+
+                                  AND IT WAS A DOOR TO A 404 FOR STAFF.
+                                  Measured on the dev API: STAFF are
+                                  served all 5 chargeable rows, each
+                                  carrying `extra_work_origin`, while
+                                  `GET /api/extra-work/6/` answers them
+                                  `404 {"detail":"No ExtraWorkRequest
+                                  matches the given query."}` — because
+                                  `scope_extra_work_for` returns `.none()`
+                                  for STAFF. Rule 6 says a role that
+                                  cannot use it does not see it; a link
+                                  that always breaks is worse than no
+                                  link. The title stays, because "which
+                                  extra work did this come from" is a
+                                  fact they still need, and it is already
+                                  in the payload they already receive. */}
                               <td>
                                 {ticket.extra_work_origin ? (
-                                  <a
-                                    href={`/extra-work/${ticket.extra_work_origin.extra_work_request_id}`}
-                                    onClick={(event) => event.stopPropagation()}
+                                  <span
                                     data-testid={`chargeable-ew-${ticket.id}`}
                                   >
                                     {ticket.extra_work_origin
                                       .extra_work_request_title ||
                                       `#${ticket.extra_work_origin.extra_work_request_id}`}
-                                  </a>
+                                  </span>
                                 ) : (
                                   <span className="muted-empty">—</span>
                                 )}
@@ -2510,8 +3030,7 @@ export function DashboardPage({
                             </>
                           ) : (
                             <td>
-                              <span className={priorityCellClass(ticket.priority)}>
-                                <i />
+                              <span className={priorityTextClass(ticket.priority)}>
                                 {tPriority(ticket.priority)}
                               </span>
                             </td>
@@ -2537,12 +3056,19 @@ export function DashboardPage({
                               pills read as one string. The rule marks
                               where "how is this job going" ends and
                               "are we late" begins. */}
+                          {/* W7 BUG 3 + DESIGN 1/2 — ONE sentence about
+                              the deadline, as text. It reads "On time —
+                              6h left", "Almost late — 1h left", "Late by
+                              1h 37m", "Waiting on customer", "Finished"
+                              or "No deadline"; the last of those is the
+                              row that used to render an empty cell. */}
                           <td className="td-sla">
                             <SLABadge
                               state={ticket.sla_display_state}
                               remainingSeconds={
                                 ticket.sla_remaining_business_seconds
                               }
+                              variant="plain"
                             />
                           </td>
                           <td className="td-facility">
@@ -2554,7 +3080,7 @@ export function DashboardPage({
                           <td className="td-date">
                             {formatDate(ticket.created_at)}
                           </td>
-                        </tr>
+                        </ClickableRow>
                       ))}
                     </tbody>
                   </table>
@@ -2570,15 +3096,6 @@ export function DashboardPage({
                 >
                   {tickets.map((ticket) => (
                     <li key={ticket.id} className="ticket-card">
-                      {ticket.extra_work_origin && (
-                        <ExtraWorkOriginPill
-                          ewId={
-                            ticket.extra_work_origin.extra_work_request_id
-                          }
-                          testId="ticket-card-extra-work-origin"
-                          style={{ marginBottom: 8 }}
-                        />
-                      )}
                       <Link
                         to={`/tickets/${ticket.id}`}
                         className="ticket-card-link"
@@ -2648,18 +3165,78 @@ export function DashboardPage({
                   ))}
                 </ul>
 
-                {!loading && tickets.length === 0 && (
+                {/* P-9 D1/D2 — AN EMPTY TAB SAYS WHERE THE WORK IS. While
+                    the period narrows the list, the other tabs' numbers
+                    are the ALL-TIME ones and one button lifts the
+                    period; otherwise the tabs' own counts, in a
+                    sentence. The four tabs above keep counting either
+                    way. */}
+                {!loading && tickets.length === 0 && tabsEmptyKind === "loading" && (
+                  <div className="empty-state" data-testid="tickets-tab-empty" data-empty-kind="loading">
+                    <div className="empty-title">
+                      <span className="skeleton-line skeleton-inline" aria-hidden="true" />
+                    </div>
+                  </div>
+                )}
+                {!loading && tickets.length === 0 && tabsEmptyKind === "period" && (
+                  /* P-10 C4 — ONE line, ONE link, in the owner's words: "No
+                     new tickets created in September yet. Earlier: 28 open
+                     — Show all time." The month is the period's, the
+                     number is this tab's all-time count, the link lifts
+                     the period. */
+                  <div className="empty-state" data-testid="tickets-tab-empty" data-empty-kind="period">
+                    <p className="empty-title tickets-tab-empty-line" data-testid="tickets-tab-empty-title">
+                      {t(`tabs_empty.period_title.${tabHere ?? "all"}`, { period: periodPhrase })}{" "}
+                      <span data-testid="tickets-tab-empty-elsewhere">
+                        {t("tabs_empty.earlier", { parts: tabPartHere })}
+                      </span>
+                      {" — "}
+                      <button
+                        type="button"
+                        className="link-button"
+                        data-testid="tickets-show-all-time"
+                        onClick={() => {
+                          setPeriod(periodState("all_time"));
+                          setPage(1);
+                        }}
+                      >
+                        {t("tabs_empty.show_all_time")}
+                      </button>
+                    </p>
+                  </div>
+                )}
+                {!loading && tickets.length === 0 && tabsEmptyKind === "other-tabs" && (
+                  <div className="empty-state" data-testid="tickets-tab-empty" data-empty-kind="other-tabs">
+                    <div className="empty-title" data-testid="tickets-tab-empty-title">
+                      {t(`tabs_empty.title.${tabHere ?? "all"}`)}
+                    </div>
+                    {tabParts(TICKET_TABS.filter((tab) => tab !== tabHere)) && (
+                      <p className="empty-sub" data-testid="tickets-tab-empty-elsewhere">
+                        {tabParts(TICKET_TABS.filter((tab) => tab !== tabHere))}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {!loading && tickets.length === 0 && tabsEmptyKind === null && (
                   <div className="empty-state">
                     <div className="empty-icon">＋</div>
+                    {/* W9 BUG 2 — an empty queue is GOOD NEWS and says
+                        so in its own words. "No tickets match these
+                        filters" is what a filter accident looks like,
+                        and it read identically to one. */}
                     <div className="empty-title">
-                      {hasActiveFilters
-                        ? t("empty_no_match_title")
-                        : t("empty_no_tickets_title")}
+                      {activeQueue
+                        ? t(`queue.${activeQueue.key}.empty`)
+                        : hasActiveFilters
+                          ? t("empty_no_match_title")
+                          : t("empty_no_tickets_title")}
                     </div>
                     <p className="empty-sub">
-                      {hasActiveFilters
-                        ? t("empty_no_match_sub")
-                        : t("empty_no_tickets_sub")}
+                      {activeQueue
+                        ? t("queue.empty_sub")
+                        : hasActiveFilters
+                          ? t("empty_no_match_sub")
+                          : t("empty_no_tickets_sub")}
                     </p>
                     {hasActiveFilters ? (
                       <button
@@ -2677,14 +3254,80 @@ export function DashboardPage({
                   </div>
                 )}
 
+                {/* P-11 A5 — matches outside this tab, one line, opened
+                    on demand, each row named with its tab. */}
+                {elsewhereShown && (
+                  <div className="ew-elsewhere" data-testid="tickets-search-elsewhere">
+                    <p className="muted small">
+                      {t("search_elsewhere", { count: elsewhereShown.count })}{" "}
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => setElsewhereOpen((open) => !open)}
+                        data-testid="tickets-search-elsewhere-toggle"
+                      >
+                        {elsewhereOpen
+                          ? t("search_elsewhere_hide")
+                          : t("search_elsewhere_show")}
+                      </button>
+                    </p>
+                    {elsewhereOpen && (
+                      <ul
+                        className="ew-elsewhere-list"
+                        data-testid="tickets-search-elsewhere-list"
+                      >
+                        {elsewhereShown.rows.map((row) => {
+                          const tabKey = ticketTabOf(row.status);
+                          return (
+                            <li key={row.id} className="ew-elsewhere-row">
+                              <Link
+                                to={`/tickets/${row.id}`}
+                                data-testid={`tickets-elsewhere-row-${row.id}`}
+                              >
+                                {row.ticket_no} · {row.title}
+                              </Link>
+                              {row.customer_name && (
+                                <span className="muted small">{row.customer_name}</span>
+                              )}
+                              <span className="ew-elsewhere-tab">
+                                {tabKey
+                                  ? t(`tickets_tabs.${tabKey}`)
+                                  : t("tickets_tabs.all")}
+                              </span>
+                            </li>
+                          );
+                        })}
+                        {elsewhereShown.count > elsewhereShown.rows.length && (
+                          <li className="ew-elsewhere-row muted small">
+                            {t("search_elsewhere_truncated", {
+                              shown: elsewhereShown.rows.length,
+                              count: elsewhereShown.count,
+                            })}
+                          </li>
+                        )}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
                 <div className="pagination">
                   <span className="pagination-info">
-                    {t("pagination_info", {
-                      visible: tickets.length,
-                      count,
-                      page,
-                      pages: pageCount,
-                    })}
+                    {/* P-15 (P-14's S4 finding) — never "Showing 0 of
+                        0 tickets" while the first load is in flight;
+                        the file's own skeleton test, applied here. */}
+                    {loading && tickets.length === 0 ? (
+                      <span
+                        className="skeleton-line skeleton-inline"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      t("pagination_info", {
+                        visible: tickets.length,
+                        count,
+                        page,
+                        pages: pageCount,
+                      })
+                    )}
                   </span>
                   <div className="pagination-controls">
                     <button
@@ -2710,187 +3353,13 @@ export function DashboardPage({
               </div>
             </div>
 
-            <div className="dash-side">
-              <div className="card">
-                <div className="section-head">
-                  <div>
-                    <div className="section-head-title">
-                      {t("ops_byb_tickets_title")}
-                    </div>
-                    <div className="section-head-sub">
-                      {t("section_byb_sub")}
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      fontFamily: "var(--f-head)",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "var(--text-faint)",
-                      letterSpacing: "0.04em",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {byBuilding ? t("byb_sites", { count: byBuilding.length }) : ""}
-                  </span>
-                </div>
-                <div style={{ padding: "16px 20px 18px" }}>
-                  {byBuilding === null ? (
-                    <p className="muted small">{t("loading")}</p>
-                  ) : byBuilding.length === 0 ? (
-                    <p className="muted small">{t("byb_no_buildings")}</p>
-                  ) : (
-                    <div className="bld-list">
-                      {byBuilding.slice(0, 5).map((row) => {
-                        const active =
-                          row.open +
-                          row.in_progress +
-                          row.waiting_customer_approval;
-                        const total = Math.max(active, 1);
-                        return (
-                          <div key={row.building_id}>
-                            <div className="bld-row-head">
-                              <span className="bld-row-name">
-                                {row.building_name}
-                              </span>
-                              <span className="bld-row-count">
-                                {t("byb_active_count", { count: active })}
-                              </span>
-                            </div>
-                            <div className="bld-bar">
-                              {row.open > 0 && (
-                                <div
-                                  className="bld-bar-seg no"
-                                  style={{
-                                    width: `${(row.open / total) * 100}%`,
-                                  }}
-                                />
-                              )}
-                              {row.in_progress > 0 && (
-                                <div
-                                  className="bld-bar-seg hi"
-                                  style={{
-                                    width: `${(row.in_progress / total) * 100}%`,
-                                  }}
-                                />
-                              )}
-                              {row.waiting_customer_approval > 0 && (
-                                <div
-                                  className="bld-bar-seg urg"
-                                  style={{
-                                    width: `${
-                                      (row.waiting_customer_approval / total) *
-                                      100
-                                    }%`,
-                                  }}
-                                />
-                              )}
-                            </div>
-                            <div className="bld-row-foot">
-                              {row.open > 0 && (
-                                <span className="no">
-                                  {t("byb_open", { count: row.open })}
-                                </span>
-                              )}
-                              {row.in_progress > 0 && (
-                                <span className="hi">
-                                  {t("byb_in_progress", {
-                                    count: row.in_progress,
-                                  })}
-                                </span>
-                              )}
-                              {row.waiting_customer_approval > 0 && (
-                                <span className="urg">
-                                  {t("byb_awaiting_customer", {
-                                    count: row.waiting_customer_approval,
-                                  })}
-                                </span>
-                              )}
-                              {row.urgent > 0 && (
-                                <span className="urg">
-                                  {t("byb_urgent", { count: row.urgent })}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="card">
-                <div className="section-head">
-                  <div>
-                    <div className="section-head-title">
-                      {t("section_status_title")}
-                    </div>
-                    <div className="section-head-sub">
-                      {t("section_status_sub")}
-                    </div>
-                  </div>
-                </div>
-                <div style={{ padding: "14px 18px 18px" }}>
-                  {!stats ? (
-                    <p className="muted small">{t("loading")}</p>
-                  ) : (
-                    <div className="bld-list">
-                      {TICKET_LIST_STATUSES.map((key) => {
-                        const value = stats.by_status[key] ?? 0;
-                        return (
-                          <div key={key} className="bld-row-head">
-                            <span className="bld-row-name">{tStatus(key)}</span>
-                            <span className="bld-row-count">{value}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="card">
-                <div className="section-head">
-                  <div>
-                    <div className="section-head-title">
-                      {t("section_focus_title")}
-                    </div>
-                    <div className="section-head-sub">
-                      {t("section_focus_sub")}
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      fontFamily: "var(--f-head)",
-                      fontSize: 13,
-                      fontWeight: 800,
-                      color: "var(--red)",
-                    }}
-                  >
-                    {focusItems.length}
-                  </span>
-                </div>
-                <div className="focus-list">
-                  {focusItems.length > 0 ? (
-                    focusItems.map((ticket) => (
-                      <Link
-                        key={ticket.id}
-                        to={`/tickets/${ticket.id}`}
-                        className="focus-item"
-                      >
-                        <span className="focus-item-title">{ticket.title}</span>
-                        <span className="focus-item-meta">
-                          {ticket.building_name} · {tStatus(ticket.status)}
-                        </span>
-                      </Link>
-                    ))
-                  ) : (
-                    <p className="focus-empty">{t("focus_empty")}</p>
-                  )}
-                </div>
-              </div>
-            </div>
+            {/* FE-6 (§D.7) — the by-building and focus panels moved to
+                Rapporten. Linked, not rebuilt. */}
+            <p className="muted small" data-testid="tickets-analytics-link">
+              <Link to="/reports#per-gebouw" className="btn btn-ghost btn-sm">
+                {t("analytics_link")}
+              </Link>
+            </p>
           </section>
           </>
         )}

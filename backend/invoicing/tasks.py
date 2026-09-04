@@ -168,37 +168,41 @@ def _notify_run(actor, customer, invoices):
     were correctly created. The run already happened; losing the email is
     an annoyance, losing the invoices is a month of billing.
     """
+    from notifications import copy as notification_copy
     from notifications.services import send_logged_email
 
     if actor is None or not getattr(actor, "email", ""):
         return None
     total = sum((inv.total_amount for inv in invoices), start=0)
-    lines = [
-        f"De facturatietaak heeft {len(invoices)} conceptfactuur/-facturen "
-        f"aangemaakt voor {customer.name}.",
-        "",
-        f"Totaal: {total:.2f}",
-        "",
-    ]
-    for inv in invoices:
-        where = "klantniveau" if inv.building_id is None else "per gebouw"
-        lines.append(f"  - concept #{inv.pk} ({where}): {inv.total_amount:.2f}")
-    lines += [
-        "",
-        "Deze concepten zijn nog niet verstuurd; controleer ze in Facturen.",
-        "",
-        "Deze e-mail is automatisch verzonden.",
-    ]
+    # P-16 Part D — facts through the copy catalogue, rendered in the
+    # recipient's language. The draft pk doubles as the on-screen
+    # "concept #N" label the operator sees under Facturen, so it is a
+    # display reference here, not a bare id.
+    template_key = "invoice_run_completed"
+    params = {
+        "count": len(invoices),
+        "customer_name": customer.name,
+        "total": f"{total:.2f}",
+        "rows": [
+            {
+                "ref": inv.pk,
+                "level": "customer" if inv.building_id is None else "building",
+                "amount": f"{inv.total_amount:.2f}",
+            }
+            for inv in invoices
+        ],
+    }
     try:
+        lang = notification_copy.resolve_lang(getattr(actor, "language", "nl"))
+        subject, body = notification_copy.render_email(template_key, params, lang)
         return send_logged_email(
             recipient_email=actor.email,
             recipient_user=actor,
-            subject=(
-                f"[Facturatie] {len(invoices)} concept(en) aangemaakt voor "
-                f"{customer.name}"
-            ),
-            body="\n".join(lines),
+            subject=subject,
+            body=body,
             event_type=INVOICE_RUN_EVENT,
+            template_key=template_key,
+            params=params,
         )
     except Exception:  # noqa: BLE001 — never lose invoices over an email.
         logger.exception(
@@ -320,9 +324,189 @@ def run_daily_invoice_run(today=None):
             customers_invoiced += 1
             created_total += len(created)
 
+    # W11 — THE RECURRING FEE, on the same run.
+    #
+    # A contract is the standing agreement: so many square metres, so
+    # many hours a year, for so much a month. Its generator has existed
+    # and been tested since Sprint 164 but nothing ever called it outside
+    # a management command somebody had to type, so every contract read
+    # EUR 0.00 on the billing tab and the module looked broken rather
+    # than unwired. This is that wire.
+    #
+    # The SAME run, deliberately, not a second one: one schedule, one
+    # place to look when a month is wrong. It runs after the Extra Work
+    # loop because the two are independent -- contract periods are driven
+    # by the contract's own billing period and first invoice date, Extra
+    # Work by the customer's billing day -- and a failure in one must not
+    # cost the other its run.
+    #
+    # `system=True` rather than an actor: `Invoice.created_by` has been
+    # nullable since Sprint 183 §3 exactly so a scheduled run stops
+    # putting a person's name on documents nobody created, and the Extra
+    # Work half above already does this. Contract drafts now render as
+    # System beside them.
+    #
+    # Double-creation is refused by the database, not by this function:
+    # `ContractInvoice` carries UniqueConstraint(contract, period_start),
+    # and the generator treats the IntegrityError as "another run has
+    # this period". That is the same data-is-the-key argument the Extra
+    # Work claim makes above.
+    contracts_created = 0
+    try:
+        from contracts.invoice_generation import generate_invoices
+
+        contracts_created = len(
+            generate_invoices(system=True, on=day).created
+        )
+    except Exception:  # noqa: BLE001 — contracts must not cost EW its run.
+        failed += 1
+        logger.exception("W11: contract invoice generation failed")
+
     return {
         "date": day.isoformat(),
         "customers_invoiced": customers_invoiced,
         "invoices_created": created_total,
+        "contract_invoices_created": contracts_created,
+        "failed": failed,
+    }
+
+
+# ---------------------------------------------------------------------
+# WP-1 G4 — the weekly billing-month-at-risk digest.
+# ---------------------------------------------------------------------
+
+#: The digest's catalogue key — the DE-DUP key since P-16 Part D: a
+#: recipient who already has a log row with this `template_key` inside
+#: the last six days is skipped, so a restarted beat container cannot
+#: double-mail the same week. Matching on the key instead of on subject
+#: text survives a copy change and a recipient-language difference.
+AT_RISK_TEMPLATE_KEY = "billing_month_at_risk"
+
+#: The old Dutch subject prefix — kept ONLY as the transition leg of the
+#: de-dup query, so a digest sent just before this deploy (whose row has
+#: no template_key) still holds the six-day window shut.
+AT_RISK_SUBJECT_PREFIX = "[Facturatie] Deze factuurmaand loopt risico"
+
+
+def _at_risk_params(data, day) -> dict:
+    """The digest's facts, for the copy catalogue: names, numbers and
+    display refs (a ticket_no, or the MW-<n> label the list pages print
+    for an unspawned request)."""
+    return {
+        "total": data["total"],
+        "month": day.strftime("%Y-%m"),
+        "groups": [
+            {
+                "customer_name": group["customer_name"],
+                "rows": [
+                    {
+                        "ref": row["ticket_no"] or f"MW-{row['extra_work_id']}",
+                        "title": row["title"],
+                        "building_name": row["building_name"] or "",
+                        "stage": row["stage"],
+                        "age_days": row["age_days"],
+                    }
+                    for row in group["rows"]
+                ],
+            }
+            for group in data["groups"]
+        ],
+    }
+
+
+@shared_task
+def send_billing_month_at_risk_digest(today=None):
+    """WP-1 G4 — mail every provider company's admins the at-risk list.
+
+    Weekly through CELERY_BEAT_SCHEDULE. Reads `at_risk.at_risk_groups`
+    over each company's own active customers — never across companies —
+    and sends through `send_logged_email`, so every mail leaves a
+    `NotificationLog` row.
+
+    EVENT TYPE: reuses `INVOICE_RUN_COMPLETED`. A dedicated
+    `NotificationEventType` value would change the model's `choices`,
+    which Django records as a migration — and WP-1 is a zero-migration
+    sprint by explicit rule. The digest is an invoicing-run operator
+    mail in substance, and its subject prefix keeps it distinguishable
+    in the log. A dedicated value is a one-line follow-up (plus its
+    choices migration) for a later sprint.
+
+    Never raises; one company's failure must not cost another its
+    digest. `today` (ISO date string) exists for tests.
+    """
+    from datetime import date, timedelta
+
+    from django.utils import timezone as tz
+
+    from customers.models import Customer
+    from notifications.models import NotificationLog
+    from notifications.services import (
+        company_admin_recipients,
+        send_logged_email,
+    )
+
+    from .at_risk import at_risk_groups
+
+    day = date.fromisoformat(today) if today else tz.localdate()
+    now = tz.now()
+
+    company_ids = list(
+        Customer.objects.filter(is_active=True)
+        .values_list("company_id", flat=True)
+        .distinct()
+    )
+    mailed = failed = skipped = 0
+    for company_id in company_ids:
+        try:
+            customers = Customer.objects.filter(
+                company_id=company_id, is_active=True
+            )
+            data = at_risk_groups(customers, today=day, now=now)
+            if data["total"] == 0:
+                continue
+            # P-16 Part D — rendered per recipient through the copy
+            # catalogue; the dedupe keys on `template_key` (with the old
+            # subject prefix as the transition leg for pre-key rows).
+            from django.db.models import Q as _Q
+
+            from notifications import copy as notification_copy
+
+            params = _at_risk_params(data, day)
+            for admin in company_admin_recipients(company_id):
+                already = NotificationLog.objects.filter(
+                    _Q(template_key=AT_RISK_TEMPLATE_KEY)
+                    | _Q(subject__startswith=AT_RISK_SUBJECT_PREFIX),
+                    recipient_user=admin,
+                    event_type=INVOICE_RUN_EVENT,
+                    created_at__gte=now - timedelta(days=6),
+                ).exists()
+                if already:
+                    skipped += 1
+                    continue
+                lang = notification_copy.resolve_lang(
+                    getattr(admin, "language", "nl")
+                )
+                subject, body = notification_copy.render_email(
+                    AT_RISK_TEMPLATE_KEY, params, lang
+                )
+                send_logged_email(
+                    recipient_email=admin.email,
+                    recipient_user=admin,
+                    subject=subject,
+                    body=body,
+                    event_type=INVOICE_RUN_EVENT,
+                    template_key=AT_RISK_TEMPLATE_KEY,
+                    params=params,
+                )
+                mailed += 1
+        except Exception:  # noqa: BLE001 — one company must not stop the rest.
+            failed += 1
+            logger.exception(
+                "WP-1 G4: at-risk digest failed for company %s", company_id
+            )
+    return {
+        "date": day.isoformat(),
+        "mailed": mailed,
+        "skipped": skipped,
         "failed": failed,
     }

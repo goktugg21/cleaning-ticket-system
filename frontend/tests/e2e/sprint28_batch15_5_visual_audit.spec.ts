@@ -12,8 +12,9 @@
  *   3. Money values always carry the euro symbol on the EW list.
  *   4. The Users page renders the un-compact RoleBadge (side
  *      caption visible) and the new per-row scope chip.
- *   5. The sidebar customer-context chip appears on every
- *      customer-scoped route and only there.
+ *   5. The customer page's tab row (FE-6 — the replacement of the
+ *      sidebar customer-context chip) appears on every customer
+ *      route and only there.
  *
  * The scope-chip assertion depends on a parallel backend change
  * (UserAdminListSerializer.scope_summary). If the field is not
@@ -39,7 +40,7 @@ const FORBIDDEN_JSON_SHAPE = /\{"before":/;
 const PAGES_TO_AUDIT = [
   { path: "/", name: "dashboard" },
   { path: "/extra-work", name: "extra-work-list" },
-  { path: "/admin/users", name: "users" },
+  { path: "/admin/people/users", name: "users" },
   { path: "/admin/audit-logs", name: "audit-logs" },
   { path: "/admin/customers", name: "customers" },
 ];
@@ -64,8 +65,14 @@ test.describe("Sprint 28 Batch 15.5 — Visual audit", () => {
   }
 
   test("money values always carry the euro symbol", async ({ page }) => {
+    // P-11 F1 — REPINNED to the P-9 tabs (§D.22 pt 6): the eight-column
+    // table this test indexed into (route, category, … total at
+    // td.nth(6)) is gone; each tab now shows at most six columns tuned
+    // to its question, and the money column is the Finished tab's
+    // Amount. The pin's INTENT survives: every non-empty money cell
+    // carries the euro symbol.
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/extra-work");
+    await page.goto("/extra-work/finished");
     await page.waitForSelector(
       '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
       { timeout: 10_000 },
@@ -73,23 +80,19 @@ test.describe("Sprint 28 Batch 15.5 — Visual audit", () => {
     const rowCount = await page
       .locator('[data-testid="extra-work-row"]')
       .count();
-    test.skip(rowCount === 0, "No EW rows in seed.");
-    // Total column. Per ExtraWorkListPage.tsx the column order is
-    // title (0), status (1), route (2), category (3), building (4),
-    // customer (5), total (6), requested (7). Iterate per row and
-    // pull the 7th td (nth(6)) — using a single flat .td().nth(6)
-    // would only inspect one row's worth of cells, not the total
-    // column across every row.
+    test.skip(rowCount === 0, "No finished EW rows in seed.");
+    // The Amount column is the 4th on Finished (what, where, finished,
+    // amount, invoice, next) — read it per row by header position.
     const rows = page.locator('[data-testid="extra-work-row"]');
     const rowsCount = await rows.count();
     const totals: string[] = [];
     for (let i = 0; i < rowsCount; i++) {
-      const t = await rows.nth(i).locator("td").nth(6).textContent();
+      const t = await rows.nth(i).locator("td").nth(3).textContent();
       if (t !== null) totals.push(t);
     }
     for (const t of totals) {
       if (t.trim() === "" || t.trim() === "—") continue;
-      expect(t, `Total cell missing currency symbol: "${t}"`).toMatch(/€/);
+      expect(t, `Amount cell missing currency symbol: "${t}"`).toMatch(/€/);
     }
   });
 
@@ -97,7 +100,7 @@ test.describe("Sprint 28 Batch 15.5 — Visual audit", () => {
     page,
   }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/admin/users");
+    await page.goto("/admin/people/users");
     await page.waitForSelector('[data-testid="users-group-provider"]', {
       timeout: 10_000,
     });
@@ -111,7 +114,7 @@ test.describe("Sprint 28 Batch 15.5 — Visual audit", () => {
     expect(await scopeChips.count()).toBeGreaterThan(0);
   });
 
-  test("sidebar customer context chip appears on scoped routes", async ({
+  test("customer tab row appears on customer routes and only there", async ({
     page,
   }) => {
     await loginAs(page, DEMO_USERS.super);
@@ -119,6 +122,8 @@ test.describe("Sprint 28 Batch 15.5 — Visual audit", () => {
     await page
       .waitForLoadState("networkidle", { timeout: 10_000 })
       .catch(() => {});
+    // The list page is not a customer page: no tab row.
+    await expect(page.locator('[data-testid="customer-tabs"]')).toHaveCount(0);
     // Pick any customer-detail link from the list (skip the
     // "create new" link which routes to /admin/customers/new).
     const firstCustomerLink = page
@@ -129,8 +134,11 @@ test.describe("Sprint 28 Batch 15.5 — Visual audit", () => {
       test.skip(true, "No customers in seed.");
     }
     await firstCustomerLink.click();
+    await expect(page.locator('[data-testid="customer-tabs"]')).toBeVisible({
+      timeout: 5_000,
+    });
     await expect(
-      page.locator('[data-testid="sidebar-customer-context-chip"]'),
-    ).toBeVisible({ timeout: 5_000 });
+      page.locator('[data-testid="customer-page-header"]'),
+    ).toBeVisible();
   });
 });

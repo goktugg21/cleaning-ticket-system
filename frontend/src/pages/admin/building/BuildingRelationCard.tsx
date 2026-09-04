@@ -126,6 +126,8 @@ export function BuildingRelationCard({
     }
   }
 
+  const showEmail = rows.some((row) => Boolean(row.email));
+  const showPhone = rows.some((row) => Boolean(row.phone));
   return (
     <section
       className="card"
@@ -255,8 +257,12 @@ export function BuildingRelationCard({
                 </th>
               )}
               <th>{t("admin.col_name")}</th>
-              <th>{t("users.col_email")}</th>
-              <th>{t("customer_contacts.field_phone")}</th>
+              {/* P-4 (Part F) — a column that cannot have a value is not
+                  a column: e-mail and phone render only when a row has
+                  one (customers and contacts without them lose the
+                  dashes). */}
+              {showEmail && <th>{t("users.col_email")}</th>}
+              {showPhone && <th>{t("customer_contacts.field_phone")}</th>}
               {edit.editMode && <th aria-label={t("admin.col_actions")} />}
             </tr>
           </thead>
@@ -308,22 +314,12 @@ export function BuildingRelationCard({
                     </span>
                   )}
                 </td>
-                <td>
-                  {row.email ? (
-                    <a href={`mailto:${row.email}`}>{row.email}</a>
-                  ) : (
-                    <span className="muted-empty">—</span>
-                  )}
-                </td>
-                <td>
-                  {/* Empty renders an em dash, never a blank cell — a
-                      blank one reads as a rendering bug. */}
-                  {row.phone ? (
-                    <a href={`tel:${row.phone}`}>{row.phone}</a>
-                  ) : (
-                    <span className="muted-empty">—</span>
-                  )}
-                </td>
+                {showEmail && (
+                  <td>{row.email ? <a href={`mailto:${row.email}`}>{row.email}</a> : ""}</td>
+                )}
+                {showPhone && (
+                  <td>{row.phone ? <a href={`tel:${row.phone}`}>{row.phone}</a> : ""}</td>
+                )}
                 {edit.editMode && (
                   <td>
                     <button

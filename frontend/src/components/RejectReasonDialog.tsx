@@ -14,7 +14,7 @@
  * `onCancel`. The reason text is cleared from local state on close
  * so re-opening starts fresh.
  */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 export interface RejectReasonDialogProps {
@@ -26,6 +26,12 @@ export interface RejectReasonDialogProps {
   placeholder?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** P-7 S3.1 — "warning": an exceptional act (deciding on the
+   *  customer's behalf). Amber band and amber confirm, never red. */
+  tone?: "warning";
+  /** P-9 C4 — a block between the description and the reason box
+   *  (the coverage notice on the approve-on-behalf ceremony). */
+  children?: ReactNode;
 }
 
 export function RejectReasonDialog({
@@ -37,6 +43,8 @@ export function RejectReasonDialog({
   placeholder,
   confirmLabel,
   cancelLabel,
+  tone,
+  children,
 }: RejectReasonDialogProps) {
   const { t } = useTranslation("extra_work");
   const [reason, setReason] = useState("");
@@ -52,13 +60,17 @@ export function RejectReasonDialog({
       role="dialog"
       aria-modal="true"
     >
-      <div className="reject-modal">
+      <div
+        className={tone === "warning" ? "reject-modal reject-modal--warning" : "reject-modal"}
+        data-tone={tone}
+      >
         <h3 className="reject-modal-title">
           {title ?? t("detail.reject_dialog_title")}
         </h3>
         <p className="reject-modal-desc">
           {description ?? t("detail.reject_dialog_description")}
         </p>
+        {children}
         <textarea
           data-testid="reject-reason-textarea"
           className="field-textarea reject-modal-textarea"
@@ -82,7 +94,7 @@ export function RejectReasonDialog({
           </button>
           <button
             type="button"
-            className="btn btn-primary btn-sm reject-modal-confirm"
+            className={`btn ${tone === "warning" ? "btn-warning" : "btn-primary"} btn-sm reject-modal-confirm`}
             data-testid="reject-reason-confirm"
             disabled={disabled}
             onClick={() => {

@@ -261,6 +261,13 @@ class _B6Fixture(TestCase):
             quantity=Decimal("1.00"),
             requested_date="2026-06-01",
         )
+        # P-16 repin — W-PLAN gates the SEND door on a complete plan
+        # (which postdates these pins). The plan is completed here so
+        # the wall each test targets — the BM's revocable KEY — is the
+        # one that answers, not the plan gate in front of it.
+        from extra_work.tests.plan_gate_fixture import make_plan_complete
+
+        make_plan_complete(ew, worker=self.bm_in, manager=self.bm_in)
         proposal = Proposal.objects.create(
             extra_work_request=ew,
             created_by=self.admin,

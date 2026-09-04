@@ -138,10 +138,16 @@ Two separate scopes (`invoicing/selectors.py`):
   provider scope; it never widens provider visibility.
 
 Every `InvoiceViewSet` action is gated by `_forbid_non_operator` (a non-
-operator gets a stable 403, never an empty 200/404); the issue/send/unissue/
-reverse actions inherit it via the `_transition` helper, **and** each
-state-machine function **independently re-checks** `_is_provider_operator`.
-That double gate is deliberate defence in depth — keep both. The PDF endpoint
+operator gets a stable 403, never an empty 200/404). **P-15 §0.1 / H-12
+tightened the four COMMIT actions**: issue/send/unissue/reverse now inherit
+the stricter `_forbid_non_admin` via the `_transition` helper — CA/SA only,
+because sending allocates the gapless number and emails the customer (a
+company act, not a building act) — **and** each of those four state-machine
+functions **independently re-checks** `is_invoice_admin`
+(`invoicing/permissions.py`, stable code `invoice_admin_only`). That double
+gate is deliberate defence in depth — keep both. A BUILDING_MANAGER keeps the
+building-level half: generate, preview, draft meta/lines, delete-draft, PDF
+and the lists, all still on the operator gate. The PDF endpoint
 (`InvoicePdfView`) and the customer read surface (`/api/invoices/my/`) are
 gated the same way through their respective scopes.
 

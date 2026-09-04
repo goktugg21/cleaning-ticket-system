@@ -220,6 +220,37 @@ class RecurringJobViewSet(viewsets.ModelViewSet):
             return RecurringJobWriteSerializer
         return RecurringJobReadSerializer
 
+    def create(self, request, *args, **kwargs):
+        # P-12 E2 (§D.24 rule 4) — the page moves you to the thing you
+        # made, so the answer must carry its id: respond with the READ
+        # shape, not the write echo.
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        read = RecurringJobReadSerializer(
+            serializer.instance, context=self.get_serializer_context()
+        )
+        headers = self.get_success_headers(read.data)
+        return Response(read.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        # P-15 (P-14's S4 finding) — UPDATE answers the READ shape too:
+        # P-12 E2 fixed create and left PATCH returning the write echo
+        # (no `id`), the one asymmetry in the pair.
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=partial
+        )
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        if getattr(instance, "_prefetched_objects_cache", None):
+            instance._prefetched_objects_cache = {}
+        read = RecurringJobReadSerializer(
+            instance, context=self.get_serializer_context()
+        )
+        return Response(read.data)
+
     def destroy(self, request, *args, **kwargs):
         # Soft-archive instead of hard delete. PlannedOccurrence PROTECTs
         # this job, so a hard delete would fail once occurrences exist;
@@ -637,6 +668,49 @@ class PlannedOccurrenceViewSet(viewsets.ReadOnlyModelViewSet):
             by_status[row["status"]] = row["c"]
         total = sum(by_status.values())
 
+        # P-12 E1 (§D.24 rule 2) — the window's visits with NO CREW:
+        # still only planned (no ticket yet), or spawned onto a ticket
+        # nobody active is assigned to. The soonest one is the door.
+        from django.db.models import Q as _Q
+
+        from tickets.models import StaffAssignmentSlotStatus
+
+        no_crew_qs = (
+            qs.filter(
+                status__in=[
+                    PlannedOccurrenceStatus.PLANNED,
+                    PlannedOccurrenceStatus.TICKET_CREATED,
+                ]
+            )
+            .annotate(
+                crew=Count(
+                    "ticket__staff_assignments",
+                    filter=~_Q(
+                        ticket__staff_assignments__slot_status=(
+                            StaffAssignmentSlotStatus.CANCELLED
+                        )
+                    ),
+                )
+            )
+            .filter(crew=0)
+        )
+        no_crew_count = no_crew_qs.count()
+        soonest = (
+            no_crew_qs.select_related("recurring_job")
+            .order_by("planned_date", "id")
+            .first()
+        )
+        no_crew_first = (
+            {
+                "occurrence": soonest.id,
+                "recurring_job": soonest.recurring_job_id,
+                "recurring_job_title": soonest.recurring_job.title,
+                "planned_date": soonest.planned_date.isoformat(),
+            }
+            if soonest
+            else None
+        )
+
         # Per-building breakdown: one GROUP BY with conditional counts per
         # status. Buildings with no rows in scope are skipped naturally
         # (no padding rows), but every row that DOES appear carries all
@@ -668,6 +742,8 @@ class PlannedOccurrenceViewSet(viewsets.ReadOnlyModelViewSet):
                     "customer_id": customer_id,
                 },
                 "by_status": by_status,
+            "no_crew": no_crew_count,
+            "no_crew_first": no_crew_first,
                 "total": total,
                 "by_building": by_building,
                 "generated_at": timezone.now().isoformat(),

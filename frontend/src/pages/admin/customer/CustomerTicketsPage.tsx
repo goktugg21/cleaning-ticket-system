@@ -55,7 +55,7 @@ export function CustomerTicketsPage() {
 
   return (
     <div data-testid="customer-tickets-page">
-      <CustomerSubPageHeader customerName={customerName} isActive={isActive} />
+      <CustomerSubPageHeader tab="work" subTab="tickets" customerName={customerName} isActive={isActive} />
 
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">

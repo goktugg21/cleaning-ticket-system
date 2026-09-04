@@ -4,7 +4,8 @@
  *
  * What's locked here:
  *   1. `/admin/customers/:id` (Overview) renders the new Overview
- *      page with the stat strip, quicklinks grid, and buildings
+ *      page with the stat strip (FE-6: one chip per destination — the
+ *      separate quicklinks grid is folded into it) and buildings
  *      preview AND NO permission affordances (no override radios,
  *      no policy toggles, no "Edit permissions" buttons).
  *   2. `/admin/customers/:id/permissions` renders the new
@@ -13,10 +14,8 @@
  *   3. BUILDING_MANAGER read-only customer detail still works —
  *      the `ByRole` dispatcher in App.tsx routes BM to
  *      `BuildingManagerCustomerDetailPage`, NOT the new Overview.
- *   4. Dashboard segmented work-view toggle hides / shows the
- *      Tickets and Extra Work sections, the unified 5-card top KPI
- *      strip always renders, and `view=all` carries a single
- *      "Recent operational items" card.
+ *   4. Dashboard (FE-6): four KPI tiles, ONE attention list and the
+ *      billing panel; the ticket list lives on /tickets only.
  *   5. `/admin/customers/:id/buildings` shows a real shell (not the
  *      placeholder) and `/admin/customers/:id/users` shows a per-
  *      user access summary cell.
@@ -100,9 +99,10 @@ test.describe("Sprint 28 Batch 13 — view-first customer pages", () => {
       timeout: 15_000,
     });
 
-    // New summary scaffolding from the Batch 13 rework: stat strip
-    // (4 cards), buildings preview card, quicklinks grid (>= 6
-    // anchors).
+    // Summary scaffolding: the stat strip (FE-6: one chip per
+    // destination, each a link — buildings / users / contacts /
+    // pricing / extra work / tickets / permissions) and the buildings
+    // preview card.
     await expect(
       page.getByTestId("customer-overview-stat-strip"),
     ).toBeVisible();
@@ -119,16 +119,17 @@ test.describe("Sprint 28 Batch 13 — view-first customer pages", () => {
       page.getByTestId("customer-overview-stat-pricing"),
     ).toBeVisible();
     await expect(
-      page.getByTestId("customer-overview-buildings-preview"),
+      page.getByTestId("customer-overview-stat-permissions"),
     ).toBeVisible();
     await expect(
-      page.getByTestId("customer-overview-quicklinks"),
+      page.getByTestId("customer-overview-buildings-preview"),
     ).toBeVisible();
-    // The quicklinks grid has six management areas. Anchor on count.
-    const quicklinks = page.locator(
-      '[data-testid^="customer-overview-quicklink-"]',
+    // The stat strip links to the management areas. Anchor on count
+    // (>= 6 chips, each an anchor into a sub-page).
+    const chips = page.locator(
+      '[data-testid="customer-overview-stat-strip"] a[data-testid^="customer-overview-stat-"]',
     );
-    expect(await quicklinks.count()).toBeGreaterThanOrEqual(6);
+    expect(await chips.count()).toBeGreaterThanOrEqual(6);
 
     // Permission affordances are NOT present on the Overview surface.
     await expect(
@@ -163,10 +164,12 @@ test.describe("Sprint 28 Batch 13 — view-first customer pages", () => {
       .locator('[data-testid="customer-permissions-advanced-toggle"]')
       .click();
 
-    // At least one policy toggle resolves — the policy panel has
-    // four booleans wired through this testid.
+    // At least one policy toggle resolves. The testid sits on the
+    // switch's visually hidden checkbox; its `.toggle-switch` label is
+    // what the operator sees.
     const policyToggles = page.getByTestId("customer-policy-toggle");
-    await expect(policyToggles.first()).toBeVisible({ timeout: 15_000 });
+    await expect(policyToggles.first()).toBeAttached({ timeout: 15_000 });
+    await expect(policyToggles.first().locator("xpath=..")).toBeVisible();
     expect(await policyToggles.count()).toBeGreaterThan(0);
   });
 
@@ -187,9 +190,11 @@ test.describe("Sprint 28 Batch 13 — view-first customer pages", () => {
       timeout: 15_000,
     });
     // Either the buildings table OR a typed empty-state should render
-    // — never the legacy placeholder.
+    // — never the legacy placeholder. Wait for the list to load before
+    // counting (the page mounts before its rows arrive).
     const table = page.getByTestId("customer-buildings-table");
     const empty = page.getByTestId("customer-buildings-empty");
+    await expect(table.or(empty).first()).toBeVisible({ timeout: 15_000 });
     const tableCount = await table.count();
     const emptyCount = await empty.count();
     expect(tableCount + emptyCount).toBeGreaterThan(0);
@@ -212,9 +217,11 @@ test.describe("Sprint 28 Batch 13 — view-first customer pages", () => {
       timeout: 15_000,
     });
     // Either at least one per-user access summary cell renders, or
-    // the typed empty-state copy renders. Both are valid outcomes.
+    // the typed empty-state copy renders. Both are valid outcomes;
+    // wait for the member list to load before counting.
     const access = page.getByTestId("customer-user-access-summary");
     const empty = page.getByTestId("customer-users-empty");
+    await expect(access.or(empty).first()).toBeVisible({ timeout: 15_000 });
     const accessCount = await access.count();
     const emptyCount = await empty.count();
     expect(accessCount + emptyCount).toBeGreaterThan(0);
@@ -251,33 +258,28 @@ test.describe("Sprint 28 Batch 13 — view-first customer pages", () => {
   });
 });
 
-test.describe("Sprint 28 Batch 13 — dashboard overview (RF-16 rework)", () => {
-  test("dashboard shows unified ops KPI strip + attention cards", async ({
+test.describe("Sprint 28 Batch 13 — dashboard overview (FE-6 rework)", () => {
+  test("dashboard shows the four KPI tiles + the attention list, no lists", async ({
     page,
   }) => {
     test.setTimeout(120_000);
     await loginAs(page, DEMO_USERS.super);
     await page.goto("/");
 
-    // Unified KPI strip is always visible.
+    // FE-6 — the KPI row is FOUR tiles: open work, urgent, awaiting
+    // (customer / review), this month.
     await expect(page.getByTestId("dashboard-ops-kpi-row")).toBeVisible({
       timeout: 15_000,
     });
-    await expect(page.getByTestId("dashboard-ops-kpi-total")).toBeVisible();
-    await expect(page.getByTestId("dashboard-ops-kpi-tickets")).toBeVisible();
-    await expect(
-      page.getByTestId("dashboard-ops-kpi-extra-work"),
-    ).toBeVisible();
-    await expect(page.getByTestId("dashboard-ops-kpi-awaiting")).toBeVisible();
-    await expect(page.getByTestId("dashboard-ops-kpi-urgent")).toBeVisible();
+    await expect(page.getByTestId("hero-open-work")).toBeVisible();
+    await expect(page.getByTestId("hero-urgent")).toBeVisible();
+    await expect(page.getByTestId("hero-awaiting")).toBeVisible();
+    await expect(page.getByTestId("hero-month")).toBeVisible();
 
-    // RF-16 — attention cards replace the work lists; the work-view
-    // toggle and the unified recent-ops table are gone.
+    // ONE attention list replaces the work lists; the billing panel
+    // closes the page. No ticket table on "/".
     await expect(page.getByTestId("dashboard-attention")).toBeVisible();
-    await expect(page.getByTestId("dashboard-recent-ops")).toHaveCount(0);
-    await expect(
-      page.getByTestId("dashboard-work-view-toggle"),
-    ).toHaveCount(0);
+    await expect(page.getByTestId("dashboard-billing-panel")).toBeVisible();
     await expect(page.getByTestId("dashboard-tickets-section")).toHaveCount(0);
 
     // The full list (with its locked wrapper testid) lives on /tickets.

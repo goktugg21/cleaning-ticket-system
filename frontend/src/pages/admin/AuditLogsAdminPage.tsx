@@ -2,6 +2,8 @@ import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+
+import { prettyEnum } from "../../lib/enumLabels";
 import { getApiError } from "../../api/client";
 import { listAuditLogs } from "../../api/admin";
 import type { AuditLogListParams } from "../../api/admin";
@@ -9,7 +11,129 @@ import { getTicketAuditTimeline } from "../../api/ticketTimeline";
 import type { AuditAction, AuditLog, TicketTimelineRow } from "../../api/types";
 import { ChangeDiff } from "../../components/ChangeDiff";
 import { SeverityBadge, UnifiedTimeline } from "../../components/UnifiedTimeline";
-import { formatDateTime } from "../../lib/intl";
+import { formatDate, formatDateTime } from "../../lib/intl";
+
+/**
+ * W-HK1 §1 — the audit log stops speaking machine.
+ *
+ * Two things in these rows were raw storage format leaking into the UI.
+ * Both are DISPLAY-only fixes: nothing here changes what is stored, what
+ * the API returns, or how the diff is parsed.
+ *
+ * 1. Timestamps. `audit/diff.py::serialize_value` writes every datetime
+ *    through `.isoformat()`, so a diff row for a date field renders as
+ *    `2026-08-20T21:42:31.914445+00:00`. The page already formats its own
+ *    `created_at` column through `formatDateTime`; these values simply
+ *    never went through it, because ChangeDiff renders raw strings by
+ *    design. `valueLabel` is ChangeDiff's own hook for exactly this, so
+ *    the fix is a prop from here rather than an edit to the shared
+ *    component — the other ChangeDiff consumer (UnifiedTimeline) is
+ *    deliberately left alone.
+ *
+ * 2. Record references. The target column printed `accounts.User#9`,
+ *    which is the storage key, not a name. Where the diff payload
+ *    carries a human field for the same row (`name`, `title`, `email`,
+ *    ...) that is shown instead, and the machine key moves to the
+ *    `title` tooltip so it is still one hover away. With no such field
+ *    the raw key is kept — a wrong guess would be worse than a key.
+ */
+
+// An ISO-8601 instant as Python's `.isoformat()` emits it. Anchored at
+// both ends and requiring the `T` so ordinary strings that merely start
+// with digits (invoice numbers like "2026-0007", version strings) are
+// never reformatted into a date.
+const ISO_DATETIME_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/;
+
+// A date-only value (Django DateField). Same anchoring rule.
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * ChangeDiff `valueLabel`: render ISO instants the way the rest of the
+ * app renders dates. Returning `null` falls through to ChangeDiff's own
+ * rendering, which is what every non-date value must keep doing.
+ */
+function auditValueLabel(_field: string, value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  if (ISO_DATETIME_RE.test(value)) return formatDateTime(value);
+  if (ISO_DATE_RE.test(value)) return formatDate(value);
+  return null;
+}
+
+// Fields that name a row, in the order a reader would prefer them.
+// `name` before `email` because a person's name reads better than their
+// login; `number` last because it is the most code-like of the set.
+const DISPLAY_NAME_FIELDS = [
+  "name",
+  "title",
+  "label",
+  "full_name",
+  "display_name",
+  "email",
+  "code",
+  "number",
+] as const;
+
+/**
+ * Pull a human label for the audited row out of its own diff payload.
+ *
+ * Prefers `after` (what the row is NOW) and falls back to `before`, so a
+ * DELETE — whose every `after` is null — still names what was deleted.
+ * Only non-empty strings qualify; a numeric `number` field would just be
+ * a second machine key.
+ */
+function displayNameFromChanges(
+  changes: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!changes || typeof changes !== "object") return null;
+  for (const field of DISPLAY_NAME_FIELDS) {
+    const raw = changes[field];
+    if (raw === null || raw === undefined) continue;
+    let candidate: unknown = raw;
+    if (typeof raw === "object" && !Array.isArray(raw)) {
+      const cell = raw as { before?: unknown; after?: unknown };
+      candidate = cell.after ?? cell.before;
+    }
+    if (typeof candidate === "string" && candidate.trim() !== "") {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
+
+/** The always-available machine key, e.g. `accounts.User#9`. */
+function targetKey(log: AuditLog): string {
+  return `${log.target_model}#${log.target_id}`;
+}
+
+/**
+ * The target cell. P-15 (P-14's S3 finding) — the machine key prints
+ * ALWAYS, beside the name when there is one: the RECORD column used to
+ * mix `extra_work.ExtraWorkRequest#281` with bare display names
+ * ("Overig", "Contracten") a stranger could not attach to any record,
+ * on the page whose purpose is investigation.
+ */
+function TargetRef({ log }: { log: AuditLog }) {
+  const key = targetKey(log);
+  const name = displayNameFromChanges(log.changes);
+  if (!name) {
+    return (
+      <span style={{ fontFamily: "var(--f-mono, monospace)" }}>{key}</span>
+    );
+  }
+  return (
+    <span data-testid="audit-target-name">
+      {name}{" "}
+      <span
+        className="muted small"
+        style={{ fontFamily: "var(--f-mono, monospace)" }}
+        data-testid="audit-target-key"
+      >
+        {key}
+      </span>
+    </span>
+  );
+}
 
 /**
  * Sprint 18 — read-only audit log viewer for SUPER_ADMIN.
@@ -59,7 +183,14 @@ function isoEndOfDay(value: string): string {
 }
 
 export function AuditLogsAdminPage() {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
+  // P-5 S6.4 — technical, but the fields wear their human names: a
+  // known field reads its `audit_field.*` label, an unknown one is
+  // prettified from its column name. The raw name stays in the title.
+  const auditFieldLabel = (field: string) =>
+    i18n.exists(`common:audit_field.${field}`)
+      ? t(`audit_field.${field}`)
+      : prettyEnum(field);
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [count, setCount] = useState(0);
   const [next, setNext] = useState<string | null>(null);
@@ -455,9 +586,7 @@ export function AuditLogsAdminPage() {
                     </span>
                   </td>
                   <td>
-                    <span style={{ fontFamily: "var(--f-mono, monospace)" }}>
-                      {log.target_model}#{log.target_id}
-                    </span>
+                    <TargetRef log={log} />
                   </td>
                   <td>
                     <span className="muted small">
@@ -465,7 +594,7 @@ export function AuditLogsAdminPage() {
                       {log.request_id ? ` · ${log.request_id}` : ""}
                     </span>
                   </td>
-                  <td>
+                  <td className="audit-changes-cell">
                     <details>
                       <summary
                         style={{ cursor: "pointer" }}
@@ -474,7 +603,11 @@ export function AuditLogsAdminPage() {
                         {t("audit_logs.changes_summary")}
                       </summary>
                       <div style={{ marginTop: 6 }}>
-                        <ChangeDiff changes={log.changes} />
+                        <ChangeDiff
+                          changes={log.changes}
+                          valueLabel={auditValueLabel}
+                          fieldLabel={auditFieldLabel}
+                        />
                       </div>
                     </details>
                   </td>
@@ -521,8 +654,8 @@ export function AuditLogsAdminPage() {
                   </div>
                   <div className="admin-card-meta-row">
                     <dt>{t("audit_logs.col_target")}</dt>
-                    <dd style={{ fontFamily: "var(--f-mono, monospace)" }}>
-                      {log.target_model}#{log.target_id}
+                    <dd>
+                      <TargetRef log={log} />
                     </dd>
                   </div>
                   {(log.request_ip || log.request_id) && (
@@ -538,7 +671,7 @@ export function AuditLogsAdminPage() {
                 <details>
                   <summary>{t("audit_logs.changes_summary")}</summary>
                   <div style={{ marginTop: 6 }}>
-                    <ChangeDiff changes={log.changes} />
+                    <ChangeDiff changes={log.changes} valueLabel={auditValueLabel} />
                   </div>
                 </details>
               </div>

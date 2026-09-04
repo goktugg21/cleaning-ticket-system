@@ -104,6 +104,12 @@ class AuditCompanyMutationTests(AuditLogBaseTest):
         target_id = target.id
         AuditLog.objects.all().delete()  # drop the CREATE row above
 
+        # P-16 repin — W13 seeds PROTECTed TicketCategory rows on every
+        # company create (post_save); they must go before the company
+        # can (the same order Sprint 142 taught the backfill fixtures).
+        from tickets.models import TicketCategory
+
+        TicketCategory.objects.filter(company=target).delete()
         target.delete()
 
         log = AuditLog.objects.filter(

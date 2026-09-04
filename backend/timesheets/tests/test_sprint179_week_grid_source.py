@@ -42,6 +42,34 @@ ISO_YEAR, ISO_WEEK = 2026, 32
 class WeekGridSourceIdentityTests(TimesheetsFixture):
     """One cell per job, one row per job."""
 
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        # P-16 repin — the write path validates the source pair against
+        # REAL, in-scope jobs now (`_source_in_scope`: the ticket must
+        # exist in the actor's ticket scope and the entry's company).
+        # The original tests used fictional ids 41/42, which the
+        # hardened door rightly refuses. Two real tickets on the
+        # building staff_a holds BUILDING_READ visibility on.
+        from tickets.models import Ticket
+
+        cls.job_a = Ticket.objects.create(
+            company=cls.company_a,
+            building=cls.building_a,
+            customer=cls.customer_a,
+            created_by=cls.ca_a,
+            title="Stairwell repaint",
+            description="job a",
+        )
+        cls.job_b = Ticket.objects.create(
+            company=cls.company_a,
+            building=cls.building_a,
+            customer=cls.customer_a,
+            created_by=cls.ca_a,
+            title="Window wash",
+            description="job b",
+        )
+
     def _cell(self, hours, *, source_type=None, source_id=None):
         cell = {
             "date": MONDAY.isoformat(),
@@ -66,8 +94,8 @@ class WeekGridSourceIdentityTests(TimesheetsFixture):
         # same building, same hour type — two different tickets.
         response = self._post(
             [
-                self._cell("4.00", source_type=HourSource.TICKET, source_id=41),
-                self._cell("3.00", source_type=HourSource.TICKET, source_id=42),
+                self._cell("4.00", source_type=HourSource.TICKET, source_id=self.job_a.id),
+                self._cell("3.00", source_type=HourSource.TICKET, source_id=self.job_b.id),
             ]
         )
         self.assertEqual(response.status_code, 200, response.data)
@@ -80,8 +108,8 @@ class WeekGridSourceIdentityTests(TimesheetsFixture):
         self.assertEqual(
             [(row.source_type, row.source_id, str(row.hours)) for row in rows],
             [
-                (HourSource.TICKET, 41, "4.00"),
-                (HourSource.TICKET, 42, "3.00"),
+                (HourSource.TICKET, self.job_a.id, "4.00"),
+                (HourSource.TICKET, self.job_b.id, "3.00"),
             ],
         )
 
@@ -107,37 +135,37 @@ class WeekGridSourceIdentityTests(TimesheetsFixture):
 
     def test_resending_the_same_job_updates_that_row(self):
         self._post(
-            [self._cell("4.00", source_type=HourSource.TICKET, source_id=41)]
+            [self._cell("4.00", source_type=HourSource.TICKET, source_id=self.job_a.id)]
         )
         response = self._post(
-            [self._cell("6.00", source_type=HourSource.TICKET, source_id=41)]
+            [self._cell("6.00", source_type=HourSource.TICKET, source_id=self.job_a.id)]
         )
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["updated"], 1)
         self.assertEqual(response.data["created"], 0)
         row = TimeEntry.objects.get(employee=self.staff_a, date=MONDAY)
         self.assertEqual(str(row.hours), "6.00")
-        self.assertEqual(row.source_id, 41)
+        self.assertEqual(row.source_id, self.job_a.id)
 
     def test_clearing_one_jobs_cell_leaves_the_other_alone(self):
         self._post(
             [
-                self._cell("4.00", source_type=HourSource.TICKET, source_id=41),
-                self._cell("3.00", source_type=HourSource.TICKET, source_id=42),
+                self._cell("4.00", source_type=HourSource.TICKET, source_id=self.job_a.id),
+                self._cell("3.00", source_type=HourSource.TICKET, source_id=self.job_b.id),
             ]
         )
         response = self._post(
-            [self._cell("0", source_type=HourSource.TICKET, source_id=41)]
+            [self._cell("0", source_type=HourSource.TICKET, source_id=self.job_a.id)]
         )
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["deleted"], 1)
         remaining = TimeEntry.objects.filter(employee=self.staff_a, date=MONDAY)
         self.assertEqual(remaining.count(), 1)
-        self.assertEqual(remaining.first().source_id, 42)
+        self.assertEqual(remaining.first().source_id, self.job_b.id)
 
     def test_an_untagged_cell_does_not_overwrite_a_job_tagged_row(self):
         self._post(
-            [self._cell("4.00", source_type=HourSource.TICKET, source_id=41)]
+            [self._cell("4.00", source_type=HourSource.TICKET, source_id=self.job_a.id)]
         )
         response = self._post([self._cell("2.00")])
         self.assertEqual(response.status_code, 200, response.data)
@@ -153,7 +181,7 @@ class WeekGridSourceIdentityTests(TimesheetsFixture):
                 # written before the source column existed. That is the
                 # point: "nobody said" is one state, not two.
                 (HourSource.OTHER, None, "2.00"),
-                (HourSource.TICKET, 41, "4.00"),
+                (HourSource.TICKET, self.job_a.id, "4.00"),
             ],
         )
 

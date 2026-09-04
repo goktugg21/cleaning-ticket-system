@@ -58,6 +58,7 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+from .plan_gate_fixture import make_plan_complete
 
 
 User = get_user_model()
@@ -213,6 +214,9 @@ class ProposalPdfFixtureMixin:
             category=ExtraWorkCategory.DEEP_CLEANING,
             status=status,
         )
+        # W-PLAN — pricing is gated on a complete plan; this
+        # module tests pricing surfaces, not the gate.
+        make_plan_complete(ew)
         # B2 (system-business-logic-and-workflows.md §7.0) — cart-line
         # quantity must match the proposal-line quantity in
         # `_line_payload` ("2.00") so the SEND coverage gate passes.

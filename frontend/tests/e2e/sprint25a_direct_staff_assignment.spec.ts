@@ -3,6 +3,7 @@ import type { APIRequestContext } from "@playwright/test";
 
 import { DEMO_PASSWORD, DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
+import { openTicketTab } from "./fixtures/tickets";
 
 /**
  * Sprint 25A — pilot-readiness audit: admin/manager direct staff
@@ -12,16 +13,20 @@ import { loginAs } from "./fixtures/login";
  *   API gate
  *     - COMPANY_ADMIN can add and remove a STAFF assignment via the
  *       new endpoint without any staff-initiated request.
- *     - Add is idempotent (re-POST returns 200, no duplicate row).
+ *     - W26.3 — ONE PERSON, ONE SLOT PER LEVEL: a re-POST for the same
+ *       person on the same ticket is rejected (400), never a second
+ *       base slot.
  *     - Cross-company COMPANY_ADMIN cannot add (404 via queryset).
  *     - CUSTOMER_USER cannot add (403).
  *     - STAFF cannot add (403).
  *     - assignable-staff endpoint excludes ineligible candidates and
  *       cross-company staff.
  *   UI
- *     - COMPANY_ADMIN sees the Sprint 25A admin block on a ticket
- *       detail page, adds a staff member, and the ticket reload
- *       shows them in `assigned_staff`. Cleanup restores state.
+ *     - COMPANY_ADMIN sees the staff-assignment section on the ticket's
+ *       People tab (FE-3: the Sprint 25A "admin block" + its select
+ *       became the Assign dialog of the staff-assignment table), adds
+ *       a staff member, and the ticket reload shows them in the
+ *       assignment table. Cleanup restores state.
  *
  * State isolation: each test acts on a freshly seeded ticket
  * cycle (add then remove). The cross-company / cross-role tests
@@ -171,15 +176,13 @@ test.describe("Sprint 25A → direct staff assignment API gate", () => {
       expect(addBody.user_id).toBe(staffId);
       const slotId = addBody.id as number;
 
-      // Multi-slot per staff — a re-POST is NO LONGER idempotent: it
-      // creates a SECOND slot row (201) for the same staff.
+      // W26.3 — one person, one slot per level: the same staff on the
+      // same ticket again is refused at the chokepoint.
       const dup = await admin.post(
         `/api/tickets/${ticketId}/staff-assignments/`,
         { data: { user_id: staffId } },
       );
-      expect(dup.status()).toBe(201);
-      const dupBody = await dup.json();
-      expect(dupBody.id).not.toBe(slotId);
+      expect(dup.status()).toBe(400);
 
       // Detail reflects the assignment.
       const detail = await admin.get(`/api/tickets/${ticketId}/`);
@@ -190,13 +193,11 @@ test.describe("Sprint 25A → direct staff assignment API gate", () => {
         .map((e) => (e as { id: number }).id);
       expect(assignedIds).toContain(staffId);
 
-      // Cleanup — remove BOTH slots, now keyed by the slot id.
-      for (const id of [slotId, dupBody.id as number]) {
-        const remove = await admin.delete(
-          `/api/tickets/${ticketId}/staff-assignments/${id}/`,
-        );
-        expect(remove.status()).toBe(204);
-      }
+      // Cleanup — remove the slot, keyed by the slot id.
+      const remove = await admin.delete(
+        `/api/tickets/${ticketId}/staff-assignments/${slotId}/`,
+      );
+      expect(remove.status()).toBe(204);
     } finally {
       await admin.dispose();
     }
@@ -304,8 +305,8 @@ test.describe("Sprint 25A → direct staff assignment API gate", () => {
 // UI — admin sees and uses the Sprint 25A block on ticket detail
 // =====================================================================
 
-test.describe("Sprint 25A → ticket detail admin block", () => {
-  test("COMPANY_ADMIN can add a STAFF via the new block and the ticket reloads with them assigned", async ({
+test.describe("Sprint 25A → ticket detail staff-assignment section", () => {
+  test("COMPANY_ADMIN can add a STAFF via the Assign dialog and the table reloads with them assigned", async ({
     baseURL,
     page,
   }) => {
@@ -319,13 +320,20 @@ test.describe("Sprint 25A → ticket detail admin block", () => {
 
     await loginAs(page, DEMO_USERS.companyAdmin);
     await page.goto(`/tickets/${ticketId}`);
-    const block = page.locator('[data-testid="assigned-staff-admin-block"]');
-    await expect(block).toBeVisible({ timeout: 15_000 });
+    await openTicketTab(page, "people");
+    const section = page.locator('[data-testid="staff-assignment-section"]');
+    await expect(section).toBeVisible({ timeout: 15_000 });
 
-    // Wait for the assignable-staff dropdown to populate.
-    const select = page.locator('[data-testid="assigned-staff-admin-select"]');
-    await expect(select).toBeVisible();
-    await select.selectOption(String(staffId));
+    // Open the Assign dialog (the "assign first" and "assign more"
+    // buttons share one testid) and tick Ahmet by his user id.
+    await section.locator('[data-testid="staff-assignment-assign"]').first().click();
+    const dialog = page.locator('[data-testid="assign-staff-modal"]');
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    const person = dialog.locator(
+      `[data-testid="assign-staff-person"][data-user-id="${staffId}"]`,
+    );
+    await expect(person).toBeVisible({ timeout: 10_000 });
+    await person.check();
 
     const addPromise = page.waitForResponse(
       (r) =>
@@ -333,19 +341,16 @@ test.describe("Sprint 25A → ticket detail admin block", () => {
         r.request().method() === "POST",
       { timeout: 15_000 },
     );
-    await page
-      .locator('[data-testid="assigned-staff-admin-add-button"]')
-      .click();
+    await dialog.locator('[data-testid="assign-staff-confirm"]').click();
     const addResponse = await addPromise;
     expect([200, 201]).toContain(addResponse.status());
 
-    // Banner shows + the staff member appears in the assigned-staff list.
-    await expect(
-      page.locator('[data-testid="assigned-staff-admin-banner"]'),
-    ).toBeVisible({ timeout: 5_000 });
+    // The dialog closes and the staff member appears as a row of the
+    // assignment table.
+    await expect(dialog).toBeHidden({ timeout: 10_000 });
     await expect(
       page
-        .locator('[data-testid="assigned-staff-item"]')
+        .locator('[data-testid="staff-assignment-row"]')
         .filter({ hasText: DEMO_USERS.staffOsius.fullName }),
     ).toBeVisible({ timeout: 10_000 });
 
@@ -366,7 +371,7 @@ test.describe("Sprint 25A → ticket detail admin block", () => {
     await admin.dispose();
   });
 
-  test("No raw `assigned_staff_admin_*` i18n keys leak on ticket detail", async ({
+  test("No raw i18n keys leak on the staff-assignment section or its Assign dialog", async ({
     baseURL,
     page,
   }) => {
@@ -379,27 +384,27 @@ test.describe("Sprint 25A → ticket detail admin block", () => {
 
     await loginAs(page, DEMO_USERS.companyAdmin);
     await page.goto(`/tickets/${ticketId}`);
+    await openTicketTab(page, "people");
+    const section = page.locator('[data-testid="staff-assignment-section"]');
+    await expect(section).toBeVisible({ timeout: 15_000 });
+    await section.locator('[data-testid="staff-assignment-assign"]').first().click();
     await expect(
-      page.locator('[data-testid="assigned-staff-admin-block"]'),
-    ).toBeVisible({ timeout: 15_000 });
+      page.locator('[data-testid="assign-staff-modal"]'),
+    ).toBeVisible({ timeout: 10_000 });
+    // i18next returns the KEY when a lookup misses; a key literal has
+    // the shape `namespace:group.key` or `group.key` with an underscore
+    // vocabulary. Scan the rendered text for the section's namespaces.
     const bodyText = (await page.locator("body").textContent()) ?? "";
-    const RAW_KEYS = [
-      "assigned_staff_admin_title",
-      "assigned_staff_admin_desc",
-      "assigned_staff_admin_select_placeholder",
-      "assigned_staff_admin_no_eligible",
-      "assigned_staff_admin_add_button",
-      "assigned_staff_admin_remove_button",
-      "assigned_staff_admin_remove_dialog_title",
-      "assigned_staff_admin_remove_dialog_body",
-      "assigned_staff_admin_banner_added",
-      "assigned_staff_admin_banner_removed",
-    ];
-    for (const key of RAW_KEYS) {
+    for (const pattern of [
+      /\bstaff_slots:[a-z_.]+/,
+      /\bassign\.[a-z_]+\b/,
+      /\bassigned_staff_[a-z_]+\b/,
+    ]) {
       expect(
-        bodyText.includes(key),
-        `Raw i18n key "${key}" leaked into rendered text — check src/i18n/{en,nl}/ticket_detail.json`,
-      ).toBe(false);
+        bodyText,
+        `Raw i18n key matching ${pattern} leaked into rendered text — check src/i18n/{en,nl}/`,
+      ).not.toMatch(pattern);
     }
+    await page.locator('[data-testid="assign-staff-cancel"]').click();
   });
 });

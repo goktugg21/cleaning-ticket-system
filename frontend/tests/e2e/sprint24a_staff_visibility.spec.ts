@@ -438,11 +438,13 @@ test.describe("Sprint 24A → UserFormPage Staff details UI", () => {
       .filter({ hasText: "B1 Amsterdam" })
       .first();
     await expect(row).toBeVisible({ timeout: 15_000 });
+    // The switch's testid sits on a visually hidden checkbox input; the
+    // `.toggle-switch` label around it is the click target.
     const checkbox = row.locator(
       '[data-testid="staff-visibility-can-request"]',
     );
-    await expect(checkbox).toBeVisible();
-    await expect(checkbox).toBeChecked({ checked: originalCanRequest });
+    await expect(checkbox).toBeAttached();
+    expect(await checkbox.isChecked()).toBe(originalCanRequest);
 
     // Flip via the UI and wait for the PATCH to round-trip.
     const patchPromise = page.waitForResponse(
@@ -451,7 +453,7 @@ test.describe("Sprint 24A → UserFormPage Staff details UI", () => {
         r.request().method() === "PATCH",
       { timeout: 10_000 },
     );
-    await checkbox.click();
+    await checkbox.locator("xpath=..").click();
     const patchResponse = await patchPromise;
     expect(patchResponse.status()).toBe(200);
 
@@ -521,7 +523,10 @@ test("UserFormPage Staff details: no horizontal body overflow at 430x932", async
 
   await page.setViewportSize({ width: 430, height: 932 });
   await loginAs(page, DEMO_USERS.companyAdmin);
-  await page.goto(`/admin/users/${staffId}`);
+  // Sprint 29 Batch 29.6 — `/admin/users/:id` is the read-only detail
+  // page; the Staff details + visibility editor (and its mobile card
+  // list) live on the form at /edit.
+  await page.goto(`/admin/users/${staffId}/edit`);
   await expect(
     page.locator('[data-testid="staff-details-section"]'),
   ).toBeVisible({ timeout: 15_000 });

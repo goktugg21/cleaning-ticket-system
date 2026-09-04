@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
 import { getCustomer, listCustomerBuildings } from "../../api/admin";
-import { PageHeader } from "../../components/PageHeader";
+import { CustomerSubPageHeader } from "./customer/CustomerSubPageHeader";
 import type {
   CustomerAdmin,
   CustomerBuildingMembership,
@@ -89,17 +89,11 @@ export function BuildingManagerCustomerDetailPage() {
           body face. `PageHeader` owns the back link (`link-back`, with
           the same chevron) and the house 28/800 title. Both test ids are
           kept where they were. */}
-      <PageHeader
-        backLink={{
-          to: "/admin/customers",
-          label: t("bm_customer_detail.back"),
-        }}
-        title={
-          <span data-testid="bm-customer-detail-title">
-            {customer ? customer.name : t("loading")}
-          </span>
-        }
-        subtitle={
+      <CustomerSubPageHeader
+        customerName={customer ? customer.name : ""}
+        isActive={customer?.is_active ?? true}
+        tab="overview"
+        facts={
           <span data-testid="bm-customer-detail-readonly-hint">
             {t("bm_customer_detail.readonly_hint")}
           </span>

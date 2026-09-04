@@ -2,31 +2,61 @@
  * Sprint 159 §1 — enter a week. ONE modal, opened by the one primary
  * button on the Hours page.
  *
- * It replaces `WeekSetupDialog` + the in-page week grid, which were two
- * halves of this and the reason the page had a grid on it AND a grid in
- * a modal. The owner's verdict on that arrangement — *the hours area has
- * got very confused* — was about exactly that duplication.
+ * ## W-HOURS4 Task 1 — the reference system's flow, with two refinements
  *
- * The order inside is the reference system's:
+ * The owner signed off a mock: the dialog is the reference system's
+ * entry flow — pick **Employees** (chips), pick **Buildings** (chips),
+ * pick the **week** — with two things the reference does not do.
  *
- *   1. the choices, SIDE BY SIDE (employees, buildings, hour types,
- *      week) — the owner asked for this explicitly, rather than stacked
- *      down the page;
- *   2. the grid those choices produce, one row per (employee, building,
- *      hour type);
- *   3. Cancel / Save.
+ * **1. Rows are the VALID (person, building) pairs only.** Building
+ * grants are the hard wall. For every selected person the server is
+ * asked what it already knows (`GET /api/reports/week-assignments/`,
+ * keyed by THE DIALOG'S week): the buildings they may enter and the
+ * jobs they are on that week. A pair the grants do not allow never
+ * materialises as a row; one quiet line counts and names the skipped
+ * pairs ("1 skipped: Gökhan × B3 — no access"). "No building" is a
+ * legitimate seat (hours not tied to a site) and is valid for everyone.
  *
- * ## Two independent reads, deliberately NOT one Promise.all
+ * **2. A job is a LINE UNDER THE PERSON (P-11 B2).** The per-row
+ * "+ link a job (optional)" picker is gone; a job line is ADDED per
+ * person ("+ Add a line for Ahmet" — another hour type on the same
+ * job, another building, or a job, through the same `RowJobPicker`
+ * search). The person's own assignments that week still arrive as
+ * proposed job lines (`seedRowsByEmployee`); the grid renders them as
+ * children under the person's standard lines, tagged Ticket / Extra
+ * work.
  *
- * Sprint 155 shipped them combined and it was a real bug, caught by
- * measuring the built page: `weeks/status/` 400s for a SUPER_ADMIN who
- * has not disambiguated a company (`timesheet_company_required`), which
- * rejected the combined promise and threw away the ENTRIES — whose own
- * request had returned 200. The grid rendered empty over a week that had
- * rows in it. Split, a failure in the lock read can never discard the
- * entries, and an unknown lock state defaults to OPEN — which only
- * affects whether the cells look editable, because the SERVER refuses a
- * write into a closed week regardless.
+ * ## Terminal work
+ *
+ * "This week" shows what `/reports/week-assignments/` proposes for the
+ * selected week. That endpoint offers OPEN work only (it excludes
+ * closed / cancelled / rejected tickets for every week), so in the
+ * current week a finished job is not offered — as ruled. In a PAST
+ * week the ruling wants since-closed work offered too (backfilling
+ * truth is legitimate); that is a one-predicate change in
+ * `backend/reports/week_assignments.py::_open_tickets`, which this
+ * dialog does not own. Search stays free and saving stays allowed: the
+ * lock that matters is the WEEK lock.
+ *
+ * ## The fill row, the hour-type rows and the week save are unchanged
+ *
+ * They belong to `HoursWeekGrid`, which this dialog hands the pairs to
+ * as per-person seeds (`seedRowsByEmployee`). Reconciliation is as it
+ * was: a pair that already has hours this week IS the saved row, not a
+ * blank twin of it.
+ *
+ * ## Three independent reads, deliberately NOT one Promise.all
+ *
+ * Sprint 155 shipped the entries and the lock combined and it was a
+ * real bug, caught by measuring the built page: `weeks/status/` 400s
+ * for a SUPER_ADMIN who has not disambiguated a company, which rejected
+ * the combined promise and threw away the ENTRIES. Split, a failure in
+ * the lock read can never discard the entries, and an unknown lock
+ * state defaults to OPEN — the SERVER refuses a write into a closed
+ * week regardless. The assignment read is the third independent read:
+ * if it fails, the grid still shows the week's saved rows, no pair
+ * rows are proposed (the wall cannot be checked), and the dialog says
+ * so.
  *
  * A NON-native overlay, conditionally mounted, like every other editing
  * modal in this codebase. CLAUDE.md's render-unconditionally rule is
@@ -36,7 +66,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { fetchWeekStatus, listTimeEntries } from "../../api/timesheets";
+import { getApiError } from "../../api/client";
+import {
+  fetchWeekStatus,
+  fillWeekFromContracts,
+  listTimeEntries,
+  listWeekAssignments,
+} from "../../api/timesheets";
+import type {
+  WeekAssignmentPerson,
+  WeekAssignments,
+} from "../../api/timesheets";
 import type {
   HourType,
   TimeEntry,
@@ -52,13 +92,24 @@ import { usePickerReserve } from "../../lib/usePickerReserve";
 import { formatIsoWeek, parseIsoWeek } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
 import { HoursWeekGrid } from "./HoursWeekGrid";
+import type { GridJobPicker, GridSeedRow } from "./HoursWeekGrid";
 
 /** The picker's sentinel for "these hours are not tied to a location".
  *  `TimeEntry.building` is nullable BY DESIGN and stays that way — this
  *  is a UI affordance for choosing null, mapped back to null before it
  *  reaches the grid. Zero is safe because every real building id is a
- *  positive auto-increment pk. */
+ *  positive auto-increment pk. Still exported: the contract-hours bulk
+ *  dialog shares it. */
 export const NO_BUILDING_ID = 0;
+
+/** Stable empty seeds so the grid's memo does not recompute per render. */
+const NO_SEED_BUILDINGS: (number | null)[] = [];
+
+/** One pair the wall refused. */
+interface SkippedPair {
+  employee: number;
+  building: number;
+}
 
 export function WeekEntryDialog({
   employees,
@@ -66,6 +117,8 @@ export function WeekEntryDialog({
   hourTypes,
   companyId,
   initialWeek,
+  initialEmployeeIds,
+  preselectNote,
   onClose,
   onSaved,
 }: {
@@ -75,31 +128,47 @@ export function WeekEntryDialog({
   hourTypes: HourType[];
   companyId?: number | null;
   initialWeek: IsoWeek;
+  /** P-11 B1 — the week card's per-person Edit opens the grid ON that
+   *  person: their id arrives pre-selected. Empty (the default) opens
+   *  the dialog as before, nobody chosen yet. */
+  initialEmployeeIds?: number[];
+  /** P-13 O4 — one sentence under the title saying WHY these people
+   *  arrived pre-selected ("These N have no hours in week W yet.").
+   *  Set only by the Hours page's Start-here door; absent otherwise. */
+  preselectNote?: string;
   onClose: () => void;
   /** The page refreshes its list and closes this. */
-  onSaved: (changed: number) => void | Promise<void>;
+  onSaved: (
+    changed: number,
+    saved?: { employee: number; hours: number }[],
+  ) => void | Promise<void>;
 }) {
   const { t } = useTranslation("common");
 
-  const [employeeIds, setEmployeeIds] = useState<number[]>([]);
-  // Sprint 165 §2 — nothing is chosen until the operator chooses. This
-  // opened with NO_BUILDING already ticked, which made it easy to save
-  // a week of hours against no location without noticing. "No building"
-  // stays AVAILABLE in the list; it is simply not picked for them.
+  const [employeeIds, setEmployeeIds] = useState<number[]>(
+    initialEmployeeIds ?? [],
+  );
   const [buildingIds, setBuildingIds] = useState<number[]>([]);
-  // Sprint 177 §7 — the JOB these hours are worked on. Optional: plenty
-  // of hours belong to no particular job, and forcing a choice would be
-  // worse than the untagged rows this is fixing. Chosen, it becomes a
-  // seeded row per job so the source travels with the hours instead of
-  // being typed twice (which is to say: never typed at all).
-  const [sourceKeys, setSourceKeys] = useState<number[]>([]);
-  const [sourceOptions, setSourceOptions] = useState<HourSourceOption[]>([]);
   const [week, setWeek] = useState<IsoWeek>(initialWeek);
 
   const [entriesByEmployee, setEntriesByEmployee] = useState<
     Record<number, TimeEntry[]>
   >({});
   const [weekClosed, setWeekClosed] = useState(false);
+  /** Which (week, company) the lock answer belongs to. The chip reads
+   *  "Loading…" until this matches the week on screen — the Hours
+   *  page's own pattern, and the only way to re-enter loading without
+   *  a synchronous setState in an effect body. */
+  const [lockKey, setLockKey] = useState<string | null>(null);
+
+  /** Sprint 177 §7 / 179B — the titles the grid's job tags read. */
+  const [sourceOptions, setSourceOptions] = useState<HourSourceOption[]>([]);
+
+  /** hours2 Part 3 — the server's answer per selected person: the
+   *  buildings they may enter (the wall) and the jobs they are on THIS
+   *  week (the "This week" group of every row's job picker). */
+  const [assignments, setAssignments] = useState<WeekAssignments | null>(null);
+  const [assignmentsError, setAssignmentsError] = useState("");
 
   // Sprint 169 §1 — the modal grows to CONTAIN an open picker list,
   // and shrinks back when it closes. See `usePickerReserve` for why a
@@ -110,20 +179,42 @@ export function WeekEntryDialog({
   /**
    * Sprint 180 §2 — Escape still closes, but not over unsaved hours.
    *
-   * The listener is on `window`, so Escape closed this dialog from
-   * anywhere, including with the caret inside a cell. The grid's typed
-   * values live in the grid's own state and are thrown away with it: an
-   * hour of typing died on one keystroke, silently, with nothing to
-   * recover and no way to know it had happened. The same is true of
-   * Cancel and of a click on the backdrop.
-   *
-   * So all three routes go through `requestClose`, which closes
-   * immediately when the grid is clean and asks first when it is not.
-   * The dirty flag is REPORTED by the grid from its own event handlers
-   * (`onDirtyChange`), never derived in an effect here.
+   * All three close routes (Escape, Cancel, backdrop) go through
+   * `requestClose`, which closes immediately when the grid is clean
+   * and asks first when it is not. The dirty flag is REPORTED by the
+   * grid from its own event handlers (`onDirtyChange`), never derived
+   * in an effect here.
    */
   const [dirty, setDirty] = useState(false);
   const discardDialogRef = useRef<ConfirmDialogHandle>(null);
+
+  /**
+   * P-7 S1.2 — switching week over unsaved hours ASKS first.
+   *
+   * The grid is remounted per week (its `key`), so a week change threw
+   * away every typed cell; the only mitigation was a standing sentence
+   * ("unsaved hours are cleared when you switch week"). My hours asked
+   * at the moment; this dialog now does the same: the chosen week waits
+   * in a ref while the question is on screen, and lands only on
+   * "discard". Rendered unconditionally, driven through the ref.
+   */
+  const leaveWeekDialogRef = useRef<ConfirmDialogHandle>(null);
+  const pendingWeekRef = useRef<IsoWeek | null>(null);
+  const requestWeek = (next: IsoWeek) => {
+    if (dirty) {
+      pendingWeekRef.current = next;
+      leaveWeekDialogRef.current?.open();
+      return;
+    }
+    setWeek(next);
+  };
+  const confirmLeaveWeek = () => {
+    const next = pendingWeekRef.current;
+    pendingWeekRef.current = null;
+    leaveWeekDialogRef.current?.close();
+    setDirty(false);
+    if (next) setWeek(next);
+  };
 
   const requestClose = useCallback(() => {
     if (dirty) {
@@ -145,35 +236,66 @@ export function WeekEntryDialog({
   // `allSettled`, so a failure for one person cannot discard anybody
   // else's rows. The request count is bounded by the operator's own
   // selection.
+  /** W-FIX1 D1 (audit F6) — which (week, company, people) setups this
+   *  dialog has already asked the server to fill. The fill is a WRITE;
+   *  it used to fire on every picker change and every week glanced at.
+   *  It now fires once per confirmed setup — both pickers non-empty —
+   *  and never twice for the same one while this dialog is open. */
+  const filledSetups = useRef(new Set<string>());
   useEffect(() => {
     if (employeeIds.length === 0) return;
     let cancelled = false;
-    Promise.allSettled(
-      employeeIds.map((employeeId) =>
-        listTimeEntries({
-          employee: employeeId,
+    /* W10 — fill this week from the standing agreements BEFORE reading
+       it, so a contracted week is never blank and nobody has to press
+       anything weekly. Idempotent server-side (and serialised there
+       since W-FIX1 D1), and it never touches a week that already has
+       rows, so re-opening a week the operator has edited changes
+       nothing. A failure is not fatal: the sheet then simply shows what
+       is already there. */
+    const setupKey = `${week.isoYear}-W${week.isoWeek}|${companyId ?? ""}|${[
+      ...employeeIds,
+    ]
+      .sort((a, b) => a - b)
+      .join(",")}`;
+    const shouldFill =
+      buildingIds.length > 0 && !filledSetups.current.has(setupKey);
+    if (shouldFill) filledSetups.current.add(setupKey);
+    const ready = shouldFill
+      ? fillWeekFromContracts({
           iso_year: week.isoYear,
           iso_week: week.isoWeek,
-          page_size: 200,
-        }).then((page) => [employeeId, page.results] as const),
-      ),
-    ).then((results) => {
-      if (cancelled) return;
-      const next: Record<number, TimeEntry[]> = {};
-      for (const result of results) {
-        if (result.status === "fulfilled") {
-          const [employeeId, rows] = result.value;
-          next[employeeId] = rows;
+          company: companyId ?? "",
+        }).catch(() => undefined)
+      : Promise.resolve(undefined);
+    ready.then(() =>
+      Promise.allSettled(
+        employeeIds.map((employeeId) =>
+          listTimeEntries({
+            employee: employeeId,
+            iso_year: week.isoYear,
+            iso_week: week.isoWeek,
+            page_size: 200,
+          }).then((page) => [employeeId, page.results] as const),
+        ),
+      ).then((results) => {
+        if (cancelled) return;
+        const next: Record<number, TimeEntry[]> = {};
+        for (const result of results) {
+          if (result.status === "fulfilled") {
+            const [employeeId, rows] = result.value;
+            next[employeeId] = rows;
+          }
         }
-      }
-      setEntriesByEmployee(next);
-    });
+        setEntriesByEmployee(next);
+      }),
+    );
     return () => {
       cancelled = true;
     };
-  }, [employeeIds, week]);
+  }, [employeeIds, buildingIds, week, companyId]);
 
   // The lock, read INDEPENDENTLY — see the header comment.
+  const currentLockKey = `${week.isoYear}-${week.isoWeek}|${companyId ?? ""}`;
   useEffect(() => {
     let cancelled = false;
     fetchWeekStatus({
@@ -182,21 +304,26 @@ export function WeekEntryDialog({
       company: companyId ?? "",
     })
       .then((status) => {
-        if (!cancelled) setWeekClosed(status.is_closed);
+        if (cancelled) return;
+        setWeekClosed(status.is_closed);
+        setLockKey(currentLockKey);
       })
       .catch(() => {
-        if (!cancelled) setWeekClosed(false);
+        if (cancelled) return;
+        setWeekClosed(false);
+        setLockKey(currentLockKey);
       });
     return () => {
       cancelled = true;
     };
-  }, [week, companyId]);
+  }, [week, companyId, currentLockKey]);
+  const lockLoading = lockKey !== currentLockKey;
 
-  /** Sprint 177 §7 — load the pickable jobs once.
+  /** Sprint 177 §7 — load the pickable jobs once, for their TITLES.
    *
-   *  Non-fatal on failure, like the category options on the extra-work
-   *  list: the source is an OPTIONAL refinement, and a picker that could
-   *  not load must not stop somebody entering their week. */
+   *  A saved row's tag may point at work the per-person proposal does
+   *  not list (a ticket that has since closed). Non-fatal: a title that
+   *  cannot be resolved falls back to "Ticket #41". */
   useEffect(() => {
     let cancelled = false;
     listHourSources()
@@ -204,57 +331,98 @@ export function WeekEntryDialog({
         if (!cancelled) setSourceOptions(options);
       })
       .catch(() => {
-        /* non-fatal: hours can still be entered untagged */
+        /* non-fatal: rows still render with the fallback label */
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  /** ChipMultiSelect keys on a NUMBER id, and a source is a (type, id)
-   *  PAIR — so the option list is indexed and the index is the id. The
-   *  pair is recovered on the way out, never reconstructed from a
-   *  parsed string. */
-  const sourceChipOptions = useMemo(
-    () =>
-      sourceOptions.map((option, index) => ({
-        id: index,
-        label: option.title,
-        sublabel: t(`hour_source.${option.source_type}`),
-      })),
-    [sourceOptions, t],
-  );
+  /** hours2 Part 3 — the wall and this week's jobs for the selected
+   *  people. Re-read when the people or the week change, and KEYED BY
+   *  THE DIALOG'S WEEK: paging the week input to W34 asks for W34's
+   *  jobs, not today's. A failure keeps the grid on its saved rows and
+   *  says so; it never throws away what the entries read returned. */
+  useEffect(() => {
+    if (employeeIds.length === 0) return;
+    let cancelled = false;
+    listWeekAssignments({
+      iso_year: week.isoYear,
+      iso_week: week.isoWeek,
+      company: companyId ?? "",
+      employees: employeeIds,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        setAssignments(data);
+        setAssignmentsError("");
+      })
+      .catch((err) => {
+        if (!cancelled) setAssignmentsError(getApiError(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeIds, week, companyId]);
 
-  const seedSources = useMemo(
-    () =>
-      sourceKeys
-        .map((index) => sourceOptions[index])
-        .filter(Boolean)
-        .map((option) => ({
-          source_type: option.source_type,
-          source_id: option.source_id,
-        })),
-    [sourceKeys, sourceOptions],
-  );
+  /** The answer, keyed by person — and only when it is the answer for
+   *  THIS week, so paging to another week never seeds last week's jobs
+   *  while the new read is in flight. */
+  const personById = useMemo(() => {
+    const map = new Map<number, WeekAssignmentPerson>();
+    if (
+      assignments &&
+      assignments.iso_year === week.isoYear &&
+      assignments.iso_week === week.isoWeek
+    ) {
+      for (const person of assignments.employees) {
+        map.set(person.employee, person);
+      }
+    }
+    return map;
+  }, [assignments, week]);
+  /** True once every selected person has an answer for this week. A
+   *  pair row never materialises before the wall has been read. */
+  const assignmentsReady = employeeIds.every((id) => personById.has(id));
 
-  const buildingOptions = useMemo(
-    () => [
-      // Offered FIRST: for a cleaner whose hours are not tied to a site
-      // it is the only correct answer and should not be hunted for at
-      // the bottom of a long list.
-      {
-        id: NO_BUILDING_ID,
-        label: t("hours_week_grid.no_building"),
-        sublabel: t("week_setup.no_building_hint"),
-      },
-      ...buildings.map((building) => ({
-        id: building.id,
-        label: building.name,
-        sublabel: [building.city, building.address].filter(Boolean).join(" · "),
-      })),
-    ],
-    [buildings, t],
-  );
+  /** P-12 B1 — each person's bookable buildings for "+ Add a line",
+   *  straight from the wall. */
+  const personBookableBuildingIds = useMemo(() => {
+    const out: Record<number, number[]> = {};
+    for (const [id, person] of personById) out[id] = person.building_ids;
+    return out;
+  }, [personById]);
+
+  /** P-15 §0.2 — who holds an APPROVED auto-fill pattern this week;
+   *  the grid says why everyone else's standard lines are empty. */
+  const personHasApprovedPattern = useMemo(() => {
+    const out: Record<number, boolean> = {};
+    for (const [id, person] of personById) {
+      out[id] = person.has_approved_pattern;
+    }
+    return out;
+  }, [personById]);
+
+  /** P-12 B5 — where each job's hours go (customer + billing day),
+   *  keyed the way the grid looks them up. */
+  const jobBillingFacts = useMemo(() => {
+    const out: Record<
+      string,
+      { customer_name: string | null; invoice_day: number | "LAST_OF_MONTH" | null }
+    > = {};
+    for (const person of personById.values()) {
+      for (const job of [...person.assignments, ...person.jobs]) {
+        if (job.customer_name === undefined && job.invoice_day === undefined) {
+          continue;
+        }
+        out[`${job.source_type}:${job.source_id}`] = {
+          customer_name: job.customer_name ?? null,
+          invoice_day: job.invoice_day ?? null,
+        };
+      }
+    }
+    return out;
+  }, [personById]);
 
   /** The blocks the grid renders, DERIVED from the selection and the
    *  employee list — so a selected employee who disappears (company
@@ -270,13 +438,126 @@ export function WeekEntryDialog({
         })),
     [employees, employeeIds],
   );
+  const employeeName = (id: number) =>
+    gridEmployees.find((employee) => employee.id === id)?.name ?? String(id);
 
-  /** The sentinel is translated back to null HERE, so nothing
-   *  downstream ever sees a building id of 0. */
-  const seedBuildingIds = useMemo(
-    () => buildingIds.map((id) => (id === NO_BUILDING_ID ? null : id)),
-    [buildingIds],
+  const buildingLabel = (id: number | null) =>
+    id === null || id === NO_BUILDING_ID
+      ? t("hours_week_grid.no_building")
+      : (buildings.find((building) => building.id === id)?.name ?? String(id));
+
+  /**
+   * Task 1b — the rows: every VALID (person, building) pair, untagged.
+   *
+   * Valid means the building is in the person's grants for this
+   * company (the `building_ids` the assignments read returned), or the
+   * seat is "No building", which needs no grant. Anything else is
+   * counted and named, never seeded. Nothing is seeded at all until
+   * the wall has been read for every selected person.
+   */
+  // P-7 S1.1 — the pair count this memo used to return fed the "N
+  // rows" banner; the grid's own count is the one count now.
+  const { seedRowsByEmployee, skippedPairs } = useMemo(() => {
+    const out: Record<number, GridSeedRow[]> = {};
+    const skipped: SkippedPair[] = [];
+    if (assignmentsReady) {
+      for (const employeeId of employeeIds) {
+        const person = personById.get(employeeId);
+        const rows: GridSeedRow[] = [];
+        for (const buildingId of buildingIds) {
+          if (buildingId === NO_BUILDING_ID) {
+            rows.push({ building: null, source_type: "", source_id: null });
+          } else if (person && person.building_ids.includes(buildingId)) {
+            rows.push({
+              building: buildingId,
+              source_type: "",
+              source_id: null,
+            });
+          } else {
+            skipped.push({ employee: employeeId, building: buildingId });
+          }
+        }
+        out[employeeId] = rows;
+      }
+    }
+    return { seedRowsByEmployee: out, skippedPairs: skipped };
+  }, [assignmentsReady, employeeIds, buildingIds, personById]);
+
+  /** Titles for the job tags: the caller-wide picker list plus every
+   *  job the proposal named, so a proposed row is never "Ticket #41". */
+  const jobTitleOptions = useMemo(() => {
+    const seen = new Set(
+      sourceOptions.map((option) => `${option.source_type}:${option.source_id ?? ""}`),
+    );
+    const extra: HourSourceOption[] = [];
+    for (const person of personById.values()) {
+      for (const job of person.jobs) {
+        const key = `${job.source_type}:${job.source_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        extra.push(job);
+      }
+    }
+    return extra.length > 0 ? [...sourceOptions, ...extra] : sourceOptions;
+  }, [sourceOptions, personById]);
+
+  /**
+   * Task 1c — what every row's job picker offers.
+   *
+   * "This week" is the person's proposal for THIS building in THE
+   * SELECTED WEEK, straight from the week-keyed read above. Search is
+   * free: the person's own jobs (any week) that match, plus what
+   * `/reports/hour-sources/` finds for the query — both narrowed to
+   * TICKET records in buildings the person may enter, each job once.
+   * Extra-work records are not offered: pre-spawn nothing can have
+   * hours, post-spawn the hours belong on the ticket the work became.
+   */
+  const jobPicker = useMemo<GridJobPicker>(
+    () => ({
+      thisWeek: (employeeId, buildingId) => {
+        if (buildingId === null) return [];
+        return (personById.get(employeeId)?.assignments ?? []).filter(
+          (job) => job.building === buildingId,
+        );
+      },
+      search: async (employeeId, _buildingId, query) => {
+        // W-HOURS5 Task 7 — candidates only; the picker applies its own
+        // code-and-title matcher, so "TCK-373" (which the server's
+        // title search cannot find) still meets its job among the
+        // person's own. The server call narrows the wider pool by
+        // title; the person's jobs list is handed over whole.
+        const person = personById.get(employeeId);
+        const allowed = new Set(person?.building_ids ?? []);
+        const seen = new Set<number>();
+        const out: HourSourceOption[] = [];
+        const add = (job: HourSourceOption) => {
+          if (
+            job.source_type !== "TICKET" ||
+            job.source_id === null ||
+            job.building === null ||
+            !allowed.has(job.building) ||
+            seen.has(job.source_id)
+          ) {
+            return;
+          }
+          seen.add(job.source_id);
+          out.push(job);
+        };
+        for (const job of person?.jobs ?? []) add(job);
+        for (const job of await listHourSources(query.trim())) add(job);
+        return out;
+      },
+      onOpenChange: onPickerOpenChange,
+    }),
+    [personById, onPickerOpenChange],
   );
+
+  const skippedText = skippedPairs
+    .map(
+      (pair) =>
+        `${employeeName(pair.employee)} × ${buildingLabel(pair.building)}`,
+    )
+    .join(", ");
 
   return (
     <div
@@ -306,22 +587,14 @@ export function WeekEntryDialog({
         ref={modalRef}
         className="card week-entry-modal"
         style={{
-          // Sprint 167 §1 — sized to its CONTENT.
-          //
-          // Sprint 166 was told to make this "large enough to work in"
-          // and gave it a min-height, which is how an empty dialog
-          // became a vast white box holding one line of text. That was
-          // my overcorrection and the instruction behind it was wrong:
-          // a dialog should be as tall as what is in it.
-          //
-          // So there is NO height floor. Empty it is three pickers and
-          // a hint and stands about that tall; it grows as rows appear;
-          // at 85vh it stops growing and the GRID scrolls inside it
-          // (`.hours-week-table-wrap`, which owns the wide/tall thing).
-          // The width keeps Sprint 166's rule, which was the half of
-          // that change that was right.
-          width: "min(96vw, 1180px)",
-          maxWidth: 1180,
+          // Sprint 167 §1 — sized to its CONTENT. No height floor: empty
+          // it is three pickers and a hint; it grows as rows appear; at
+          // 85vh the GRID scrolls inside it.
+          // P-8R C — 1240 wide: room for the label columns beside seven
+          // fixed day columns, so the grid never scrolls sideways at
+          // the dialog's own width (`.week-entry-modal .hours-week-col-*`).
+          width: "min(96vw, 1240px)",
+          maxWidth: 1240,
           padding: 24,
           maxHeight: "85vh",
           display: "flex",
@@ -334,8 +607,19 @@ export function WeekEntryDialog({
         <p className="muted small" style={{ marginTop: 0, marginBottom: 16 }}>
           {t("week_setup.subtitle")}
         </p>
+        {/* P-13 O4 — why these people are already chosen. */}
+        {preselectNote && (
+          <p
+            className="muted small"
+            role="status"
+            style={{ marginTop: -8, marginBottom: 16 }}
+            data-testid="week-entry-preselect-note"
+          >
+            {preselectNote}
+          </p>
+        )}
 
-        {/* The four choices, SIDE BY SIDE. */}
+        {/* The three choices, SIDE BY SIDE: who, where, and which week. */}
         <div className="week-entry-setup-row" data-testid="week-entry-setup">
           <div className="field">
             <span className="field-label">
@@ -364,7 +648,19 @@ export function WeekEntryDialog({
               {t("week_setup.buildings_label")}
             </span>
             <ChipMultiSelect
-              options={buildingOptions}
+              options={[
+                // Offered FIRST: for hours not tied to a site it is the
+                // only correct answer, and it needs no grant.
+                {
+                  id: NO_BUILDING_ID,
+                  label: t("hours_week_grid.no_building"),
+                  sublabel: t("week_setup.no_building_hint"),
+                },
+                ...buildings.map((building) => ({
+                  id: building.id,
+                  label: building.name,
+                })),
+              ]}
               selectedIds={buildingIds}
               onChange={setBuildingIds}
               placeholder={t("week_setup.select_buildings")}
@@ -377,57 +673,43 @@ export function WeekEntryDialog({
             />
           </div>
 
-          {/* Sprint 177 §7 — WHICH JOB. Optional by design; left empty
-              the grid behaves exactly as it did before this sprint. */}
-          {sourceChipOptions.length > 0 && (
-            <div className="field">
-              <span className="field-label">
-                {t("week_setup.sources_label")}
-              </span>
-              <ChipMultiSelect
-                options={sourceChipOptions}
-                selectedIds={sourceKeys}
-                onChange={setSourceKeys}
-                placeholder={t("week_setup.select_sources")}
-                removeLabel={(label) =>
-                  t("week_setup.remove_source", { name: label })
-                }
-                emptyText={t("week_setup.no_sources")}
-                onOpenChange={onPickerOpenChange}
-                testIdPrefix="week-setup-sources"
-              />
-              <p className="muted small" style={{ marginTop: 4 }}>
-                {t("week_setup.sources_hint")}
-              </p>
-            </div>
-          )}
-
-          {/* Sprint 162 §1c — the hour-type step is GONE. The grid now
-              carries `+ Add type` per block, which is the only way a
-              type is chosen, so asking for types up front was asking
-              the same question twice and pre-committing the answer.
-              Removing it was unsafe before that control existed and is
-              safe now, which is why it waited. */}
-
           <div className="field">
             <span className="field-label">{t("week_setup.week_label")}</span>
-            <input
-              className="field-input"
-              type="week"
-              value={formatIsoWeek(week)}
-              onChange={(event) => {
-                const parsed = parseIsoWeek(event.target.value);
-                if (parsed) setWeek(parsed);
-              }}
-              data-testid="week-setup-week"
-            />
-            {/* Sprint 179B §3 — the lock, said where the week is chosen.
-                The grid has always carried a "this week is closed"
-                banner, but the grid returns early with "pick an
-                employee first" until somebody is selected, so an
-                operator could page to a closed week, choose people and
-                buildings, type a whole week and only meet the lock on
-                Save. This renders from the moment the dialog opens. */}
+            <div className="week-setup-week-line">
+              <input
+                className="field-input"
+                type="week"
+                value={formatIsoWeek(week)}
+                onChange={(event) => {
+                  const parsed = parseIsoWeek(event.target.value);
+                  if (parsed) requestWeek(parsed);
+                }}
+                data-testid="week-setup-week"
+              />
+              {/* Part 4b — the SAME chip the Hours page's week bar
+                  wears, so a past week reads as open-until-locked. */}
+              <span
+                className={
+                  weekClosed ? "badge badge-closed" : "badge badge-approved"
+                }
+                data-testid="week-setup-lock"
+                data-closed={weekClosed ? "true" : "false"}
+              >
+                {lockLoading ? (
+                  <span
+                    className="skeleton-line"
+                    style={{ width: 54, height: 10, display: "inline-block" }}
+                    aria-hidden="true"
+                  />
+                ) : weekClosed ? (
+                  t("weeks.status_closed")
+                ) : (
+                  t("weeks.status_open")
+                )}
+              </span>
+            </div>
+            {/* Sprint 179B §3 — the lock, said where the week is chosen,
+                from the moment the dialog opens. */}
             {weekClosed && (
               <p
                 className="muted small week-setup-locked"
@@ -437,66 +719,50 @@ export function WeekEntryDialog({
                 {t("week_setup.week_closed_hint")}
               </p>
             )}
-            {/* The live row count. Never omitted: "4 employees x 3
-                buildings = 12 rows" is the difference between a
-                confident confirm and a surprise. */}
-            <p
-              className="week-setup-summary"
-              data-testid="week-setup-summary"
-              role="status"
-            >
-              {/* One BLOCK per (employee, building) now, each opening
-                  with a single default hour-type row. The old count
-                  multiplied by the chosen types, which no longer
-                  exist as a setup choice.
-
-                  Sprint 179B §3 — and it must multiply by the JOBS.
-                  Sprint 177 §7 seeds one row per job (`seedSources` ->
-                  `seats` in the grid), so with two jobs picked this
-                  line promised two rows and the grid produced four. The
-                  count is the one thing on this screen that claims to
-                  say what is about to happen, so it says it. */}
-              {seedSources.length > 0
-                ? t("week_setup.summary_with_jobs", {
-                    employees: employeeIds.length,
-                    buildings: buildingIds.length,
-                    jobs: seedSources.length,
-                    rows:
-                      employeeIds.length *
-                      buildingIds.length *
-                      seedSources.length,
-                  })
-                : t("week_setup.summary", {
-                    employees: employeeIds.length,
-                    buildings: buildingIds.length,
-                    rows: employeeIds.length * buildingIds.length,
-                  })}
-            </p>
+            {/* P-11 B2 — "Building access checked — the rows are
+                below." is gone: the system talking to itself. The
+                eligibility check still runs (skipped pairs are still
+                named below); it just no longer announces success. */}
+            {/* Task 1b — the quiet count line that names the pairs the
+                wall refused. Absent when nothing was skipped. */}
+            {skippedPairs.length > 0 && (
+              <p
+                className="muted small week-setup-summary-hint"
+                role="status"
+                data-testid="week-setup-skipped"
+              >
+                {t("week_setup.skipped_pairs", {
+                  count: skippedPairs.length,
+                  pairs: skippedText,
+                })}
+              </p>
+            )}
             {/* Sprint 179B §3 — the reconciliation rule, said once and
-                where the count is. A combination that already has hours
-                this week is NOT given a second, empty row (the grid's
-                `put()` keeps the first row for a key), and an operator
-                who expected the promised number of blank rows and got
-                filled ones has no other way to learn why. */}
-            <p className="muted small week-setup-summary-hint">
-              {t("week_setup.summary_hint")}
-            </p>
+                where the count is. */}
           </div>
         </div>
 
-        {/* Sprint 179B §2 — `sourceOptions` gives the grid's Job column
-            its titles. The list is already loaded here for the picker,
-            so the grid is handed it rather than fetching it again; and
-            `showSource` is on because these rows CAN belong to a job. */}
+        {assignmentsError && (
+          <div
+            className="alert-error"
+            role="alert"
+            style={{ marginBottom: 12 }}
+            data-testid="week-setup-assignments-error"
+          >
+            {t("week_setup.assignments_error", { detail: assignmentsError })}
+          </div>
+        )}
+
+        {/* `jobTitleOptions` gives the job tags their titles; `showSource`
+            is on because these rows CAN belong to a job, and `jobPicker`
+            puts the choice on the row itself. The pairs travel as
+            `seedRowsByEmployee`; the shared seeds are empty, so nothing
+            is multiplied. */}
         <HoursWeekGrid
-          /* Sprint 180 §2 — KEYED BY THE WEEK, which is CLAUDE.md's own
-             rule for prop-derived state. The grid's typed cells are
-             keyed by DATE and Save posts exactly one iso_year/iso_week,
-             so hours typed for week 32 went invisible and unsaveable the
-             moment the operator paged to week 33 — they sat in state
-             until the dialog closed. Remounting makes the screen and the
-             pending write the same thing, and the grid's own head says
-             so before it happens rather than after. */
+          /* Sprint 180 §2 — KEYED BY THE WEEK, CLAUDE.md's own rule for
+             prop-derived state: the grid's typed cells are keyed by DATE
+             and Save posts one iso week, so remounting per week makes
+             the screen and the pending write the same thing. */
           key={`${week.isoYear}-W${week.isoWeek}`}
           week={week}
           employees={gridEmployees}
@@ -504,10 +770,23 @@ export function WeekEntryDialog({
           hourTypes={hourTypes}
           buildings={buildings}
           entriesByEmployee={entriesByEmployee}
-          seedBuildingIds={seedBuildingIds}
-          seedSources={seedSources}
-          sourceOptions={sourceOptions}
-          showSource
+          seedBuildingIds={NO_SEED_BUILDINGS}
+          /* P-12 B1 — "+ Add a line"'s building choice reads each
+             person's GRANT list (the wall the assignments read
+             returned), not the header's picks — those are empty
+             whenever the dialog opens from the week card's Edit, and
+             the select then offered only "No building". */
+          personBuildingIds={personBookableBuildingIds}
+          personHasApprovedPattern={personHasApprovedPattern}
+          jobBillingFacts={jobBillingFacts}
+          seedRowsByEmployee={seedRowsByEmployee}
+          sourceOptions={jobTitleOptions}
+          jobPicker={jobPicker}
+          /* P-8R C — the one count line explains itself ("2 people × 2
+             buildings = 4 standard rows (+2 job rows)") once the wall
+             has been read; before that the pair rows do not exist yet
+             and the grid prints its plain count. */
+          setupBuildingCount={assignmentsReady ? buildingIds.length : undefined}
           weekClosed={weekClosed}
           onSaved={onSaved}
           onCancel={requestClose}
@@ -523,10 +802,7 @@ export function WeekEntryDialog({
 
         {/* Sprint 180 §2 — the guard on Escape and Cancel.
             Rendered UNCONDITIONALLY and driven entirely through the ref,
-            which is CLAUDE.md's rule for a native `<dialog>`: wrapping
-            it in `{dirty && …}` mounts an invisible dialog whose trigger
-            looks dead, and unmounting one while it is open can leave the
-            whole page inert. */}
+            which is CLAUDE.md's rule for a native `<dialog>`. */}
         <ConfirmDialog
           ref={discardDialogRef}
           title={t("week_setup.discard_title")}
@@ -537,6 +813,18 @@ export function WeekEntryDialog({
           onConfirm={() => {
             discardDialogRef.current?.close();
             onClose();
+          }}
+        />
+        <ConfirmDialog
+          ref={leaveWeekDialogRef}
+          title={t("week_setup.leave_week_title")}
+          body={t("week_setup.leave_week_body", { week: week.isoWeek })}
+          confirmLabel={t("week_setup.leave_week_confirm")}
+          cancelLabel={t("week_setup.discard_cancel")}
+          destructive
+          onConfirm={confirmLeaveWeek}
+          onCancel={() => {
+            pendingWeekRef.current = null;
           }}
         />
       </div>

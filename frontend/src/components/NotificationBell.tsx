@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Bell } from "lucide-react";
+import { AlertTriangle, Bell } from "lucide-react";
 import { formatRelative } from "../lib/intl";
 import {
   diffNewNotifications,
@@ -27,6 +27,8 @@ import {
   notificationHref,
 } from "../api/notifications";
 import type { Notification } from "../api/types";
+import { isSlaWarningEvent } from "../api/types";
+import { notificationSeverityClass, notificationToastSeverity } from "../lib/notificationSeverity";
 import { useToast } from "./ToastProvider";
 import type { ToastInput } from "./ToastProvider";
 
@@ -36,17 +38,19 @@ const POLL_MS = 15_000;
 const PANEL_LIMIT = 8;
 // 1..N new in a single poll -> that many individual toasts; strictly above this
 // -> one aggregate "N new notifications" toast (never a wall of toasts).
-const TOAST_BURST_CAP = 3;
+// W-UX F50 — two, matching the provider's own visible cap.
+const TOAST_BURST_CAP = 2;
 // One-time-per-tab-session guard for the login backlog greeting (B9). Stored in
 // sessionStorage so a mid-session reload doesn't re-flood; a fresh tab (new
 // login) greets again.
 const GREETED_KEY = "cleanops.notifGreeted";
+const GREETED_MAX_KEY = "cleanops.notifGreetedMaxId";
 
 export function NotificationBell() {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
-  const { push } = useToast();
+  const { push, clear } = useToast();
   const panelId = useId();
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
@@ -98,6 +102,33 @@ export function NotificationBell() {
           ? t("notifications.toast_ticket_ref", { no: n.ticket_no })
           : "") ||
         t("notifications.toast_new");
+      // Sprint W4-Q §1 — a time-driven warning toasts as a WARNING and
+      // leads with what is wrong, not with the name of the job. The
+      // headline of an activity toast answers "about what?"; the
+      // headline of a warning has to answer "what has gone quiet?", and
+      // the job name is still on the description line underneath.
+      // W-LATE addendum 2 — the TONE is the row's own `severity`: L1
+      // the standard warning, L2 red, L3 dark red and sticky. The list
+      // of warning types still decides whether the toast NAMES its kind
+      // in the headline; a row that carries a rung but no name in that
+      // list (a future warning) still warns rather than celebrating.
+      const severity = notificationToastSeverity(n);
+      if (isSlaWarningEvent(n.event_type) || severity) {
+        return {
+          variant: "warning",
+          severity,
+          // P-16 Part D — the warning headline arrives resolved from
+          // the API in the viewer's language; the client no longer
+          // keeps a title map.
+          title: (isSlaWarningEvent(n.event_type) && n.title) || name,
+          description: isSlaWarningEvent(n.event_type)
+            ? n.summary || name
+            : n.summary,
+          onClick: () => {
+            openNotification(n);
+          },
+        };
+      }
       return {
         variant: "success",
         title: name,
@@ -142,16 +173,36 @@ export function NotificationBell() {
             // stay silent rather than risk re-flooding on every load.
             greeted = true;
           }
-          if (!greeted && data.unread_count > 0) {
+          // P-2 §8 — the greeting was re-firing on every fresh tab (a
+          // tab-session mark), and it led with the seeded L1 warning
+          // toasts. Now: the mark is per browser and per high-water id
+          // (a reload or a new tab greets only with items newer than the
+          // last greeting), and time-driven warnings are never part of
+          // the greeting — the bell badge and the Warnings page carry
+          // them; a toast is for something that just happened.
+          let greetedMax = 0;
+          try {
+            greetedMax = Number(localStorage.getItem(GREETED_MAX_KEY) || "0") || 0;
+          } catch {
+            greetedMax = Number.MAX_SAFE_INTEGER;
+          }
+          const fresh = feed.filter(
+            (x) =>
+              !x.is_read &&
+              x.id > greetedMax &&
+              !isSlaWarningEvent(x.event_type) &&
+              !notificationToastSeverity(x),
+          ); // newest-first
+          if (!greeted && fresh.length > 0) {
             try {
               sessionStorage.setItem(GREETED_KEY, "1");
+              localStorage.setItem(GREETED_MAX_KEY, String(maxId ?? 0));
             } catch {
               // Best-effort: still show this single greeting.
             }
-            const unreadItems = feed.filter((x) => !x.is_read); // newest-first
-            const shown = unreadItems.slice(0, TOAST_BURST_CAP);
+            const shown = fresh.slice(0, TOAST_BURST_CAP);
             shown.forEach((x) => push(notificationToastInput(x)));
-            const more = data.unread_count - shown.length;
+            const more = fresh.length - shown.length;
             if (more > 0) {
               push({
                 variant: "success",
@@ -256,7 +307,18 @@ export function NotificationBell() {
             ? t("notifications.bell_aria_unread", { count: unread })
             : t("notifications.bell_aria")
         }
-        onClick={() => setOpen((value) => !value)}
+        onClick={() =>
+          setOpen((value) => {
+            // W-LATE addendum 2 — an L2/L3 toast stays until dismissed,
+            // and the stack sits over this panel. Opening the bell IS the
+            // dismissal: the list underneath holds the same rows, so the
+            // toasts have nothing left to say and must not cover it
+            // (measured: a sticky toast intercepted the click on the row
+            // it was announcing).
+            if (!value) clear();
+            return !value;
+          })
+        }
         data-testid="topbar-notification-bell"
       >
         <Bell size={18} strokeWidth={2} />
@@ -290,10 +352,26 @@ export function NotificationBell() {
                   role="menuitem"
                   className={`notif-item${
                     notification.is_read ? "" : " notif-item-unread"
-                  }`}
+                  }${
+                    isSlaWarningEvent(notification.event_type)
+                      ? " notif-item-warning"
+                      : ""
+                  }${notificationSeverityClass(notification, "notif-item")}`}
+                  data-severity={notification.severity}
                   onClick={() => openNotification(notification)}
                 >
                   <span className="notif-item-main">
+                    {/* P-16 Part D — the warning NAMES itself with the
+                        title the API resolved in the viewer's own
+                        language (§D.13.3: the SPA never composes
+                        notification copy from parts). */}
+                    {isSlaWarningEvent(notification.event_type) &&
+                      notification.title && (
+                        <span className="notif-warning-title">
+                          <AlertTriangle size={13} strokeWidth={2.2} />
+                          {notification.title}
+                        </span>
+                      )}
                     <span className="notif-item-summary">
                       {notification.summary}
                     </span>

@@ -5,10 +5,10 @@ import axios from "axios";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Avatar } from "../components/Avatar";
 import { ImageUploadField } from "../components/ImageUploadField";
+import { formatDate, useLocaleCode } from "../lib/intl";
 import { deleteProfilePhoto, uploadProfilePhoto } from "../api/media";
-import { roleLabelKeyNs } from "../auth/permissions";
+import { isCustomerUser, roleLabelKeyNs } from "../auth/permissions";
 import { Toggle } from "../components/Toggle";
 import type {
   NotificationEventType,
@@ -53,44 +53,26 @@ function errorPayload(err: unknown): unknown {
 }
 
 
-function formatJoinDate(iso: string, lang: string): string {
-  try {
-    return new Intl.DateTimeFormat(lang === "nl" ? "nl-NL" : "en-US", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
-}
-
-// Returns a translated "X minutes ago" / "X hours ago" / "X days ago"
-// string for recent timestamps; falls back to an absolute date once the
-// gap exceeds 7 days. Plurals via i18next count interpolation.
-function formatLastSignIn(
-  iso: string | null,
-  lang: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  t: (key: string, opts?: any) => string,
-): string {
-  if (!iso) return t("common:account.never_signed_in");
-  const then = new Date(iso);
-  if (Number.isNaN(then.getTime())) return iso;
-  const diffMs = Date.now() - then.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  const diffHr = Math.floor(diffMs / 3600000);
-  const diffDay = Math.floor(diffMs / 86400000);
-  if (diffMin < 1) return t("common:time.just_now");
-  if (diffMin < 60) return t("common:time.minutes_ago", { count: diffMin });
-  if (diffHr < 24) return t("common:time.hours_ago", { count: diffHr });
-  if (diffDay < 7) return t("common:time.days_ago", { count: diffDay });
-  return formatJoinDate(iso, lang);
-}
-
 export function SettingsPage() {
   const { me, reloadMe } = useAuth();
-  const { t, i18n } = useTranslation(["settings", "common"]);
+  const { t } = useTranslation(["settings", "common"]);
+  const locale = useLocaleCode();
+
+  // P-8R D — the header's third fact: "3 bedrijven · 12 gebouwen". Counts
+  // only, from the id sets /api/auth/me/ already carries; a role with no
+  // scope rows reads "—" rather than a claim.
+  const accessSummary = me
+    ? (
+        [
+          [me.company_ids.length, "common:account.companies"],
+          [me.building_ids.length, "common:account.buildings"],
+          [me.customer_ids.length, "common:account.customers"],
+        ] as const
+      )
+        .filter(([count]) => count > 0)
+        .map(([count, key]) => `${count} ${t(key, { count })}`)
+        .join(" · ")
+    : "";
 
   const languageOptions = [
     { value: "nl", label: `${t("common:language_dutch")} (nl)` },
@@ -262,6 +244,13 @@ export function SettingsPage() {
 
   return (
     <div>
+      {/* P-7 S7 / P-8R D — the profile is a HORIZONTAL header band at
+          every width: the avatar (its pencil badge opens the photo
+          upload, the remove link sits under it), the name, the email
+          and the role on one line, ONE quiet meta row under it (member
+          since · access — P-9 dropped "last sign-in", which the token
+          door never records). The forms fill the width below in a
+          two-column grid of equal-height cards. */}
       <div className="page-header">
         <div>
           <div className="eyebrow">{t("eyebrow")}</div>
@@ -270,129 +259,56 @@ export function SettingsPage() {
         </div>
       </div>
 
-      <div className="settings-layout">
-        <aside>
-          {me && (
-            <section className="card account-overview">
-              <div className="account-overview-header">
-                <Avatar
-                  imageUrl={me.profile_photo_url}
-                  name={me.full_name || me.email}
-                  size={56}
-                  className="account-avatar-img"
-                />
-                <div className="account-identity">
-                  {me.full_name?.trim() && (
-                    <div className="account-name">{me.full_name}</div>
-                  )}
-                  <div className="account-email">{me.email}</div>
-                  {me.role && (
-                    <span className="account-role-pill">
-                      {t(roleLabelKeyNs(me.role))}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="account-overview-divider" />
-
-              {/* RF-1 — own profile photo (always self-service). */}
-              <div className="account-photo-section">
-                <div className="account-meta-label" style={{ marginBottom: 8 }}>
-                  {t("common:settings.photo_title")}
-                </div>
-                <ImageUploadField
-                  imageUrl={me.profile_photo_url}
-                  name={me.full_name || me.email}
-                  size={72}
-                  testId="profile-photo-upload"
-                  onUpload={async (file) => {
-                    await uploadProfilePhoto(me.id, file);
-                    await reloadMe();
-                  }}
-                  onRemove={async () => {
-                    await deleteProfilePhoto(me.id);
-                    await reloadMe();
-                  }}
-                />
-              </div>
-
-              <div className="account-overview-divider" />
-
-              <div className="account-meta">
-                <div className="account-meta-row">
-                  <div className="account-meta-label">
-                    {t("common:account.member_since")}
-                  </div>
-                  <div className="account-meta-value">
-                    {me.date_joined
-                      ? formatJoinDate(me.date_joined, i18n.language)
-                      : "—"}
-                  </div>
-                </div>
-                <div className="account-meta-row">
-                  <div className="account-meta-label">
-                    {t("common:account.last_sign_in")}
-                  </div>
-                  <div className="account-meta-value">
-                    {formatLastSignIn(me.last_login, i18n.language, t)}
-                  </div>
-                </div>
-              </div>
-
-              {(me.company_ids.length > 0 ||
-                me.building_ids.length > 0 ||
-                me.customer_ids.length > 0) && (
-                <>
-                  <div className="account-overview-divider" />
-                  <div className="account-access">
-                    <div className="account-access-label">
-                      {t("common:account.access")}
-                    </div>
-                    {me.company_ids.length > 0 && (
-                      <div className="account-access-row">
-                        <span className="account-access-count">
-                          {me.company_ids.length}
-                        </span>
-                        <span className="account-access-name">
-                          {t("common:account.companies", {
-                            count: me.company_ids.length,
-                          })}
-                        </span>
-                      </div>
-                    )}
-                    {me.building_ids.length > 0 && (
-                      <div className="account-access-row">
-                        <span className="account-access-count">
-                          {me.building_ids.length}
-                        </span>
-                        <span className="account-access-name">
-                          {t("common:account.buildings", {
-                            count: me.building_ids.length,
-                          })}
-                        </span>
-                      </div>
-                    )}
-                    {me.customer_ids.length > 0 && (
-                      <div className="account-access-row">
-                        <span className="account-access-count">
-                          {me.customer_ids.length}
-                        </span>
-                        <span className="account-access-name">
-                          {t("common:account.customers", {
-                            count: me.customer_ids.length,
-                          })}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </>
+      {me && (
+        <section className="card account-header" data-testid="settings-account-header">
+          {/* RF-1 — own profile photo (always self-service). */}
+          <ImageUploadField
+            variant="badge"
+            imageUrl={me.profile_photo_url}
+            name={me.full_name || me.email}
+            size={64}
+            testId="profile-photo-upload"
+            onUpload={async (file) => {
+              await uploadProfilePhoto(me.id, file);
+              await reloadMe();
+            }}
+            onRemove={async () => {
+              await deleteProfilePhoto(me.id);
+              await reloadMe();
+            }}
+          />
+          <div className="account-header-main">
+            <div className="account-header-identity">
+              {me.full_name?.trim() && (
+                <span className="account-name">{me.full_name}</span>
               )}
-            </section>
-          )}
-        </aside>
+              <span className="account-email">{me.email}</span>
+              {me.role && (
+                <span className="account-role-pill">{t(roleLabelKeyNs(me.role))}</span>
+              )}
+            </div>
+            <dl className="account-header-facts" data-testid="settings-account-facts">
+              <div className="account-header-fact">
+                <dt>{t("common:account.member_since")}</dt>
+                <dd>{formatDate(me.date_joined, locale)}</dd>
+              </div>
+              {/* P-9 G (SS D.20 ruling 12(c)) — no "last sign-in" row: the
+                  JWT token door does not record `last_login`
+                  (`SIMPLE_JWT` sets no `UPDATE_LAST_LOGIN`), and a fact
+                  the system does not know is not shown. */}
+              <div className="account-header-fact">
+                <dt>{t("common:account.access")}</dt>
+                <dd>{accessSummary || "—"}</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+      )}
 
-        <div className="settings-main">
+      {/* P-8R D — Profile and Password side by side, Notifications
+          spanning the full width under them; one column at laptop
+          widths and below (see .settings-layout in index.css). */}
+      <div className="settings-layout">
         <form className="card" onSubmit={handleProfileSubmit} noValidate>
           <div className="form-section">
             <div
@@ -592,7 +508,11 @@ export function SettingsPage() {
           </div>
         </form>
 
-        <form className="card" onSubmit={handlePreferencesSubmit} noValidate>
+        <form
+          className="card settings-span"
+          onSubmit={handlePreferencesSubmit}
+          noValidate
+        >
           <div className="form-section">
             <div
               className="form-section-title"
@@ -610,7 +530,7 @@ export function SettingsPage() {
                 <div className="loading-bar-fill" />
               </div>
             ) : (
-              <div>
+              <div className="notification-rows">
                 {preferences.map((entry) => {
                   const checked = !entry.muted;
                   // Frontend translation overrides the API-provided label so
@@ -618,7 +538,17 @@ export function SettingsPage() {
                   // page. The API label remains as a fallback if the key is
                   // absent (defensive — all four are populated).
                   const labelKey = EVENT_LABEL_KEYS[entry.event_type];
-                  const label = labelKey ? t(labelKey) : entry.label;
+                  // P-15 (P-14's S3 finding, §D.2) — a customer never
+                  // sees the word "ticket"; their portal calls it a
+                  // MELDING. Same keys with the `_customer` suffix,
+                  // picked by the viewer's side.
+                  const label = labelKey
+                    ? t(
+                        isCustomerUser(me?.role)
+                          ? `${labelKey}_customer`
+                          : labelKey,
+                      )
+                    : entry.label;
                   return (
                     <label
                       key={entry.event_type}
@@ -660,7 +590,6 @@ export function SettingsPage() {
             </button>
           </div>
         </form>
-        </div>
       </div>
     </div>
   );

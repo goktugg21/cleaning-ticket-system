@@ -1,0 +1,651 @@
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import type { AssignableStaff } from "../../api/admin";
+import type { TransitionRequirements } from "../../api/types";
+import { plannedDayIso } from "../../lib/isoWeek";
+
+/**
+ * W13-FIX §1 — THE TRANSITION MODAL.
+ *
+ *     The owner's father, twenty years a programmer, on the workflow
+ *     card: "If you work on those transition modals, this job is done."
+ *
+ *     The owner: "I click. It has to give me a warning. I cannot be
+ *     sure whether the button worked."
+ *
+ * Before this, every workflow button fired its POST on the first click.
+ * Nothing was asked and nothing was confirmed, so a job could be
+ * recorded as started with nobody doing it and no date on it, and the
+ * only way to learn what a button did was to press it.
+ *
+ * Now pressing a move opens THIS, and the move does not happen until it
+ * is answered. It asks the three things a step can need:
+ *
+ *     WHO is doing it      the staff picker, multi-select
+ *     WHEN                 the start date and time
+ *     WHAT IT NEEDS to be  the note that travels with the move
+ *     reported done
+ *
+ * WHICH of those it asks for is NOT decided here. The component renders
+ * a field per entry in `requirements.unmet`, and that list comes from
+ * `GET /tickets/<id>/transition-requirements/`, which is the same
+ * `transition_requirements.py` that `apply_transition` enforces. A
+ * screen that predicted the rule would be a second copy of it, and this
+ * codebase has already been bitten twice by exactly that (CLAUDE.md:
+ * the render-order array, the pagination class). So the page asks.
+ *
+ * It is a plain overlay, not a native `<dialog>`, matching the sibling
+ * picker in `ResponsibleManagersSection`. CLAUDE.md's `<dialog>` rule
+ * exists because a conditionally-MOUNTED native dialog is invisible and
+ * an unmounted-while-open one freezes the page; an overlay div has
+ * neither failure mode, and mounting it conditionally is correct.
+ */
+
+export interface TransitionAnswers {
+  note: string;
+  assigned_staff_ids?: number[];
+  scheduled_start_at?: string;
+  /** W14 §4 — the justification an OVERRIDE carries. Never merged into
+   *  `note`: the note is the operational comment on the move, the
+   *  reason is what the audit row records, and collapsing them would
+   *  put one value in two meanings. */
+  override_reason?: string;
+  /** W-UX1 §4 — TRUE only when the operator explicitly chose to move
+   *  without the proof this step requires.
+   *
+   *  This is a deliberate departure from W10 §4's "is_override is the
+   *  BACKEND's call". That rule exists so an ORDINARY move is not
+   *  stamped as an override in the audit trail — and it is right for
+   *  every other path. Skipping a required photo or note is not an
+   *  ordinary move; it IS the override, and the machine cannot infer
+   *  that from the status pair because the pair is a perfectly normal
+   *  completion. Sending it is also what makes the reason survive:
+   *  `state_machine` writes `override_reason if is_override else ""`
+   *  (state_machine.py:727), so a reason sent without the flag is
+   *  discarded and the bypass would cost nothing. */
+  is_override?: boolean;
+}
+
+/** W-FIX1 B2 (audit F24) — the prefilled start is never in the past:
+ *  the plan's day when it is still ahead, otherwise TODAY. Ticket 373
+ *  opened on "yesterday". P-5 S1.3 — a DAY, never a clock the operator
+ *  did not choose: the old `datetime-local` input stamped the moment of
+ *  the press onto the plan ("starts 10 Sep 04:14"). */
+function prefillStartDay(current: string, today: string = localToday()): string {
+  if (!current) return "";
+  return current >= today ? current : today;
+}
+
+function localToday(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/** W-LATE §3c — a part that is still open when a completion move is
+ *  pressed, with the slots a "mark done" quick action would complete. */
+export interface OpenPart {
+  id: number;
+  title: string;
+  slotIds: number[];
+}
+
+export interface TicketTransitionModalProps {
+  /** The verb already rendered on the button that opened this. */
+  actionLabel: string;
+  fromStatusLabel: string;
+  toStatusLabel: string;
+  /** null while the requirements call is still in flight. */
+  requirements: TransitionRequirements | null;
+  loading: boolean;
+  staff: AssignableStaff[];
+  /** W-FIX1 C3 (audit F34) — why the list is empty when the server
+   *  refused it; rendered under the picker so a disabled confirm has
+   *  a sentence next to it. */
+  staffError?: string;
+  /** R2 — who is ALREADY on this ticket. Shown as the settled default
+   *  and NEVER posted back: `staff` below is the server's addable list,
+   *  which already excludes them, so re-sending one is the duplicate
+   *  that answers `staff_already_assigned`. Carried assignments (an EW
+   *  spawn hands its workers to the ticket) arrive through this list,
+   *  which is why the modal never has to know they were carried. */
+  currentAssignees: { id: number; label: string }[];
+  /** R2 / P-5 S1 — the DAY the job already carries ("YYYY-MM-DD" in
+   *  the server's zone, or ""): the ticket's own, else the meerwerk
+   *  plan's first work day — so "When does it start?" comes
+   *  pre-filled from the ONE plan instead of asking again. */
+  currentStartDay: string;
+  /** The clock a person chose ("HH:MM"), or "" for a day-only plan. */
+  currentStartTime: string;
+  /** Where the prefilled day came from; the field says so. */
+  startSource?: "ticket" | "meerwerk" | null;
+  /** P-5 S1.4 — i18next context: "meerwerk" on a meerwerk job, so the
+   *  sentences never say "ticket" there. */
+  kindContext?: string;
+  busy: boolean;
+  error?: string;
+  onCancel: () => void;
+  onConfirm: (answers: TransitionAnswers) => void;
+  /** W-FIX2 — upload one file as completion proof, through the ticket's
+   *  EXISTING attachment endpoint. The gate reads
+   *  `_ticket_has_visible_attachment`, i.e. ordinary non-hidden
+   *  `TicketAttachment` rows, so an ordinary upload satisfies it and no
+   *  backend change is needed. Resolves when the row exists. */
+  onUploadProof?: (file: File) => Promise<void>;
+  /** W-LATE §3c — the parts still open, named. Rendered as ONE inline
+   *  warn line; the move is NEVER blocked on them, and (W-PLANTRUTH §3b)
+   *  going through closes them. Passed only for the completion moves.
+   *  W-VIEWER §13 — no per-part action any more: proceeding does it, and
+   *  the deliberate on-behalf close belongs on the parts modal, where a
+   *  reason is asked for (§10). */
+  openParts?: OpenPart[];
+  /** P-5 S0 — the hours this step needs are entered somewhere else.
+   *  Pressing the pointer closes this modal and lands on them. */
+  onGoToActualHours?: () => void;
+}
+
+export function TicketTransitionModal({
+  actionLabel,
+  fromStatusLabel,
+  toStatusLabel,
+  requirements,
+  loading,
+  staff,
+  staffError = "",
+  currentAssignees,
+  currentStartDay,
+  currentStartTime,
+  startSource = null,
+  kindContext,
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+  onUploadProof,
+  openParts,
+  onGoToActualHours,
+}: TicketTransitionModalProps) {
+  const { t } = useTranslation(["ticket_detail", "common"]);
+
+  // No reset effect here on purpose. The answers must not survive a
+  // change of STEP -- a date typed for "start the work" must never be
+  // submitted against "send it to the customer" -- and CLAUDE.md's rule
+  // for exactly this is to KEY the component rather than to setState in
+  // an effect body. `TicketDetailPage` mounts this with
+  // `key={transitionTarget}`, so a different move is a different
+  // component instance and these three start empty by construction.
+  const [note, setNote] = useState("");
+  // W-FIX1 — the people being ADDED, and only them. It was seeded with
+  // the existing crew, which read well and posted a duplicate: the
+  // picker's own source excludes anyone already holding a base slot
+  // here, so every seeded id was one the server would refuse. The crew
+  // is rendered above as settled fact instead.
+  const [picked, setPicked] = useState<number[]>([]);
+  const [startDay, setStartDay] = useState(() => prefillStartDay(currentStartDay));
+  const [startTime, setStartTime] = useState(currentStartTime);
+  const [reason, setReason] = useState("");
+  /** W-UX1 §4 — the two-press bypass: pressing it once reveals the
+   *  reason, and only a reason arms the move. */
+  const [overriding, setOverriding] = useState(false);
+  // W-FIX2 — the modal said "a photo or a note" and offered only a note.
+  const [proofUploading, setProofUploading] = useState(false);
+  const [proofUploaded, setProofUploaded] = useState(false);
+  const [proofError, setProofError] = useState("");
+
+  const unmet = useMemo(() => requirements?.unmet ?? [], [requirements]);
+  const needsAssignee = unmet.includes("assignee");
+  /** R2 — "the modal SHOWS what already exists and asks only for
+   *  what is missing". A requirement the ticket already satisfies is
+   *  still part of this step's checklist, so it renders — prefilled
+   *  and editable — instead of vanishing and leaving the operator to
+   *  wonder whether it was asked for. `requirements` carries the
+   *  satisfied ones for exactly this reason. */
+  const has = (key: string) =>
+    (requirements?.requirements ?? []).some((r) => r.key === key);
+  const showAssignee = has("assignee");
+  const showSchedule = has("schedule");
+  const needsSchedule = unmet.includes("schedule");
+  /**
+   * W14 §4 — THE MOVE IS AN OVERRIDE AND THE SERVER WILL WANT A REASON.
+   *
+   * Not predicted here. `state_machine.transition_needs_override_reason`
+   * decides, `transition-requirements` reports it, and this renders
+   * whatever comes back — the same "the page does not predict, it asks"
+   * the module was built on.
+   *
+   * Before this, the endpoint did not report it and so this form never
+   * asked: the operator pressed Undo, was shown a modal wanting only an
+   * optional note, pressed its button, and the modal closed on a 400
+   * nobody was shown. The owner: "undo and the correction actions do
+   * not seem to work. I could not get them to work."
+   */
+  const needsReason = unmet.includes("override_reason");
+  /** W-UX1 §4 — this step wants proof the work happened, and the ticket
+   *  does not carry it yet. R3: it says so INLINE, here, the moment it
+   *  is unmet, rather than being met as a 400 after the press. */
+  const needsProof = unmet.includes("completion_evidence");
+  /** P-5 S0 — an hourly meerwerk line still has no actual hours. Not
+   *  answerable here: the hours live on the Money tab, so this says so
+   *  and points there. The machine refuses the move until they are in. */
+  const needsActualHours = unmet.includes("actual_hours");
+
+  // Every unmet requirement must have an answer before the move is
+  // offered. This is the "DOES NOT TRANSITION until it is answered"
+  // half that lives on the screen; the backend enforces the same thing
+  // independently, so a client that skipped this still cannot move it.
+  /** W-FIX1 B2 (audit F24) — moving an EXISTING schedule is a
+   *  reschedule, and a reschedule needs its reason; the note is that
+   *  reason on this door, so it stops being optional the moment the
+   *  date differs from the one the ticket already has. */
+  const movingSchedule =
+    showSchedule &&
+    currentStartDay !== "" &&
+    startDay !== "" &&
+    (startDay !== currentStartDay || startTime !== currentStartTime);
+  const answered =
+    !needsActualHours &&
+    (!needsAssignee || picked.length > 0 || currentAssignees.length > 0) &&
+    (!needsSchedule || startDay !== "") &&
+    (!movingSchedule || note.trim() !== "") &&
+    (!needsReason || reason.trim() !== "") &&
+    // Proof is answered by writing the note this step asks for, or by
+    // explicitly overriding WITH a reason. Nothing else.
+    (!needsProof ||
+      note.trim() !== "" ||
+      proofUploaded ||
+      (overriding && reason.trim() !== ""));
+
+  function confirm() {
+    const answers: TransitionAnswers = { note: note.trim() };
+    // Send the selection whenever the block was SHOWN and the
+    // operator changed it, not only when the requirement was unmet:
+    // editing a carried-over crew is the R2 affordance, and a change
+    // the modal accepted but did not post would be a lie.
+    if (showAssignee && picked.length > 0) answers.assigned_staff_ids = picked;
+    if (needsReason && reason.trim() !== "") {
+      answers.override_reason = reason.trim();
+    }
+    if (needsProof && overriding && reason.trim() !== "") {
+      answers.override_reason = reason.trim();
+      answers.is_override = true;
+    }
+    if (showSchedule && startDay !== "") {
+      // P-3 §A.3 / P-5 S1.3 — a NAIVE local datetime, read by the
+      // server in its own zone (`plannedDayIso`); midnight when no
+      // clock was chosen, which the detail renders as a day only.
+      answers.scheduled_start_at = plannedDayIso(startDay, startTime || undefined);
+    }
+    onConfirm(answers);
+  }
+
+  return (
+    <div
+      className="ew-plan-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={actionLabel}
+      data-testid="transition-modal"
+    >
+      <div className="card ew-plan-dialog transition-dialog">
+        <h3 className="section-title ew-plan-dialog-title">{actionLabel}</h3>
+
+        {/* The move itself, in words, so the operator can see WHERE this
+            puts the ticket before committing to it -- the whole of the
+            father's "I cannot be sure whether the button worked". */}
+        <p className="transition-dialog-move" data-testid="transition-modal-move">
+          {t("transition.move", {
+            from: fromStatusLabel,
+            to: toStatusLabel,
+          })}
+        </p>
+
+        {loading ? (
+          <p className="muted small" data-testid="transition-modal-loading">
+            {t("common:loading")}
+          </p>
+        ) : (
+          <>
+            {/* W-UX1 §4 / R3 — the requirement warning, inline, as a
+                state line. The note field below IS the answer, so the
+                warning points at it rather than at a 400 the operator
+                would otherwise meet after pressing. */}
+            {needsActualHours && (
+              <div
+                className="transition-field"
+                data-testid="transition-field-actual-hours"
+              >
+                <p className="alert-notice" role="status">
+                  {t("transition.hours_required")}
+                </p>
+                {onGoToActualHours && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={onGoToActualHours}
+                    data-testid="transition-go-actual-hours"
+                  >
+                    {t("transition.hours_go")}
+                  </button>
+                )}
+              </div>
+            )}
+            {needsProof && (
+              <div
+                className="transition-field"
+                data-testid="transition-field-proof"
+              >
+                {/* R3 — and it CLEARS LIVE. The warning is about a
+                    missing thing, so the moment either kind of proof is
+                    present it has nothing to say. */}
+                {/* P-5 S0 — a requirement, not a failure: calm notice
+                    styling. The red is for a refusal that happened. */}
+                {note.trim() === "" && !proofUploaded && (
+                  <p className="alert-notice" role="status">
+                    {t("transition.proof_required")}
+                  </p>
+                )}
+                {onUploadProof && (
+                  <div className="transition-proof-upload">
+                    <label className="field-label" htmlFor="transition-proof-file">
+                      {t("transition.proof_photo_label")}
+                    </label>
+                    <input
+                      id="transition-proof-file"
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf"
+                      disabled={proofUploading}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) return;
+                        setProofError("");
+                        setProofUploading(true);
+                        void onUploadProof(file)
+                          .then(() => setProofUploaded(true))
+                          .catch((err: unknown) =>
+                            setProofError(
+                              err instanceof Error
+                                ? err.message
+                                : String(err),
+                            ),
+                          )
+                          .finally(() => setProofUploading(false));
+                      }}
+                      data-testid="transition-proof-file"
+                    />
+                    {proofUploading && (
+                      <span className="muted small">
+                        {t("transition.proof_photo_uploading")}
+                      </span>
+                    )}
+                    {proofUploaded && (
+                      <span className="muted small" data-testid="transition-proof-done">
+                        {t("transition.proof_photo_done")}
+                      </span>
+                    )}
+                    {proofError && (
+                      <p className="alert-error" role="alert">
+                        {proofError}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {!overriding ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setOverriding(true)}
+                    data-testid="transition-proof-override"
+                  >
+                    {t("transition.proof_override")}
+                  </button>
+                ) : (
+                  <>
+                    <label className="field-label" htmlFor="transition-proof-reason">
+                      {t("transition.proof_override_reason")}
+                    </label>
+                    <textarea
+                      id="transition-proof-reason"
+                      className="field-textarea"
+                      value={reason}
+                      onChange={(event) => setReason(event.target.value)}
+                      data-testid="transition-proof-reason"
+                    />
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* W-LATE §3c — COMPLETION STAYS FREE. Open parts are said,
+                once, inline; the confirm button below is never disabled
+                by them and the server does not gate on them either.
+
+                W-VIEWER §13 — AND THE PER-PART QUICK BUTTON IS GONE.
+                It closed a worker's slot on their behalf with no reason
+                attached, which §10 now requires of exactly that act —
+                and it was redundant besides: §3b already closes every
+                open part when the move goes through, with the actor's
+                name and one timeline line. Two doors onto the same
+                outcome, one of them recording less, is not a choice
+                worth offering. The names stay: knowing WHICH parts are
+                about to be closed is the information this block exists
+                to give. */}
+            {openParts && openParts.length > 0 && (
+              <div
+                className="transition-field wp-notice"
+                role="status"
+                data-testid="transition-open-parts"
+              >
+                <p style={{ margin: "0 0 6px", fontWeight: 700 }}>
+                  {t("transition.open_parts", { count: openParts.length })}
+                </p>
+                <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
+                  {openParts.map((part) => (
+                    <li
+                      key={part.id}
+                      style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}
+                      data-testid="transition-open-part"
+                      data-part-id={part.id}
+                    >
+                      <span>{part.title}</span>
+                      {part.slotIds.length === 0 && (
+                        <span className="muted small">
+                          ({t("transition.part_nobody")})
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <p className="muted small" style={{ margin: "6px 0 0" }}>
+                  {t("transition.open_parts_proceed")}
+                </p>
+              </div>
+            )}
+
+            {showAssignee && (
+              <div className="transition-field" data-testid="transition-field-assignee">
+                <span className="field-label" id="transition-who-label">
+                  {t("transition.who_label")}
+                </span>
+                {/* R2 — who is on it already, as settled fact. Not
+                    checkboxes: taking somebody OFF a job is the
+                    assignment section's own action, and a control that
+                    looks like it removes them but does not would be
+                    worse than no control. */}
+                {currentAssignees.length > 0 && (
+                  <div
+                    className="parts-chip-row"
+                    data-testid="transition-current-assignees"
+                  >
+                    {currentAssignees.map((person) => (
+                      <span key={person.id} className="parts-chip">
+                        {person.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {/* W-FIX1 — NO ADD CONTROL WHEN THERE IS NOBODY TO ADD,
+                    and no apology line either. The old empty state said
+                    "nobody available to assign" on a ticket whose whole
+                    crew was standing right above it, because `staff` is
+                    the ADDABLE list and a fully-staffed job empties it. */}
+                {staff.length > 0 && (
+                  <>
+                <p className="muted small">{t("transition.who_hint")}</p>
+                <div
+                  className="assign-picker"
+                  role="group"
+                  aria-labelledby="transition-who-label"
+                >
+                  {(
+                    staff.map((person) => (
+                      <label key={person.id} className="assign-picker-row">
+                        <input
+                          type="checkbox"
+                          className="checkbox-input"
+                          checked={picked.includes(person.id)}
+                          onChange={(event) =>
+                            setPicked((current) =>
+                              event.target.checked
+                                ? [...current, person.id]
+                                : current.filter((id) => id !== person.id),
+                            )
+                          }
+                          data-testid="transition-staff-option"
+                        />
+                        <span>{person.full_name?.trim() || person.email}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {staffError && (
+              <p
+                className="form-error"
+                data-testid="transition-assignee-unavailable"
+              >
+                {t("transition.assignee_list_unavailable")} {staffError}
+              </p>
+            )}
+
+            {showSchedule && (
+              <div className="transition-field" data-testid="transition-field-schedule">
+                <label className="field-label" htmlFor="transition-starts-at">
+                  {t("transition.when_label")}
+                </label>
+                <p className="muted small">
+                  {startSource === "meerwerk" && startDay === currentStartDay
+                    ? t("transition.when_from_plan")
+                    : t("transition.when_hint", { context: kindContext })}
+                </p>
+                <div className="transition-when-row">
+                  <input
+                    id="transition-starts-at"
+                    type="date"
+                    className="filter-control"
+                    value={startDay}
+                    onChange={(event) => setStartDay(event.target.value)}
+                    data-testid="transition-starts-at"
+                  />
+                  <label className="muted small transition-when-time">
+                    {t("transition.when_time_label")}
+                    <input
+                      type="time"
+                      className="filter-control"
+                      value={startTime}
+                      onChange={(event) => setStartTime(event.target.value)}
+                      data-testid="transition-starts-time"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {needsReason && (
+              <div
+                className="transition-field"
+                data-testid="transition-field-override-reason"
+              >
+                <label
+                  className="field-label"
+                  htmlFor="transition-override-reason"
+                >
+                  {t("transition.reason_label")}
+                </label>
+                {/* Says WHY it is being asked for, because "this is not
+                    a step the workflow offers" is the whole reason the
+                    field is here and the operator cannot see the
+                    transition table. */}
+                <p className="muted small">
+                  {t("transition.reason_hint", { context: kindContext })}
+                </p>
+                <textarea
+                  id="transition-override-reason"
+                  className="filter-control"
+                  rows={3}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  data-testid="transition-override-reason"
+                />
+              </div>
+            )}
+
+            <div className="transition-field">
+              <label className="field-label" htmlFor="transition-note">
+                {t("transition.note_label")}
+              </label>
+              <p className="muted small">{t("transition.note_hint")}</p>
+              {movingSchedule && (
+                <p
+                  className="form-hint ew-hours-tone-over"
+                  data-testid="transition-note-required"
+                >
+                  {t("transition.note_required_for_move")}
+                </p>
+              )}
+              <textarea
+                id="transition-note"
+                className="filter-control"
+                rows={3}
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                data-testid="transition-note"
+              />
+            </div>
+          </>
+        )}
+
+        {error && (
+          <div className="alert-error" role="alert" data-testid="transition-modal-error">
+            {error}
+          </div>
+        )}
+
+        <div className="ew-plan-actions">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onCancel}
+            disabled={busy}
+            data-testid="transition-modal-cancel"
+          >
+            {t("common:cancel")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={confirm}
+            disabled={busy || loading || !answered}
+            data-testid="transition-modal-confirm"
+          >
+            {busy ? t("updating") : actionLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

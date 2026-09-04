@@ -13,11 +13,13 @@ import type {
   ContractLine,
   ContractLineWritePayload,
   ContractOptions,
+  ContractPlanning,
   ContractRevision,
   ContractRevisionWritePayload,
   ContractStats,
   ContractType,
   ContractWritePayload,
+  ExtraWorkRegister,
 } from "./contracts.types";
 
 /**
@@ -81,6 +83,22 @@ export async function updateContract(
 
 export async function deleteContract(id: number): Promise<void> {
   await api.delete(`/contracts/${id}/`);
+}
+
+/**
+ * P-15 §1.1 — the ONE door for lifecycle moves. The serializer's
+ * `lifecycle` is read-only; the server's ALLOWED_TRANSITIONS guard
+ * refuses illegal jumps with `{detail, code}` (`invalid_transition`,
+ * `no_op_transition`, …).
+ */
+export async function transitionContract(
+  id: number,
+  lifecycle: "ACTIVE" | "CANCELLED",
+): Promise<Contract> {
+  const { data } = await api.post<Contract>(`/contracts/${id}/transition/`, {
+    lifecycle,
+  });
+  return data;
 }
 
 /**
@@ -234,4 +252,53 @@ export async function updateContractType(
 
 export async function deleteContractType(id: number): Promise<void> {
   await api.delete(`/contracts/types/${id}/`);
+}
+
+// ---------------------------------------------------------------------------
+// W16 — the extra works register
+// ---------------------------------------------------------------------------
+
+/**
+ * The customer's register of chargeable work, created on first ask.
+ *
+ * Keyed on the CUSTOMER, not on a contract id — the caller has a
+ * customer in hand and must not have to know whether a register has
+ * been made yet. Same shape as the reference system's
+ * `/contracts/extra-works/{customerId}`.
+ *
+ * The GET syncs before it answers, so what comes back is current. It
+ * is idempotent, so calling it twice costs a query and changes
+ * nothing.
+ */
+export async function getExtraWorkRegister(
+  customerId: number,
+): Promise<ExtraWorkRegister> {
+  const { data } = await api.get<ExtraWorkRegister>(
+    `/contracts/extra-works/${customerId}/`,
+  );
+  return data;
+}
+
+/** Rebuild the register and report what moved, so the page can say
+ *  "3 jobs added" rather than "done". */
+export async function syncExtraWorkRegister(
+  customerId: number,
+): Promise<ExtraWorkRegister> {
+  const { data } = await api.post<ExtraWorkRegister>(
+    `/contracts/extra-works/${customerId}/sync/`,
+    {},
+  );
+  return data;
+}
+
+// W23 — the year×week planning grid for one contract.
+export async function getContractPlanning(
+  contractId: number,
+  year: number,
+): Promise<ContractPlanning> {
+  const response = await api.get<ContractPlanning>(
+    `/contracts/${contractId}/planning/`,
+    { params: { year } },
+  );
+  return response.data;
 }

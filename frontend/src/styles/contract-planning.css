@@ -1,0 +1,224 @@
+/* W23 — the contract year×week planning grid.
+ *
+ * Its own file because index.css belongs to another wave; imported by
+ * ContractPlanningGrid.tsx and nothing else.
+ *
+ * Horizontal space law: 52 week columns do not fit 1366px. The table
+ * scrolls inside `.contract-planning-scroll` — scrollbar always
+ * reserved (scrollbar-gutter) so the affordance is visible, and the
+ * PAGE never scrolls sideways. The name column and the tail stay
+ * sticky so a scrolled grid still says which line and how full.
+ *
+ * W24 — the first cut was sized like a sparkline: 22px rows, 9px week
+ * numbers, a 140px name column and a tail in the same whisper as the
+ * week headers. At a real row count it read as a texture rather than a
+ * table. Every dimension below is now set for READING, and the extra
+ * width it costs is paid by the scroll container that already owned the
+ * overflow — the page still never scrolls sideways.
+ */
+
+.contract-planning-yearbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.contract-planning-year {
+  font-family: var(--f-head);
+  font-weight: 800;
+  font-size: 14px;
+  min-width: 48px;
+  text-align: center;
+}
+
+.contract-planning-scroll {
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  /* The visible affordance: a fading right edge says "more to the
+     right" even before the scrollbar is noticed. */
+  background:
+    linear-gradient(to left, var(--surface-2), transparent 24px) right / 24px
+      100% no-repeat local,
+    var(--surface);
+}
+
+.contract-planning-table {
+  border-collapse: collapse;
+  /* 53 weeks x 24px + a 240px name column + a 96px tail ≈ 1608px
+     minimum, which overflows the card at BOTH 1366px and 1920px —
+     deliberately, and unchanged in kind from the 18px version: the
+     scroll container owns the excess and the page never does. */
+  min-width: 1608px;
+  width: max-content;
+}
+
+.contract-planning-week-head {
+  /* 11px is the smallest size at which a two-digit week number is read
+     rather than decoded; 24px is the narrowest column that holds it
+     without the digits touching their neighbours' borders. */
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  padding: 6px 0 7px;
+  min-width: 24px;
+  text-align: center;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.contract-planning-name-col {
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  padding: 8px 12px 8px 10px;
+  /* A contract line is named things like "Dagelijkse schoonmaak
+     kantoortuin 2e verdieping". 140px ellipsised it to three words. */
+  max-width: 320px;
+  min-width: 240px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-right: 1px solid var(--border-soft);
+  z-index: 1;
+}
+
+.contract-planning-name-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.contract-planning-name-link {
+  cursor: pointer;
+}
+
+.contract-planning-name-link:hover {
+  text-decoration: underline;
+}
+
+.contract-planning-cell {
+  min-width: 24px;
+  /* A real row, not a 22px sliver: tall enough that a tinted week is a
+     block of colour and the count inside it is legible. */
+  height: 34px;
+  border: 1px solid var(--border-soft);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--text-2);
+}
+
+.contract-planning-cell[data-status] {
+  cursor: pointer;
+  background: var(--surface-3);
+}
+
+/* Status tints from the shared token palette — the same green / red /
+ * amber vocabulary every badge already speaks. */
+.contract-planning-cell[data-status="COMPLETED"] {
+  background: var(--green-2);
+  color: #fff;
+}
+.contract-planning-cell[data-status="TICKET_CREATED"] {
+  background: var(--green-soft);
+}
+.contract-planning-cell[data-status="PLANNED"] {
+  background: var(--teal-soft);
+}
+.contract-planning-cell[data-status="RESCHEDULED"] {
+  background: var(--amber-soft);
+}
+.contract-planning-cell[data-status="MISSED"] {
+  background: var(--red-soft);
+  color: var(--red);
+}
+.contract-planning-cell[data-status="SKIPPED"],
+.contract-planning-cell[data-status="CANCELLED"] {
+  background: var(--surface-3);
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.contract-planning-tail-head,
+.contract-planning-tail {
+  position: sticky;
+  right: 0;
+  background: var(--surface);
+  padding: 4px 12px;
+  text-align: right;
+  white-space: nowrap;
+  min-width: 96px;
+  border-left: 1px solid var(--border-soft);
+  z-index: 1;
+}
+
+.contract-planning-tail-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* The achieved count carries the row's weight; the agreed frequency is
+   the quieter thing it is measured against. */
+.contract-planning-tail-done {
+  font-family: var(--f-head);
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-1);
+}
+
+.contract-planning-tail-sep {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-faint);
+  margin: 0 2px;
+}
+
+.contract-planning-tail-target {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+/* W24 — the two full-width state lines: "nothing is linked yet" and
+   "n more lines carry no linked work". A real line at the grid's own
+   reading size, spanning every column, so neither can be mistaken for a
+   broken row. */
+.contract-planning-state {
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-align: left;
+}
+
+.contract-planning-state-count {
+  padding: 10px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-faint);
+  border-top: 1px solid var(--border-soft);
+}
+
+/* The sticky element is the TEXT, never the cell.
+ *
+ * Measured, not assumed: with `position: sticky` on the full-width
+ * `<td colSpan>` itself, the message scrolled clean off the left edge
+ * (-597px at 1366px, scrollport 979px). A sticky box cannot be pinned
+ * outside its own boundaries, and the cell's boundaries are the whole
+ * 1608px table — so it just travelled with it. Pinning a NARROW inline
+ * box inside that cell is what actually keeps the sentence on screen at
+ * every scroll position. */
+.contract-planning-state-text {
+  position: sticky;
+  left: 16px;
+  display: inline-block;
+}

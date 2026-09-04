@@ -93,9 +93,15 @@ export function StaffCredentialModal({
     credential?.grants ?? [],
   );
   const [customers, setCustomers] = useState<CustomerAdmin[]>([]);
-  const [selectedCustomerId, setSelectedCustomerId] = useState<number | "">(
-    "",
-  );
+  /** W-UX1-C — the release picker is MULTI-SELECT. One decision
+   *  ("who may see this certificate") is usually made about several
+   *  customers at once, and the single-select forced one round trip
+   *  through the whole form per customer. Ids rather than a Set so the
+   *  render order is the picker's order. */
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<number[]>([]);
+  /** Per-customer failures from ONE Add press, so a partial success
+   *  says exactly which customers did not take. */
+  const [grantErrors, setGrantErrors] = useState<string[]>([]);
   const [grantBusy, setGrantBusy] = useState(false);
   const [grantRemoveTarget, setGrantRemoveTarget] =
     useState<CredentialGrant | null>(null);
@@ -239,24 +245,48 @@ export function StaffCredentialModal({
 
   async function handleAddGrant(event: FormEvent) {
     event.preventDefault();
-    if (!credential || selectedCustomerId === "") return;
+    if (!credential || selectedCustomerIds.length === 0) return;
     setGrantBusy(true);
     setError("");
-    try {
-      await createCredentialGrant(
-        userId,
-        credential.id,
-        Number(selectedCustomerId),
-      );
-      setSelectedCustomerId("");
-      await reloadGrants();
+    setGrantErrors([]);
+    // SEQUENTIAL, and deliberately so. The endpoint is per-customer
+    // (`POST /users/<u>/credentials/<c>/grants/`, one `customer_id`) and
+    // is reused rather than widened. Firing them in parallel would race
+    // the reload and make a partial failure hard to attribute; a handful
+    // of customers is not a throughput problem.
+    const failures: string[] = [];
+    let granted = 0;
+    for (const customerId of selectedCustomerIds) {
+      try {
+        await createCredentialGrant(userId, credential.id, customerId);
+        granted += 1;
+      } catch (err) {
+        const name =
+          customers.find((c) => c.id === customerId)?.name ?? String(customerId);
+        failures.push(`${name}: ${getApiError(err)}`);
+      }
+    }
+    // Whatever DID land is real, so the list is reloaded either way and
+    // the picker keeps only the customers that failed — pressing Add
+    // again retries exactly those.
+    setSelectedCustomerIds(
+      failures.length === 0
+        ? []
+        : selectedCustomerIds.filter((cid) =>
+            failures.some((f) =>
+              f.startsWith(
+                `${customers.find((c) => c.id === cid)?.name ?? String(cid)}: `,
+              ),
+            ),
+          ),
+    );
+    setGrantErrors(failures);
+    await reloadGrants();
+    if (granted > 0) {
       toast.push({ variant: "success", title: t("toast.grant_added") });
       onChanged();
-    } catch (err) {
-      setError(getApiError(err));
-    } finally {
-      setGrantBusy(false);
     }
+    setGrantBusy(false);
   }
 
   function openGrantRemoveDialog(grant: CredentialGrant) {
@@ -699,39 +729,53 @@ export function StaffCredentialModal({
                       >
                         {t("grants.add_label")}
                       </label>
-                      <select
-                        id="credential-grant-add"
-                        className="field-select"
-                        value={
-                          selectedCustomerId === ""
-                            ? ""
-                            : String(selectedCustomerId)
-                        }
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setSelectedCustomerId(
-                            value === "" ? "" : Number(value),
-                          );
-                        }}
-                        disabled={grantBusy || grantableCustomers.length === 0}
-                        data-testid="credential-grant-add-select"
-                      >
-                        <option value="">
-                          {grantableCustomers.length === 0
-                            ? t("grants.no_more")
-                            : t("grants.placeholder")}
-                        </option>
-                        {grantableCustomers.map((customer) => (
-                          <option key={customer.id} value={customer.id}>
-                            {customer.name}
-                          </option>
-                        ))}
-                      </select>
+                      {/* W-UX1-C — MULTI-SELECT. A checkbox list rather
+                          than `<select multiple>`: the picker already
+                          hides customers who hold a grant, so what is
+                          left is a short list of choices, and a native
+                          multiple-select hides its own selection behind
+                          a scroll and a modifier key. `.assign-picker*`
+                          is the same pair the ticket's staff picker
+                          uses — no new design language, no new class. */}
+                      {grantableCustomers.length === 0 ? (
+                        <p className="muted small" data-testid="credential-grant-none">
+                          {t("grants.no_more")}
+                        </p>
+                      ) : (
+                        <div
+                          className="assign-picker"
+                          role="group"
+                          aria-labelledby="credential-grant-add"
+                          data-testid="credential-grant-add-select"
+                        >
+                          {grantableCustomers.map((customer) => (
+                            <label
+                              key={customer.id}
+                              className="assign-picker-row"
+                              data-testid="credential-grant-option"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedCustomerIds.includes(customer.id)}
+                                disabled={grantBusy}
+                                onChange={(event) =>
+                                  setSelectedCustomerIds((prev) =>
+                                    event.target.checked
+                                      ? [...prev, customer.id]
+                                      : prev.filter((cid) => cid !== customer.id),
+                                  )
+                                }
+                              />
+                              <span>{customer.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <button
                       type="submit"
                       className="btn btn-primary btn-sm"
-                      disabled={grantBusy || selectedCustomerId === ""}
+                      disabled={grantBusy || selectedCustomerIds.length === 0}
                       data-testid="credential-grant-add-button"
                     >
                       {grantBusy
@@ -739,6 +783,17 @@ export function StaffCredentialModal({
                         : t("grants.add_button")}
                     </button>
                   </form>
+                )}
+                {grantErrors.length > 0 && (
+                  <ul
+                    className="alert-error"
+                    role="alert"
+                    data-testid="credential-grant-errors"
+                  >
+                    {grantErrors.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
                 )}
               </>
             ) : (

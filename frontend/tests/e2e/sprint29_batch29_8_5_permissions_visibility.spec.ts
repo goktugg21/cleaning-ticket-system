@@ -42,12 +42,23 @@ import { loginAs } from "./fixtures/login";
  *   - `permissions-rollup-summary-edit-<accessId>`                  (per-row edit)
  *
  * Preserved from earlier sprints (29.6 / 29.7 locks):
- *   - `permissions-rollup-chip-<userId>`               (chip root)
  *   - `user-detail-permissions-link-<customerId>`      (chip on user detail)
  *   - `customer-access-overrides-button`               (row Edit button)
  *   - `section-customer-overrides-editor`              (modal root, was drawer)
  *   - `customer-overrides-close`                       (modal close)
+ *
+ * RF-8 (#106) — the permissions matrix sits inside the collapsed
+ * "Geavanceerd" card of the Permissions page; a spec that lands there
+ * without `?focus_user=` opens it first (`openAdvanced`).
  */
+
+async function openAdvanced(page: Page): Promise<void> {
+  const toggle = page.locator('[data-testid="customer-permissions-advanced-toggle"]');
+  await expect(toggle).toBeVisible({ timeout: 10_000 });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
+}
 
 type AccessRow = {
   id: number;
@@ -269,6 +280,7 @@ test.describe("Sprint 29 Batch 29.8.5 — permissions visibility surfaces", () =
 
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${t.customerId}/permissions`);
+    await openAdvanced(page);
 
     const row = page.locator(
       `[data-testid="permissions-matrix-row"][data-user-id="${t.userId}"][data-building-id="${t.buildingId}"]`,
@@ -305,6 +317,7 @@ test.describe("Sprint 29 Batch 29.8.5 — permissions visibility surfaces", () =
 
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${t.customerId}/permissions`);
+    await openAdvanced(page);
 
     await openModalForAccess(page, t.userId, t.buildingId);
 

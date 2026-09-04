@@ -4,7 +4,9 @@ import { DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
 import {
   DEMO_TICKET_TITLES,
+  openWorkflowFolds,
   resolveDemoTicketId,
+  restorePantryToWaitingCustomerApproval,
 } from "./fixtures/tickets";
 
 /**
@@ -23,10 +25,25 @@ import {
  * (.data-table tbody tr → a.td-id) onto direct `/tickets/{id}` goto
  * calls. The ID is resolved at the start of each test by calling
  * `/api/tickets/?search=<title>` so the spec stays robust under
- * `--reset-tickets` autoincrement churn. Dashboard nav was incidental
- * to every test in this file; the dedicated dashboard table specs
- * still cover the table-row click-through.
+ * `--reset-tickets` autoincrement churn.
+ *
+ * FE-3 — every transition button carries `workflow-move-<STATUS>`.
+ * The ONE primary action (for Amanda: Approve, with Reject beside it)
+ * sits in the phase banner at the top of the page; corrections and
+ * provider overrides sit behind the "Geavanceerd" / "Advanced" fold
+ * and further forward steps behind "other steps". `openWorkflowFolds`
+ * opens whichever folds exist so a spec can see every button; the
+ * `.status-actions .status-btn` selector alone no longer reaches the
+ * banner buttons.
  */
+
+const MOVE_BUTTONS = '[data-testid^="workflow-move-"]';
+
+// sprint27f's mutating test approves the pantry ticket; make sure the
+// fixture is back in WAITING_CUSTOMER_APPROVAL before reading it here.
+test.beforeAll(async () => {
+  await restorePantryToWaitingCustomerApproval();
+});
 
 test("Amanda sees Approve/Reject on the B3 waiting ticket", async ({
   page,
@@ -43,15 +60,15 @@ test("Amanda sees Approve/Reject on the B3 waiting ticket", async ({
   await page.goto(`/tickets/${ticketId}`);
   await page.waitForLoadState("networkidle");
 
-  // Status-action buttons are rendered from ticket.allowed_next_statuses;
-  // the labels are i18n'd ("Move to Approved" / "Move to Rejected").
-  const statusActions = page.locator(".status-actions .status-btn");
-  await expect(statusActions).toHaveCount(2, { timeout: 10_000 });
-
-  const labels = (await statusActions.allTextContents()).map((s) => s.trim());
-  // Tolerate the i18n label drift by matching on the status enum tail.
-  expect(labels.some((l) => /Approved|Goedgekeurd/i.test(l))).toBe(true);
-  expect(labels.some((l) => /Rejected|Afgewezen/i.test(l))).toBe(true);
+  // Both decisions are the customer's primary action: they render as
+  // banner buttons, no fold to open.
+  await expect(
+    page.locator('[data-testid="workflow-move-APPROVED"]'),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.locator('[data-testid="workflow-move-REJECTED"]'),
+  ).toBeVisible();
+  await expect(page.locator(MOVE_BUTTONS)).toHaveCount(2);
 });
 
 test("Iris cannot reach Amanda's B3 waiting ticket", async ({ page }) => {
@@ -71,11 +88,14 @@ test("Iris cannot reach Amanda's B3 waiting ticket", async ({ page }) => {
   await page.goto(`/tickets/${ticketId}`);
 
   // The detail page renders the not-found / scope-error path. We
-  // assert the absence of the workflow buttons rather than HTTP code,
-  // because the SPA handles the API 404 internally.
+  // assert the absence of the workflow buttons (and of the fact
+  // block) rather than HTTP code, because the SPA handles the API 404
+  // internally.
   await expect(
-    page.locator(".status-actions .status-btn"),
-  ).toHaveCount(0, { timeout: 10_000 });
+    page.locator(".alert-error, .empty-state").first(),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(MOVE_BUTTONS)).toHaveCount(0);
+  await expect(page.locator('[data-testid="ticket-facts"]')).toHaveCount(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -86,31 +106,44 @@ test("Iris cannot reach Amanda's B3 waiting ticket", async ({ page }) => {
 // existing tests cover.
 // ---------------------------------------------------------------------------
 
-test("Building manager sees no Approve/Reject on a WAITING_CUSTOMER_APPROVAL ticket", async ({
+test("Building manager with the override key gets the ON-BEHALF door, never a silent approve, on a WAITING_CUSTOMER_APPROVAL ticket", async ({
   page,
 }) => {
-  // Gokhan (manager B1+B2+B3) can REACH the B3 ticket but the state
-  // machine does not let a building manager approve/reject — those
-  // are SCOPE_CUSTOMER_LINKED transitions reserved for customer-users
-  // (with admin override available to staff). The button list should
-  // therefore not contain APPROVED or REJECTED, only no-ops or none.
+  // P-11 F1 — REPINNED to P-4's ruling (`tickets/override_authority`):
+  // the customer's decision can be answered ON BEHALF by SA, a company
+  // admin in the ticket's company, or a BUILDING MANAGER assigned to
+  // the building who holds the override permission — which Gokhan
+  // (manager B1+B2+B3) does in the demo seed. The door is the OVERRIDE
+  // door: pressing it opens the reason dialog (sprint27f's), and the
+  // history row carries is_override (H-11). H-5 still stands — STAFF
+  // never see these buttons; the pre-P-4 expectation that a BM never
+  // does described the world before the on-behalf feature existed.
   await loginAs(page, DEMO_USERS.managerAll);
   const ticketId = await resolveDemoTicketId(
     page,
     DEMO_TICKET_TITLES.pantry_wca,
   );
   await page.goto(`/tickets/${ticketId}`);
-  await page.waitForLoadState("networkidle");
+  await expect(page.locator('[data-testid="ticket-facts"]')).toBeVisible({
+    timeout: 10_000,
+  });
+  await openWorkflowFolds(page);
 
-  const labels = (
-    await page.locator(".status-actions .status-btn").allTextContents()
-  ).map((s) => s.trim());
-  // The label may be i18n'd; tolerate Dutch / English variants by
-  // checking against the underlying status name in either language.
-  for (const l of labels) {
-    expect(/Approved|Goedgekeurd/i.test(l)).toBe(false);
-    expect(/Rejected|Afgewezen/i.test(l)).toBe(false);
-  }
+  const approve = page.locator('[data-testid="workflow-move-APPROVED"]');
+  await expect(approve).toHaveCount(1);
+  await expect(
+    page.locator('[data-testid="workflow-move-REJECTED"]'),
+  ).toHaveCount(1);
+
+  // The door asks for the reason — it is never a one-click approve.
+  await approve.click();
+  const modal = page.locator("[data-testid='ticket-override-modal']");
+  await expect(modal).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.locator("[data-testid='ticket-override-reason']"),
+  ).toBeVisible();
+  await page.locator("[data-testid='ticket-override-cancel']").click();
+  await expect(modal).toBeHidden({ timeout: 10_000 });
 });
 
 test("ticket detail timeline does NOT leak seed_demo_data internal note", async ({
@@ -122,12 +155,19 @@ test("ticket detail timeline does NOT leak seed_demo_data internal note", async 
   // those out at render time so demo users never see the marker. Pick
   // the [DEMO] Closed kitchen tap ticket — it walks through 4
   // transitions, so every history row's note is populated.
+  //
+  // RF-4 — the activity timeline is folded by default; open it first.
   await loginAs(page, DEMO_USERS.companyAdmin);
   const ticketId = await resolveDemoTicketId(
     page,
     DEMO_TICKET_TITLES.kitchen_closed,
   );
   await page.goto(`/tickets/${ticketId}`);
+  const toggle = page.locator('[data-testid="ticket-activity-toggle"]');
+  await expect(toggle).toBeVisible({ timeout: 10_000 });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
   const timeline = page.locator(".timeline").first();
   await expect(timeline).toBeVisible({ timeout: 10_000 });
   const text = (await timeline.textContent()) ?? "";
@@ -139,7 +179,8 @@ test("Super admin sees REOPENED_BY_ADMIN button on a CLOSED ticket", async ({
 }) => {
   // "[DEMO] Closed kitchen tap" (B1 Amsterdam, CLOSED).
   // Super admin's allowed_next_statuses for CLOSED includes every
-  // other status, so at least one button mentions REOPENED.
+  // other status; reopening is a correction, so it sits behind the
+  // Advanced fold of the workflow card.
   await loginAs(page, DEMO_USERS.super);
   const ticketId = await resolveDemoTicketId(
     page,
@@ -148,17 +189,13 @@ test("Super admin sees REOPENED_BY_ADMIN button on a CLOSED ticket", async ({
   await page.goto(`/tickets/${ticketId}`);
   // Wait until the workflow card finishes rendering. networkidle
   // alone is not enough — the page does several Promise.all sets and
-  // the buttons appear only after `loadTicket` resolves and the
-  // useMemo recomputes from non-null `ticket`.
-  const statusActions = page.locator(".status-actions .status-btn");
-  await expect(statusActions.first()).toBeVisible({ timeout: 15_000 });
+  // the buttons appear only after `loadTicket` resolves.
+  await expect(page.locator('[data-testid="side-card-workflow"]')).toBeVisible({
+    timeout: 15_000,
+  });
+  await openWorkflowFolds(page);
 
-  const labels = (await statusActions.allTextContents()).map((s) => s.trim());
-  // The seeded ticket is in CLOSED status. allowed_next_statuses for
-  // a super-admin is "every status except the current one", so the
-  // button list should have at least one entry mentioning REOPENED.
-  expect(labels.length).toBeGreaterThan(0);
-  expect(
-    labels.some((l) => /Reopened|Heropend/i.test(l)),
-  ).toBe(true);
+  const reopen = page.locator('[data-testid="workflow-move-REOPENED_BY_ADMIN"]');
+  await expect(reopen).toBeVisible({ timeout: 10_000 });
+  expect(await page.locator(MOVE_BUTTONS).count()).toBeGreaterThan(0);
 });

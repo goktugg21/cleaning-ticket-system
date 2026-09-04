@@ -1,6 +1,7 @@
 import io
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 from PIL import Image
 
@@ -160,6 +161,56 @@ class TenantFixtureMixin:
         }
         payload.update(overrides)
         return payload
+
+    def make_workable(self, ticket=None, *, assignee=None, when=None):
+        """W13-FIX §1 — satisfy what a forward move INTO WORK now needs.
+
+        `tickets/transition_requirements.py` refuses OPEN -> ACKNOWLEDGED
+        without a start time, and OPEN/ACKNOWLEDGED/ON_HOLD ->
+        IN_PROGRESS without both somebody doing it and a start time --
+        because those statuses already claimed to mean exactly that and
+        never checked.
+
+        A test whose subject is something else (scoping, audit rows, the
+        completion gate) states the precondition in one line here rather
+        than restating the rule, so the rule stays in one place.
+        """
+        ticket = ticket or self.ticket
+        ticket.assigned_to = assignee or self.manager
+        ticket.scheduled_start_at = when or timezone.now()
+        ticket.save(
+            update_fields=["assigned_to", "scheduled_start_at", "updated_at"]
+        )
+        return ticket
+
+    def record_plan(self, ticket, actor=None):
+        """P-1 — say out loud that a PERSON planned this ticket.
+
+        A `scheduled_start_at` written straight onto the row is what the
+        Sprint 9B seed left behind on crmtest, and since P-1 the board
+        and the detail read such a date as NO plan (`tickets/
+        plan_provenance.py`). A fixture whose subject is a planned job
+        writes the same annotation row `set_schedule` writes, so the
+        test states the precondition the rule actually needs.
+        """
+        from tickets.models import TicketStatusHistory
+        from tickets.schedule_history import compose_schedule_note
+
+        return TicketStatusHistory.objects.create(
+            ticket=ticket,
+            old_status=ticket.status,
+            new_status=ticket.status,
+            changed_by=actor or self.super_admin,
+            note=compose_schedule_note(
+                action="set",
+                old_start=None,
+                new_start=ticket.scheduled_start_at,
+                window_label="",
+                reason="",
+            ),
+            is_override=False,
+            override_reason="",
+        )
 
     def move_ticket_to_customer_approval(self, ticket=None):
         ticket = ticket or self.ticket

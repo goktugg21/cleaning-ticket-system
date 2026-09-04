@@ -59,6 +59,7 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+from .plan_gate_fixture import make_plan_complete
 from extra_work.proposal_state_machine import TransitionError
 from tickets.models import Ticket
 
@@ -192,6 +193,8 @@ class _DirectPublishFixtureMixin:
             status=ExtraWorkStatus.UNDER_REVIEW,
             request_intent=request_intent,
         )
+        # W-PLAN — pricing is gated on a complete plan.
+        make_plan_complete(ew)
         ExtraWorkRequestItem.objects.create(
             extra_work_request=ew,
             service=self.service,

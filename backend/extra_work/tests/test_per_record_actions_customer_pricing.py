@@ -180,7 +180,6 @@ class CustomerSpecificContractPricingRoutingTests(TestCase):
                 {
                     "service": self.service_priced.id,
                     "quantity": "2.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ],
@@ -215,7 +214,6 @@ class CustomerSpecificContractPricingRoutingTests(TestCase):
                 {
                     "service": self.service_priced.id,
                     "quantity": "2.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ],
@@ -247,7 +245,6 @@ class CustomerSpecificContractPricingRoutingTests(TestCase):
                 {
                     "service": self.service_priced.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 },
                 {
@@ -256,7 +253,6 @@ class CustomerSpecificContractPricingRoutingTests(TestCase):
                     # cart routes to PROPOSAL.
                     "service": self.service_unpriced.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 },
             ],

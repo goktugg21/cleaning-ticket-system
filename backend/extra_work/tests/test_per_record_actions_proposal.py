@@ -50,6 +50,7 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+from .plan_gate_fixture import make_plan_complete
 
 
 User = get_user_model()
@@ -151,6 +152,9 @@ class _ActionsFixtureMixin:
             category=ExtraWorkCategory.DEEP_CLEANING,
             status=status,
         )
+        # W-PLAN — pricing is gated on a complete plan; this
+        # module tests pricing surfaces, not the gate.
+        make_plan_complete(ew)
         ExtraWorkRequestItem.objects.create(
             extra_work_request=ew,
             service=self.service,

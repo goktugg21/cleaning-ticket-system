@@ -5,21 +5,23 @@ import type { BuildingAdmin } from "../../api/types";
 import { hourTypeLabel } from "../../lib/hourTypeLabel";
 
 /**
- * Sprint 152.2 — the employee / hour-type / building filter row, shared
- * by the Entries tab and the Overview tab.
+ * The employee / source / hour-type / building filter controls on the
+ * Hours admin's Worked tab.
  *
- * EXTRACTED rather than copied. Both tabs filter the same collection
- * with the same three controls, and a second hand-maintained copy is
- * exactly the "written once, omitted elsewhere" defect this project has
- * paid for repeatedly — the Sprint 126 permission group that rendered a
- * headerless column for three sprints, and the Sprint 142.1 uniqueness
- * pre-check that was fixed in one serializer and left broken in its
- * twin. One component means a fourth filter is added once.
+ * W-HR1 §2 — it was shared with the Overview tab, which is deleted, so
+ * this now has ONE caller. Kept as its own file rather than inlined:
+ * four pickers and their empty-option handling are the bulk of the
+ * filter row, and folding them back into an 1100-line page is the
+ * direction this area has been moving away from.
  *
- * Deliberately NOT including the PERIOD controls: the two tabs differ
- * there on purpose (Entries has a plain from/to pair, Overview has the
- * week/range mode switch), and folding both into one component would
- * make it a switch statement pretending to be a shared control.
+ * The markup is the house `.filter-field` / `.filter-label` /
+ * `.filter-control` set, so the row wraps inside `.filter-bar` the way
+ * every other admin list's does. It was `.field` / `.field-select`
+ * inside a nowrap, horizontally-scrolling `.hours-filter-line`, which
+ * is why the last two controls sat off the right edge at 1366.
+ *
+ * Deliberately NOT including the PERIOD controls: the week bar and the
+ * from/to pair belong to the page, which owns the week.
  */
 export interface HoursFilterValues {
   employee: number | "";
@@ -29,11 +31,9 @@ export interface HoursFilterValues {
    *  column and the API filter and stopped there; the owner looked for
    *  the control and it was not on the screen.
    *
-   *  OPTIONAL, and the control renders only when the caller passes it:
-   *  the Overview tab shares this row but reports on periods, where a
-   *  source filter would narrow a chart nobody asked to narrow. A
-   *  shared control that appears on every caller is how a filter row
-   *  grows past what any one screen needs. */
+   *  OPTIONAL, and the control renders only when the caller passes
+   *  it — a filter that appears whether or not the screen wants it is
+   *  how a filter row grows past what any one screen needs. */
   source_type?: string;
 }
 
@@ -43,7 +43,7 @@ export interface HoursFilterRowProps {
   employees: TimesheetEmployee[];
   hourTypes: HourType[];
   buildings: BuildingAdmin[];
-  /** Distinguishes the two tabs' DOM ids and test ids. */
+  /** Prefixes the DOM ids and test ids. */
   idPrefix: string;
   disabled?: boolean;
 }
@@ -61,13 +61,13 @@ export function HoursFilterRow({
 
   return (
     <>
-      <div className="field" style={{ margin: 0 }}>
-        <label className="field-label" htmlFor={`${idPrefix}-filter-employee`}>
+      <div className="filter-field">
+        <span className="filter-label">
           {t("hours_admin.filter_employee")}
-        </label>
+        </span>
         <select
           id={`${idPrefix}-filter-employee`}
-          className="field-select"
+          className="filter-control"
           value={values.employee === "" ? "" : String(values.employee)}
           onChange={(event) =>
             onChange({
@@ -88,13 +88,13 @@ export function HoursFilterRow({
       </div>
 
       {values.source_type !== undefined && (
-      <div className="field" style={{ margin: 0 }}>
-        <label className="field-label" htmlFor={`${idPrefix}-filter-source`}>
+      <div className="filter-field">
+        <span className="filter-label">
           {t("hours_admin.filter_source")}
-        </label>
+        </span>
         <select
           id={`${idPrefix}-filter-source`}
-          className="field-select"
+          className="filter-control"
           value={values.source_type}
           onChange={(event) => onChange({ source_type: event.target.value })}
           data-testid={`${idPrefix}-filter-source`}
@@ -112,13 +112,13 @@ export function HoursFilterRow({
       </div>
       )}
 
-      <div className="field" style={{ margin: 0 }}>
-        <label className="field-label" htmlFor={`${idPrefix}-filter-hour-type`}>
+      <div className="filter-field">
+        <span className="filter-label">
           {t("hours_admin.filter_hour_type")}
-        </label>
+        </span>
         <select
           id={`${idPrefix}-filter-hour-type`}
-          className="field-select"
+          className="filter-control"
           value={values.hour_type === "" ? "" : String(values.hour_type)}
           onChange={(event) =>
             onChange({
@@ -138,13 +138,13 @@ export function HoursFilterRow({
         </select>
       </div>
 
-      <div className="field" style={{ margin: 0 }}>
-        <label className="field-label" htmlFor={`${idPrefix}-filter-building`}>
+      <div className="filter-field">
+        <span className="filter-label">
           {t("hours_admin.filter_building")}
-        </label>
+        </span>
         <select
           id={`${idPrefix}-filter-building`}
-          className="field-select"
+          className="filter-control"
           value={values.building === "" ? "" : String(values.building)}
           onChange={(event) =>
             onChange({

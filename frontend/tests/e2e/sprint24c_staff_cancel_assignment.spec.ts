@@ -3,6 +3,7 @@ import type { APIRequestContext } from "@playwright/test";
 
 import { DEMO_PASSWORD, DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
+import { openTicketTab } from "./fixtures/tickets";
 
 /**
  * Sprint 24C — STAFF self-cancellation of a PENDING assignment request.
@@ -389,6 +390,8 @@ test.describe("Sprint 24C → ticket detail cancel UX", () => {
 
     await loginAs(page, DEMO_USERS.staffOsius);
     await page.goto(`/tickets/${ticketId}`);
+    // FE-3 — the request-assignment block lives on the People tab.
+    await openTicketTab(page, "people");
     // Pending block should render automatically thanks to the
     // discover-pending-request effect.
     await expect(
@@ -450,6 +453,8 @@ test.describe("Sprint 24C → ticket detail cancel UX", () => {
 
     await loginAs(page, DEMO_USERS.staffOsius);
     await page.goto(`/tickets/${ticketId}`);
+    // FE-3 — the request-assignment block lives on the People tab.
+    await openTicketTab(page, "people");
     await expect(
       page.locator('[data-testid="request-assignment-pending"]'),
     ).toBeVisible({ timeout: 15_000 });
@@ -526,6 +531,8 @@ for (const vp of [
     await page.setViewportSize(vp);
     await loginAs(page, DEMO_USERS.staffOsius);
     await page.goto(`/tickets/${ticketId}`);
+    // FE-3 — the request-assignment block lives on the People tab.
+    await openTicketTab(page, "people");
     await expect(
       page.locator('[data-testid="request-assignment-pending"]'),
     ).toBeVisible({ timeout: 15_000 });
@@ -566,6 +573,8 @@ test("No raw `request_assignment_*` cancel i18n keys leak on ticket detail", asy
 
   await loginAs(page, DEMO_USERS.staffOsius);
   await page.goto(`/tickets/${ticketId}`);
+  // FE-3 — the request-assignment block lives on the People tab.
+  await openTicketTab(page, "people");
   await expect(
     page.locator('[data-testid="request-assignment-pending"]'),
   ).toBeVisible({ timeout: 15_000 });

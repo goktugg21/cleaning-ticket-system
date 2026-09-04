@@ -32,9 +32,46 @@ export interface ContractType {
   updated_at: string;
 }
 
+/** P-5 S7 — one customer's share of a building's bills. */
+export interface ContractBuildingCostShare {
+  customer_id: number;
+  customer_name: string;
+  share_pct: string;
+}
+
 export interface ContractBuildingRef {
   id: number;
   name: string;
+  /** P-5 S7 — present on the detail only. */
+  cost_shares?: ContractBuildingCostShare[];
+}
+
+/** P-5 S7 — one visit of a contract's recurring work (an occurrence). */
+export interface ContractVisit {
+  id: number;
+  planned_date: string;
+  status: string;
+  recurring_job_id: number;
+  recurring_job_title: string;
+  ticket_id: number | null;
+  ticket_no: string | null;
+}
+
+export interface ContractVisits {
+  recent: ContractVisit[];
+  next: ContractVisit[];
+  total: number;
+}
+
+/** P-5 S7 — one invoice a contract produced. */
+export interface ContractInvoiceTrailRow {
+  invoice_id: number;
+  number: string | null;
+  status: string;
+  period_start: string;
+  period_end: string;
+  invoice_date: string;
+  total_amount: string;
 }
 
 /** One project on a revision. `amount` and `hours` are per BILLING
@@ -50,6 +87,58 @@ export interface ContractLine {
   area_m2: string | null;
   amount: string;
   vat_pct: string;
+  /** W16 — the chargeable job this line MIRRORS, on an extra work
+   *  register. NULL on every ordinary contract line. Read-only: the
+   *  link is made by the server's sync, and the amount comes with it. */
+  extra_work: number | null;
+  extra_work_no: number | null;
+  /** P-12 C3 (§D.24 rule 6) — which recurring work runs this line. */
+  recurring?: {
+    id: number;
+    title: string;
+    frequency: string;
+    is_active: boolean;
+  }[];
+}
+
+/** W16 — one building's slice of a customer's extra work register. */
+export interface ExtraWorkRegisterBuilding {
+  id: number;
+  name: string;
+  job_count: number;
+  total_amount: string;
+  lines: ContractLine[];
+}
+
+/**
+ * W16 — the per-customer register of chargeable work.
+ *
+ * THREE money figures, not one, and the difference between two of them
+ * is the number that matters: `earned_amount - invoiced_amount` is
+ * exactly what the Extra Work run still has to bill. A single "total"
+ * would be a lie whichever one it was — measured on the demo data the
+ * register held EUR 990.99 of finished work while only EUR 660.66 was
+ * still billable, the rest already invoiced.
+ */
+export interface ExtraWorkRegister {
+  /** W-FIX1 D2 — null until the first explicit sync has made it. */
+  contract: {
+    id: number;
+    contract_no: string;
+    kind: string;
+    customer: number;
+    customer_name: string;
+    revision: number;
+  } | null;
+  buildings: ExtraWorkRegisterBuilding[];
+  summary: {
+    job_count: number;
+    building_count: number;
+    total_amount: string;
+    earned_amount: string;
+    invoiced_amount: string;
+  };
+  changed?: { added: number; updated: number; removed: number };
 }
 
 export interface ContractRevisionSummary {
@@ -97,6 +186,10 @@ export interface Contract {
   end_date: string | null;
   lifecycle: ContractLifecycle;
   status: ContractStatus;
+  /** P-15 §1.2 — money-bearing: has generated invoices, so the list's
+   *  Delete cannot take it (the row says why; the server refuses with
+   *  `contract_has_invoices`). */
+  has_invoices: boolean;
   description: string;
   notes: string;
   billing_period: BillingPeriod;
@@ -105,6 +198,9 @@ export interface Contract {
   payment_terms_days: number;
   start_proration: boolean;
   buildings: ContractBuildingRef[];
+  /** P-5 S7 — connected facts; null on the list. */
+  visits?: ContractVisits | null;
+  invoice_trail?: ContractInvoiceTrailRow[] | null;
   active_revision: ContractRevisionSummary | null;
   /** All four are DERIVED from the active revision's lines server-side
    *  and stored nowhere — never cache them into a second copy here. */
@@ -166,6 +262,28 @@ export interface ContractStats {
   cancelled: number;
   monthly_total: string;
   yearly_total: string;
+  /** P-12 C1 — the road's buckets and the Start-here facts. */
+  ending_soon: number;
+  draft_without_lines: number;
+  monthly_by_status: {
+    active: string;
+    ending_soon: string;
+    draft: string;
+    expired: string;
+    cancelled: string;
+  };
+  ending_soon_days: number;
+  start_here: {
+    draft_no_lines: ContractStartHereRow | null;
+    ending_soonest: ContractStartHereRow | null;
+  };
+}
+
+export interface ContractStartHereRow {
+  id: number;
+  contract_no: string;
+  customer_name: string;
+  end_date: string | null;
 }
 
 export interface ContractOptions {
@@ -180,7 +298,10 @@ export interface ContractFilters {
   search?: string;
   customer?: number | "";
   building?: number | "";
-  status?: ContractStatus | "";
+  status?: ContractStatus | "ENDING" | "";
+  /** P-12 C1 — "exclude" narrows an ACTIVE read to not-ending-soon,
+   *  so the Active and Ending tabs partition. */
+  ending?: "exclude";
   type?: number | "";
   sort?: string;
   page?: number;
@@ -216,4 +337,31 @@ export interface ContractForecast {
   invoices_per_year: number;
   first_invoice_date: string | null;
   excluded_first_invoice: boolean;
+}
+
+// ---------------------------------------------------------------------
+// W23 — the year×week planning grid (GET /contracts/<id>/planning/).
+// Mirrors `contracts.serializers.ContractPlanningSerializer` verbatim.
+// ---------------------------------------------------------------------
+export interface ContractPlanningWeek {
+  week: number;
+  count: number;
+  /** Dominant `PlannedOccurrenceStatus` for the week's cell tint. */
+  status: string;
+  /** The recurring job to open when the cell is clicked. */
+  job_id: number;
+}
+
+export interface ContractPlanningLine {
+  line_id: number;
+  name: string;
+  frequency_per_year: number | null;
+  planned_count: number;
+  job_ids: number[];
+  weeks: ContractPlanningWeek[];
+}
+
+export interface ContractPlanning {
+  year: number;
+  lines: ContractPlanningLine[];
 }

@@ -25,6 +25,10 @@ class InvoicePreviewLineSerializer(serializers.Serializer):
 
     extra_work = serializers.IntegerField(source="id", read_only=True)
     description = serializers.CharField(source="title", read_only=True)
+    # P-5 S7 — the building the meerwerk was done at, so a due row can
+    # link back to it.
+    building = serializers.IntegerField(source="building_id", read_only=True)
+    building_name = serializers.CharField(source="building.name", read_only=True)
     line_subtotal = serializers.SerializerMethodField()
     line_vat = serializers.SerializerMethodField()
     line_total = serializers.SerializerMethodField()
@@ -111,6 +115,19 @@ class InvoiceLineSerializer(serializers.ModelSerializer):
     """Read shape for one invoice line (both origins). `extra_work` is the
     source-EW id (NULL for a hand-added line)."""
 
+    # P-5 S7 — where the amount came from: the meerwerk and the building
+    # behind an extra-work line, so an invoice row links back to what
+    # produced it.
+    extra_work_title = serializers.CharField(
+        source="extra_work.title", read_only=True, default=None
+    )
+    building = serializers.IntegerField(
+        source="extra_work.building_id", read_only=True, default=None
+    )
+    building_name = serializers.CharField(
+        source="extra_work.building.name", read_only=True, default=None
+    )
+
     class Meta:
         model = InvoiceLine
         fields = [
@@ -118,6 +135,9 @@ class InvoiceLineSerializer(serializers.ModelSerializer):
             "ordering",
             "description",
             "extra_work",
+            "extra_work_title",
+            "building",
+            "building_name",
             "quantity",
             "unit_price",
             "vat_pct",
@@ -134,6 +154,25 @@ class InvoiceLineSerializer(serializers.ModelSerializer):
 
 
 class InvoiceSerializer(serializers.ModelSerializer):
+    # P-5 S7 — the contract that produced this invoice, when one did
+    # (`contracts.ContractInvoice`, the period claim), with its period.
+    contract = serializers.SerializerMethodField()
+
+    def get_contract(self, obj):
+        link = getattr(obj, "contract_period", None)
+        if link is None:
+            return None
+        contract = link.contract
+        return {
+            "id": contract.id,
+            "contract_no": contract.contract_no,
+            "contract_type_name": (
+                contract.contract_type.name if contract.contract_type_id else None
+            ),
+            "period_start": link.period_start.isoformat(),
+            "period_end": link.period_end.isoformat(),
+        }
+
     """Read shape for one invoice (with its lines) for the Facturen UI."""
 
     customer_name = serializers.CharField(source="customer.name", read_only=True)
@@ -204,6 +243,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "customer_name",
             "building",
             "building_name",
+            # P-5 S7 — the contract behind a contract-period invoice.
+            "contract",
             "department",
             "department_name",
             "work_type",

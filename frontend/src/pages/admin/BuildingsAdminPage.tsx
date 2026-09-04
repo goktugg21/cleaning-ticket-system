@@ -1,9 +1,11 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, RefreshCw } from "lucide-react";
+import { Building, Plus, SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
+import { EmptyState } from "../../components/EmptyState";
+import { PageHeader } from "../../components/PageHeader";
 import { SortableHeader } from "../../components/SortableHeader";
 import type { SortState } from "../../components/SortableHeader";
 import {
@@ -72,12 +74,15 @@ function CustomerNamesCell({
   names,
   total,
   moreLabel,
+  emptyLabel,
 }: {
   names: string[];
   total: number;
   moreLabel: (n: number) => string;
+  /** §D.6 rule 15 — "no customers" as a word, never a dash. */
+  emptyLabel: string;
 }) {
-  if (total === 0) return <span className="muted-empty">—</span>;
+  if (total === 0) return <span className="muted-empty">{emptyLabel}</span>;
   const shown = names.slice(0, 2);
   const hidden = total - shown.length;
   return (
@@ -280,6 +285,7 @@ export function BuildingsAdminPage() {
   const hasActiveFilters = Boolean(
     searchActive ||
       activeFilter !== "true" ||
+      buildingTypeFilter !== "" ||
       (companyFilter !== "" && !companyDropdownDisabled),
   );
 
@@ -443,35 +449,58 @@ export function BuildingsAdminPage() {
   }
 
   const moreLabel = (n: number) => t("buildings.more_customers", { count: n });
+  const noCustomersLabel = t("admin_list.no_customers");
+
+  // P-6 V3 (§D.6 rule 13) — the type column exists only when a row on
+  // this page has a type; a column of "no type" says nothing.
+  const anyBuildingType = buildings.some((b) => Boolean(b.building_type_name));
+
+  // P-6 V3 — the filters behind ONE Filter fold with the active ones as
+  // chips (the contracts / tickets pattern); the search stays outside.
+  const activeFilterChips: string[] = [];
+  if (activeFilter === "false") activeFilterChips.push(t("admin.status_inactive"));
+  if (activeFilter === "all") activeFilterChips.push(t("admin.status_all"));
+  if (buildingTypeFilter !== "") {
+    const typeName = buildingTypes.find((o) => o.id === buildingTypeFilter)?.name;
+    if (typeName) activeFilterChips.push(typeName);
+  }
+  if (companyFilter !== "" && !companyDropdownDisabled) {
+    activeFilterChips.push(companyName(companyFilter));
+  }
+
+  const previousLocked = loading
+    ? t("admin_list.page_loading")
+    : !previous || page <= 1
+      ? t("admin_list.page_first")
+      : undefined;
+  const nextLocked = loading
+    ? t("admin_list.page_loading")
+    : !next
+      ? t("admin_list.page_last")
+      : undefined;
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
-          </div>
-          <h2 className="page-title">{t("nav.buildings")}</h2>
-          <p className="page-sub">
-            {loading ? t("buildings.loading") : t("buildings.count", { count })}
-          </p>
-        </div>
-        <div className="page-header-actions">
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={load}
-            disabled={loading}
+      {/* P-6 V3 — the shared header; "+ New" is the one primary action
+          (§D.6 rule 3). The Refresh button is gone: the list reloads on
+          every filter, sort and save. */}
+      <PageHeader
+        eyebrow={t("nav.admin_group")}
+        title={t("nav.buildings")}
+        subtitle={
+          loading ? t("buildings.loading") : t("buildings.count", { count })
+        }
+        actions={
+          <Link
+            className="btn btn-primary btn-sm"
+            to="/admin/buildings/new"
+            data-testid="buildings-create-link"
           >
-            <RefreshCw size={14} strokeWidth={2.5} />
-            {t("refresh")}
-          </button>
-          <Link className="btn btn-primary btn-sm" to="/admin/buildings/new">
             <Plus size={14} strokeWidth={2.5} />
             {t("admin.create_new")}
           </Link>
-        </div>
-      </div>
+        }
+      />
 
       {savedBanner && (
         <div className="alert-info" style={{ marginBottom: 16 }} role="status">
@@ -509,7 +538,15 @@ export function BuildingsAdminPage() {
             <span className="summary-stat-label">
               {t("buildings.stat_active")}
             </span>
-            <span className="summary-stat-value">{activeCount ?? "—"}</span>
+            {/* §D.6 rule 15 — the number when known, a word while it is
+                being counted, never a dash that reads as "none". */}
+            <span className="summary-stat-value">
+              {activeCount === null ? (
+                <span className="muted-empty">{t("admin_list.counting")}</span>
+              ) : (
+                activeCount
+              )}
+            </span>
             <span className="summary-stat-meta">
               {t("buildings.stat_active_meta")}
             </span>
@@ -535,79 +572,6 @@ export function BuildingsAdminPage() {
               onChange={(event) => setSearchInput(event.target.value)}
             />
           </div>
-          <div className="filter-field">
-            <span className="filter-label">{t("status")}</span>
-            <select
-              className="filter-control"
-              value={activeFilter}
-              onChange={(event) => {
-                setActiveFilter(event.target.value as ActiveFilter);
-                setPage(1);
-                setSelectedIds([]);
-              }}
-            >
-              <option value="true">{t("admin.status_active")}</option>
-              <option value="false">{t("admin.status_inactive")}</option>
-              <option value="all">{t("admin.status_all")}</option>
-            </select>
-          </div>
-          {/* Sprint 178 §1 — filter by the company's own building type.
-              Shown only when there is a catalog to filter BY: an empty
-              dropdown is a control that looks broken. */}
-          {buildingTypes.length > 0 && (
-            <div className="filter-field">
-              <span className="filter-label">
-                {t("buildings.filter_building_type")}
-              </span>
-              <select
-                className="filter-control"
-                style={{ maxWidth: 220 }}
-                value={buildingTypeFilter === "" ? "" : String(buildingTypeFilter)}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setBuildingTypeFilter(value === "" ? "" : Number(value));
-                  setPage(1);
-                  setSelectedIds([]);
-                }}
-                data-testid="buildings-filter-building-type"
-              >
-                <option value="">{t("buildings.filter_type_all")}</option>
-                {buildingTypes.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div className="filter-field">
-            <span className="filter-label">{t("company")}</span>
-            {/* Cap the Company select so it matches Search / Status instead
-                of stretching to fill the filter-bar's 1fr track. */}
-            <select
-              className="filter-control"
-              style={{ maxWidth: 220 }}
-              value={companyFilter === "" ? "" : String(companyFilter)}
-              onChange={(event) => {
-                const v = event.target.value;
-                setCompanyFilter(v === "" ? "" : Number(v));
-                // Sprint 178 §1 — type ids are PER COMPANY, so a leftover
-                // id would filter the new company's list by something it
-                // does not have and quietly return nothing.
-                setBuildingTypeFilter("");
-                setPage(1);
-                setSelectedIds([]);
-              }}
-              disabled={companyDropdownDisabled}
-            >
-              <option value="">{t("admin.all_companies")}</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
           <div className="filter-actions">
             {hasActiveFilters && (
               <button
@@ -617,6 +581,7 @@ export function BuildingsAdminPage() {
                 onClick={() => {
                   setSearchInput("");
                   setActiveFilter("true");
+                  setBuildingTypeFilter("");
                   if (!companyDropdownDisabled) setCompanyFilter("");
                   setPage(1);
                   setSelectedIds([]);
@@ -628,16 +593,122 @@ export function BuildingsAdminPage() {
             {/* Sprint 155 §4 — the intent step. Hidden, not disabled,
                 when the page has no rows: a control that cannot work
                 should not be offered (the running Sprint 138-143
-                theme). */}
+                theme). §D.6 rule 14 — while it IS disabled (a bulk
+                action running) the wrapper carries the reason. */}
             {pageIds.length > 0 && (
-              <EditModeToggle
-                editMode={edit.editMode}
-                onToggle={edit.toggleMode}
-                disabled={bulkBusy}
-                testId="buildings-edit-mode-toggle"
-              />
+              <span title={bulkBusy ? t("admin_list.edit_busy") : undefined}>
+                <EditModeToggle
+                  editMode={edit.editMode}
+                  onToggle={edit.toggleMode}
+                  disabled={bulkBusy}
+                  testId="buildings-edit-mode-toggle"
+                />
+              </span>
             )}
           </div>
+          <details
+            className="filter-fold"
+            open={activeFilterChips.length > 0}
+            data-testid="buildings-filter-fold"
+          >
+            <summary className="filter-fold-summary" data-testid="buildings-filter-toggle">
+              <SlidersHorizontal size={14} strokeWidth={2.4} aria-hidden="true" />
+              {t("admin_list.filter_fold")}
+              {activeFilterChips.length > 0 && (
+                <span className="filter-fold-count">
+                  {t("admin_list.filter_active", { count: activeFilterChips.length })}
+                </span>
+              )}
+              {activeFilterChips.map((label) => (
+                <span className="filter-fold-chip" key={label}>
+                  {label}
+                </span>
+              ))}
+            </summary>
+            <div className="filter-fold-body">
+              <div className="filter-field">
+                <span className="filter-label">{t("status")}</span>
+                <select
+                  className="filter-control"
+                  value={activeFilter}
+                  onChange={(event) => {
+                    setActiveFilter(event.target.value as ActiveFilter);
+                    setPage(1);
+                    setSelectedIds([]);
+                  }}
+                >
+                  <option value="true">{t("admin.status_active")}</option>
+                  <option value="false">{t("admin.status_inactive")}</option>
+                  <option value="all">{t("admin.status_all")}</option>
+                </select>
+              </div>
+              {/* Sprint 178 §1 — filter by the company's own building type.
+                  Shown only when there is a catalog to filter BY: an empty
+                  dropdown is a control that looks broken. */}
+              {buildingTypes.length > 0 && (
+                <div className="filter-field">
+                  <span className="filter-label">
+                    {t("buildings.filter_building_type")}
+                  </span>
+                  <select
+                    className="filter-control"
+                    style={{ maxWidth: 220 }}
+                    value={buildingTypeFilter === "" ? "" : String(buildingTypeFilter)}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setBuildingTypeFilter(value === "" ? "" : Number(value));
+                      setPage(1);
+                      setSelectedIds([]);
+                    }}
+                    data-testid="buildings-filter-building-type"
+                  >
+                    <option value="">{t("buildings.filter_type_all")}</option>
+                    {buildingTypes.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="filter-field">
+                <span className="filter-label">{t("company")}</span>
+                {/* Cap the Company select so it matches Search / Status instead
+                    of stretching to fill the filter-bar's 1fr track. §D.6
+                    rule 14 — locked on a single-company deployment, and the
+                    title says so. */}
+                <select
+                  className="filter-control"
+                  style={{ maxWidth: 220 }}
+                  value={companyFilter === "" ? "" : String(companyFilter)}
+                  onChange={(event) => {
+                    const v = event.target.value;
+                    setCompanyFilter(v === "" ? "" : Number(v));
+                    // Sprint 178 §1 — type ids are PER COMPANY, so a leftover
+                    // id would filter the new company's list by something it
+                    // does not have and quietly return nothing.
+                    setBuildingTypeFilter("");
+                    setPage(1);
+                    setSelectedIds([]);
+                  }}
+                  disabled={companyDropdownDisabled}
+                  title={
+                    companyDropdownDisabled ? t("admin_list.company_single") : undefined
+                  }
+                >
+                  <option value="">{t("admin.all_companies")}</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                {companyDropdownDisabled && (
+                  <span className="muted small">{t("admin_list.company_single")}</span>
+                )}
+              </div>
+            </div>
+          </details>
         </form>
 
         {edit.editMode && (
@@ -716,8 +787,9 @@ export function BuildingsAdminPage() {
                 {/* Sprint 179B §1 — the type, as a COLUMN. Sprint 178 added
                     the catalog and the filter and nothing on this list said
                     what a building's type was, so the feature read as
-                    absent. Mirrored in the phone card list below. */}
-                <th>{t("buildings.col_building_type")}</th>
+                    absent. Mirrored in the phone card list below. P-6 V3
+                    (§D.6 rule 13) — absent when no row on the page has one. */}
+                {anyBuildingType && <th>{t("buildings.col_building_type")}</th>}
                 <th>{t("buildings.col_customers")}</th>
                 <SortableHeader
                   label={t("created")}
@@ -747,7 +819,18 @@ export function BuildingsAdminPage() {
                     role="link"
                     tabIndex={0}
                     aria-label={t("admin.view") + ": " + building.name}
-                    onClick={openDetail}
+                    /* W14 §3 — one click, one history entry. The row
+                       navigates AND contains a `<Link>` to the same
+                       place, so a click on the link pushed twice and
+                       the browser's Back then landed on the page it was
+                       pressed from. Same defect, same fix, as the
+                       tickets list. */
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("a,button")) {
+                        return;
+                      }
+                      openDetail();
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
@@ -779,11 +862,17 @@ export function BuildingsAdminPage() {
                     <td>
                       {[building.city, building.postal_code]
                         .filter(Boolean)
-                        .join(" ") || "—"}
+                        .join(" ") || (
+                        <span className="muted-empty">{t("admin_list.no_city")}</span>
+                      )}
                     </td>
-                    <td data-testid={`buildings-type-${building.id}`}>
-                      {building.building_type_name || "—"}
-                    </td>
+                    {anyBuildingType && (
+                      <td data-testid={`buildings-type-${building.id}`}>
+                        {building.building_type_name || (
+                          <span className="muted-empty">{t("admin_list.no_type")}</span>
+                        )}
+                      </td>
+                    )}
                     <td>
                       <CustomerNamesCell
                         names={building.customer_names?.names ?? []}
@@ -793,6 +882,7 @@ export function BuildingsAdminPage() {
                           0
                         }
                         moreLabel={moreLabel}
+                        emptyLabel={noCustomersLabel}
                       />
                     </td>
                     <td className="td-date">
@@ -871,13 +961,16 @@ export function BuildingsAdminPage() {
                       </div>
                     )}
                     {/* Sprint 179B §1 — the same column the table gained,
-                        mirrored here so the phone list does not drift. */}
-                    <div className="admin-card-meta-row">
-                      <dt>{t("buildings.col_building_type")}</dt>
-                      <dd data-testid={`buildings-card-type-${building.id}`}>
-                        {building.building_type_name || "—"}
-                      </dd>
-                    </div>
+                        mirrored here so the phone list does not drift.
+                        Like the address row: present only when set. */}
+                    {building.building_type_name && (
+                      <div className="admin-card-meta-row">
+                        <dt>{t("buildings.col_building_type")}</dt>
+                        <dd data-testid={`buildings-card-type-${building.id}`}>
+                          {building.building_type_name}
+                        </dd>
+                      </div>
+                    )}
                     <div className="admin-card-meta-row">
                       <dt>{t("buildings.col_customers")}</dt>
                       <dd>
@@ -889,6 +982,7 @@ export function BuildingsAdminPage() {
                             0
                           }
                           moreLabel={moreLabel}
+                          emptyLabel={noCustomersLabel}
                         />
                       </dd>
                     </div>
@@ -914,24 +1008,27 @@ export function BuildingsAdminPage() {
         </ul>
 
         {!loading && buildings.length === 0 && (
-          <div className="empty-state">
-            <div className="empty-icon">＋</div>
-            <div className="empty-title">
-              {hasActiveFilters
+          <EmptyState
+            icon={Building}
+            title={
+              hasActiveFilters
                 ? t("buildings.empty_filtered_title")
-                : t("buildings.empty_initial_title")}
-            </div>
-            <p className="empty-sub">
-              {hasActiveFilters
+                : t("buildings.empty_initial_title")
+            }
+            description={
+              hasActiveFilters
                 ? t("admin.empty_filtered_desc")
-                : t("buildings.empty_initial_desc")}
-            </p>
-            {!hasActiveFilters && (
-              <Link className="btn btn-primary btn-sm" to="/admin/buildings/new">
-                {t("buildings.create")}
-              </Link>
-            )}
-          </div>
+                : t("buildings.empty_initial_desc")
+            }
+            action={
+              !hasActiveFilters ? (
+                <Link className="btn btn-primary btn-sm" to="/admin/buildings/new">
+                  {t("buildings.create")}
+                </Link>
+              ) : undefined
+            }
+            testId="buildings-empty"
+          />
         )}
 
         {(previous || next) && (
@@ -943,7 +1040,8 @@ export function BuildingsAdminPage() {
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                disabled={loading || !previous || page <= 1}
+                disabled={previousLocked !== undefined}
+                title={previousLocked}
                 onClick={() => {
                   setPage((current) => Math.max(1, current - 1));
                   setSelectedIds([]);
@@ -954,7 +1052,8 @@ export function BuildingsAdminPage() {
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                disabled={loading || !next}
+                disabled={nextLocked !== undefined}
+                title={nextLocked}
                 onClick={() => {
                   setPage((current) => current + 1);
                   setSelectedIds([]);
@@ -1266,10 +1365,23 @@ function BuildingQuickEditDialog({
               onChange={(event) => setIsActive(event.target.value === "true")}
               data-testid="building-quick-edit-status"
               disabled={busy || statusLocked}
+              title={
+                statusLocked
+                  ? t("buildings.status_locked_hint")
+                  : busy
+                    ? t("admin_list.saving_wait")
+                    : undefined
+              }
             >
               <option value="true">{t("admin.status_active")}</option>
               <option value="false">{t("admin.status_inactive")}</option>
             </select>
+            {/* §D.6 rule 14 — the sentence beside the locked control. */}
+            {statusLocked && (
+              <span className="muted small" data-testid="building-quick-edit-status-locked">
+                {t("buildings.status_locked_hint")}
+              </span>
+            )}
           </div>
         </div>
 
@@ -1304,6 +1416,7 @@ function BuildingQuickEditDialog({
               type="submit"
               className="btn btn-primary btn-sm"
               disabled={busy}
+              title={busy ? t("admin_list.saving_wait") : undefined}
               data-testid="building-quick-edit-save"
             >
               {busy ? t("admin_form.saving") : t("admin_form.save_changes")}

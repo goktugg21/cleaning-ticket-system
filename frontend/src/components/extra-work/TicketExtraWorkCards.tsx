@@ -1,0 +1,656 @@
+/**
+ * W18 — ONE "Extra work" card on the operational ticket.
+ *
+ * One work, one page: a chargeable row opens the TICKET, so the ticket
+ * carries the Extra-Work facts. W17 split them over two cards (money +
+ * a separate hours panel whose 160px table column clipped the input out
+ * of the narrow rail); this is the merge. Per hourly line a stacked
+ * label-over-input row, the amounts under them, billing month and
+ * invoice state read-only, and ONE button: Save hours. Fixed-price work
+ * has no hours affordance at all — absent, not disabled.
+ *
+ * PROVIDER-ONLY, and the CALLER gates the mount: STAFF get a hard 404
+ * on `GET /api/extra-work/<id>/` (`scope_extra_work_for` returns
+ * `.none()` for them — measured, not assumed), so the fetch must never
+ * fire for a role that cannot pass it, and customers keep their
+ * existing surfaces. A provider whose scope still refuses the record
+ * (a BUILDING_MANAGER outside the building) collapses to nothing
+ * rather than to an error card.
+ *
+ * Money comes from `rowAmounts()` — the ONE billing-total rule
+ * (final-with-quoted-fallback) — never a hand-sum. `isPriced` keeps
+ * "unpriced" (an em dash) from ever rendering like "costs nothing"
+ * (a real EUR 0,00). On top of that, W18: while the active priced set
+ * has hourly lines and no final amount exists yet, the amounts are a
+ * projection, not a bill — they render as an em dash with an
+ * "awaiting worked hours" state instead of a EUR 0,00 that reads as
+ * "costs nothing". Scoped HERE; `isPriced`/`rowAmounts` serve the
+ * lists unchanged.
+ */
+import { useEffect, useRef, useState } from "react";
+import { Download, Eye } from "lucide-react";
+import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+
+import { getApiError } from "../../api/client";
+import {
+  fetchProposalPdf,
+  getExtraWork,
+  getProposalDetail,
+  listProposalsForEw,
+  transitionExtraWork,
+  updateExtraWorkBilling,
+} from "../../api/extraWork";
+import type {
+  ExtraWorkRequestDetail,
+  Proposal,
+  ProposalDetail,
+} from "../../api/types";
+import { formatDate, formatNumber } from "../../lib/intl";
+import { monthName } from "../../lib/billingSentence";
+import { CollapsibleCard } from "../CollapsibleCard";
+import { PdfPreviewDialog } from "../PdfPreviewDialog";
+import type { PdfPreviewDialogHandle } from "../PdfPreviewDialog";
+import { StatusBadge } from "../StatusBadge";
+import { useToast } from "../ToastProvider";
+import { useMissingPieceAnchor } from "../../lib/missingPiece";
+import { useCurrentTicketKind } from "../../lib/currentTicketKind";
+import { selectApprovedProposal } from "./activeHourlyLines";
+import { MoneyStory } from "./MoneyStory";
+
+// W-PLANTRUTH §4b — THE AGREEMENT CARD IS A REAL TABLE.
+//
+// W25 built these rows as flex: one shared geometry object per cell,
+// applied to a header row and to each data row, so the words would sit
+// over the numbers they name. They did line up — but only as long as
+// every row agreed to use the same three objects, and the two number
+// cells were pushed to the far right of an elastic name column, so on a
+// long service name the quantity ended up a rail's width away from the
+// label that named it. The owner's words: a field floating far from its
+// label.
+//
+// A `<table>` with `table-layout: fixed` and a `<colgroup>` makes the
+// alignment the BROWSER's job rather than a convention three call sites
+// have to keep: QTY and AMOUNT are adjacent, fixed, and right-aligned
+// directly under their own headers, and the name column takes the slack
+// and wraps. The widths live in `index.css` (`.ew-agreement-table`),
+// sized for the ~340px ticket rail at 1366.
+//
+// NOT `.data-table`: that class carries a min-width of 860px for the
+// wide list pages, and inside this rail it pushed the money cells past
+// the viewport's right edge where `.workspace` clipped them — the
+// W22.2 defect, which is why these rows were flex in the first place.
+
+export function TicketExtraWorkCards({
+  extraWorkId,
+  currentTicketId,
+  onChanged,
+}: {
+  extraWorkId: number;
+  /** W21 — the job page this card group is mounted on, so the series
+   *  day list can render THIS day as text instead of a self-link. */
+  currentTicketId?: number;
+  /** W22 — called after a write that the ticket page may want to
+   *  re-read for (the cancel; the ticket itself is NOT auto-cancelled,
+   *  but its convert/origin affordances read the EW state). */
+  onChanged?: () => void;
+}) {
+  const { t } = useTranslation(["ticket_detail", "extra_work"]);
+  // P-5 S1.4 — meerwerk words on a meerwerk job.
+  const currentKind = useCurrentTicketKind();
+  const kindContext = currentKind?.kind === "MEERWERK" ? "meerwerk" : undefined;
+  const { push: pushToast } = useToast();
+  const [ew, setEw] = useState<ExtraWorkRequestDetail | null>(null);
+  /* W-FIX1 C3 (audit F33) — a refused or failed read is a line, not a
+     blank Money tab. */
+  const [ewLoadFailure, setEwLoadFailure] = useState<{
+    id: number;
+    message: string;
+  } | null>(null);
+  const ewLoadError =
+    ewLoadFailure !== null && ewLoadFailure.id === extraWorkId
+      ? ewLoadFailure.message
+      : "";
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [approvedProposalDetail, setApprovedProposalDetail] =
+    useState<ProposalDetail | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  /** W-HOURS4 Task 4 — the in-app preview of the same document the
+   *  Download button fetches. Native `<dialog>`, rendered
+   *  unconditionally below and driven through the ref (CLAUDE.md). */
+  const pdfPreviewRef = useRef<PdfPreviewDialogHandle>(null);
+  // W22 §1 — the billing-month editor, rebuilt from the request page
+  // (the redirect closed that page for providers, and the month was
+  // one of the three facts that lived only there). `null` draft means
+  // "showing the stored value"; "" means the operator cleared it, which
+  // PATCHes invoice_date null = follows the completion month.
+  const [billingDraft, setBillingDraft] = useState<string | null>(null);
+  const [billingBusy, setBillingBusy] = useState(false);
+  // W22 §2 — cancel modal state. The server refuses IN_PROGRESS ->
+  // CANCELLED without an override_reason (400 override_reason_required),
+  // so the modal collects it and shows the server's refusal in place.
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelBusy, setCancelBusy] = useState(false);
+  // P-5 S0/S2.4 — where "enter the hours" lands.
+  const actualHoursAnchor = useMissingPieceAnchor("actual-hours");
+  const [cancelError, setCancelError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    getExtraWork(extraWorkId)
+      .then((detail) => {
+        if (!cancelled) setEw(detail);
+      })
+      .catch((err) => {
+        // Out-of-scope or gone: the ticket page stands on its own, and
+        // the Money tab SAYS so (W-FIX1 C3) instead of rendering nothing.
+        if (!cancelled) {
+          setEw(null);
+          setEwLoadFailure({ id: extraWorkId, message: getApiError(err) });
+        }
+      });
+    listProposalsForEw(extraWorkId)
+      .then((list) => {
+        if (!cancelled) setProposals(list);
+      })
+      .catch(() => {
+        if (!cancelled) setProposals([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [extraWorkId]);
+
+  // The approved proposal's lines (with `actual_hours`) are NOT on the
+  // EW detail payload — same second fetch the Extra Work page does.
+  const approvedProposal = selectApprovedProposal(proposals);
+  const approvedProposalId = approvedProposal?.id ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    if (approvedProposalId === null) {
+      queueMicrotask(() => {
+        if (!cancelled) setApprovedProposalDetail(null);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    getProposalDetail(extraWorkId, approvedProposalId)
+      .then((detail) => {
+        if (!cancelled) setApprovedProposalDetail(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setApprovedProposalDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [extraWorkId, approvedProposalId]);
+
+  if (!ew) {
+    return ewLoadError ? (
+      <p className="form-error" data-testid="ticket-extra-work-money-error">
+        {t("ew_money_unavailable", { context: kindContext })} {ewLoadError}
+      </p>
+    ) : null;
+  }
+
+  // P-13 B — the money states (awaiting hours / no price / the
+  // amounts) moved into MoneyStory, which derives them itself from the
+  // same three props this card holds.
+  // Same lock the Extra Work page derives: the backend freezes the final
+  // amount once any spawned operational ticket is APPROVED or CLOSED.
+  const finalAmountLocked = ew.spawned_tickets.some(
+    (spawned) => spawned.status === "APPROVED" || spawned.status === "CLOSED",
+  );
+  // PDF read is action-driven, same as the Extra Work page: absent
+  // `actions` (older response) falls back to offering it — the caller
+  // already gates this card to provider management.
+  const canViewProposalPdf = ew.actions
+    ? ew.actions.can_view_proposal_pdf
+    : true;
+  const isSeries = ew.spawned_tickets.length > 1;
+  // W21 — the Agreement card's three tables, from data this component
+  // ALREADY holds (no new fetches): the cart the customer asked for,
+  // the approved proposal's agreed lines, and the day-by-day spawned
+  // tickets ordered the way the redirect orders them (scheduled date,
+  // undated last, id as tiebreak).
+  // W22 §3b — nothing asks twice: the Requested table exists to show
+  // what the customer asked BEFORE a proposal re-priced it. With no
+  // approved proposal, Agreed IS the requested cart — one table.
+  // (P-13 B — the Agreed table itself lives in MoneyStory's block 1.)
+  const showRequested = approvedProposal !== null && ew.line_items.length > 0;
+  const sortedSpawned = [...ew.spawned_tickets].sort((a, b) => {
+    const ad = a.scheduled_start_at ?? "9999-12-31T23:59:59Z";
+    const bd = b.scheduled_start_at ?? "9999-12-31T23:59:59Z";
+    if (ad !== bd) return ad < bd ? -1 : 1;
+    return a.id - b.id;
+  });
+  const hasAgreement =
+    showRequested ||
+    (approvedProposalId !== null && canViewProposalPdf) ||
+    isSeries;
+  // W22 §2 — rule 6: the action renders only when the server's own list
+  // says this viewer may drive it. `allowed_next_statuses` is computed
+  // per-user through `_user_can_drive_transition`, so status, role and
+  // scope are one server-derived fact, not three client guesses.
+  const canCancel = ew.allowed_next_statuses.includes("CANCELLED");
+
+  async function handleDownloadPdf() {
+    if (approvedProposalId === null) return;
+    setPdfBusy(true);
+    try {
+      const blob = await fetchProposalPdf(extraWorkId, approvedProposalId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `proposal-${approvedProposalId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      pushToast({ variant: "error", title: getApiError(err) });
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
+  /** W-HOURS4 Task 4 — Preview beside Download. The dialog fetches the
+   *  SAME route `fetchProposalPdf` (`api/extraWork.ts`) downloads, as
+   *  an authenticated blob, and keeps its own Download button: a
+   *  proposal is preview + download (only credentials are preview-only). */
+  function openPdfPreview() {
+    if (approvedProposalId === null) return;
+    pdfPreviewRef.current?.open({
+      url: `/extra-work/${extraWorkId}/proposals/${approvedProposalId}/pdf/`,
+      filename: `proposal-${approvedProposalId}.pdf`,
+    });
+  }
+
+  const storedBillingMonth = ew.invoice_date ? ew.invoice_date.slice(0, 7) : "";
+  const billingValue = billingDraft ?? storedBillingMonth;
+
+  async function saveBillingMonth() {
+    if (!ew || billingBusy) return;
+    setBillingBusy(true);
+    try {
+      const updated = await updateExtraWorkBilling(ew.id, {
+        invoice_date: billingValue === "" ? null : `${billingValue}-01`,
+      });
+      setEw(updated);
+      setBillingDraft(null);
+      // Rule 4 — the answer states the month the SERVER stored, not the
+      // one that was typed; a server that stored something else must
+      // not be reported as success.
+      pushToast({
+        variant: "success",
+        title: updated.invoice_date
+          ? t("ew_billing_saved", { month: monthName(updated.invoice_date) })
+          : t("ew_billing_cleared"),
+      });
+    } catch (err) {
+      pushToast({ variant: "error", title: getApiError(err) });
+    } finally {
+      setBillingBusy(false);
+    }
+  }
+
+  async function handleConfirmCancel() {
+    if (!ew || cancelBusy) return;
+    const reason = cancelReason.trim();
+    if (reason === "") return;
+    setCancelBusy(true);
+    setCancelError("");
+    try {
+      // `override_reason` satisfies the IN_PROGRESS gate (the server
+      // coerces is_override there); `note` lands the same words on the
+      // history row for the pre-spawn statuses where no override is in
+      // play — the reason is recorded whichever pair this is.
+      const updated = await transitionExtraWork(ew.id, {
+        to_status: "CANCELLED",
+        override_reason: reason,
+        note: reason,
+      });
+      setEw(updated);
+      setCancelOpen(false);
+      setCancelReason("");
+      pushToast({
+        variant: "success",
+        title: t("ew_cancel_done", { context: kindContext }),
+      });
+      onChanged?.();
+    } catch (err) {
+      setCancelError(getApiError(err));
+    } finally {
+      setCancelBusy(false);
+    }
+  }
+
+  return (
+    <>
+    <div
+      className="card"
+      data-testid="ticket-extra-work-money"
+      ref={actualHoursAnchor}
+    >
+      <div className="form-section">
+        <div className="form-section-title">{t("ew_card_title")}</div>
+        {/* P-13 B — the three-block Money story (Agreed → Worked → On
+            the invoice), ONE component shared with the request page.
+            The billing-month editor rides in as this mount's slot. */}
+        <MoneyStory
+          ew={ew}
+          approvedProposal={approvedProposal}
+          approvedProposalDetail={approvedProposalDetail}
+          locked={finalAmountLocked}
+          onUpdated={(detail) => {
+            setEw(detail);
+            if (approvedProposalId !== null) {
+              getProposalDetail(extraWorkId, approvedProposalId)
+                .then(setApprovedProposalDetail)
+                .catch(() => {
+                  // Keep the prior detail; a transient refresh failure
+                  // must not blank the fields mid-edit.
+                });
+            }
+          }}
+          billingEditor={
+            <div className="detail-kv-row">
+              <span className="detail-kv-label">
+                {t("ew_card_billing_month")}
+              </span>
+              {/* W22 §1 — the value IS the control (the request page's
+                  editor, rebuilt here since the redirect closed that
+                  page for providers). Empty + save = follows the
+                  completion month again (invoice_date null). */}
+              <span
+                className="detail-kv-val"
+                data-testid="ticket-ew-billing-month"
+                style={{ display: "flex", gap: 8, alignItems: "center" }}
+              >
+                <input
+                  type="month"
+                  className="field-input"
+                  style={{ minWidth: 0, flex: 1 }}
+                  value={billingValue}
+                  onChange={(event) => setBillingDraft(event.target.value)}
+                  aria-label={t("extra_work:detail.billing_month_input_label")}
+                  data-testid="ticket-ew-billing-month-input"
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={billingBusy || billingValue === storedBillingMonth}
+                  onClick={() => void saveBillingMonth()}
+                  data-testid="ticket-ew-billing-save"
+                >
+                  {t("extra_work:detail.billing_save")}
+                </button>
+              </span>
+            </div>
+          }
+        />
+        {/* W22 §2 — the cancel, home from the closed request page. A
+            secondary action, rendered only when `allowed_next_statuses`
+            offers CANCELLED to THIS viewer (rule 6). */}
+        {canCancel && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            style={{ alignSelf: "flex-start" }}
+            onClick={() => {
+              setCancelError("");
+              setCancelOpen(true);
+            }}
+            data-testid="ticket-ew-cancel-button"
+          >
+            {t("ew_cancel_action")}
+          </button>
+        )}
+      </div>
+    </div>
+    {/* W21 — THE AGREEMENT CARD. What was asked, what was agreed, the
+        paper it was agreed on, and (for a series) the days it became.
+        This card replaced the "Request & proposal" origin link and the
+        "Series overview" escape: the request page no longer exists for
+        a provider once work is spawned, so everything it was opened for
+        lives here. Collapsed by default — it is reference, not the
+        job's live state. Names, tables and row links only. */}
+    {hasAgreement && (
+      <CollapsibleCard
+        title={t("ew_agreement_title")}
+        // W-PLAN2 Task 2 — open by default (Details + Activity are
+        // the only cards that stay collapsed). One token; declared as
+        // out-of-owned-list in the wave report.
+        defaultOpen
+        testId="side-card-agreement"
+      >
+        <div style={{ padding: "14px 18px 16px" }}>
+          {/* W22 §3b — Requested renders only when a proposal re-priced
+              the ask; with no proposal, Agreed IS the requested cart
+              and nothing asks twice (rule 8). */}
+          {/* W22.2 — NOT `.data-table`: that class carries a min-width
+              of 860px (index.css) for the wide list pages, and inside
+              this ~340px rail card it pushed the quantity and money
+              cells past the viewport's right edge, where `.workspace`
+              clipped them — the owner saw only the line's name (the
+              same clipping mode W18 fixed for the hours input). Fluid
+              flex rows: the name wraps, the numbers keep their spot. */}
+          {showRequested && (
+            <>
+              <div className="detail-kv-label">
+                {t("ew_agreement_requested")}
+              </div>
+              <div data-testid="ticket-ew-requested-lines">
+                {/* W25 — the column words. Without them a number in the
+                    rail is just a number; the owner could not tell an
+                    amount from a count. The requested cart has NO money
+                    column (it is what was asked, before anything was
+                    priced), so it gets the two headers it actually has
+                    — an "Amount" over an absent column would be the
+                    lie the header exists to prevent. */}
+                <table className="ew-agreement-table">
+                  <colgroup>
+                    <col />
+                    <col className="ew-agreement-col-qty" />
+                  </colgroup>
+                  <thead>
+                    <tr data-testid="ticket-ew-requested-head">
+                      <th className="detail-kv-label">
+                        {t("extra_work:detail.agreement_col_service")}
+                      </th>
+                      <th className="detail-kv-label ew-agreement-num">
+                        {t("extra_work:detail.agreement_col_qty")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ew.line_items.map((line) => (
+                      <tr key={line.id}>
+                        <td className="ew-agreement-name">
+                          {line.service_name || line.custom_description}
+                        </td>
+                        <td className="ew-agreement-num">
+                          {line.quantity != null && line.quantity !== ""
+                            ? formatNumber(line.quantity)
+                            : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+          {/* P-13 B — the Agreed table moved into the Money story's
+              first block ("Agreed with the customer"); this fold keeps
+              the paper trail: the original ask, the PDF, the days. */}
+          {approvedProposalId !== null && canViewProposalPdf && (
+            /* W-HOURS5 Task 9 — an eye before Preview, a download glyph
+               before Download, and the row pulled left by the ghost
+               button's own 12px padding so the icons sit on the card
+               content's left edge. */
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                marginTop: 12,
+                marginLeft: -12,
+              }}
+              data-testid="ticket-ew-proposal-pdf-actions"
+            >
+              {/* W-HOURS4 Task 4 — Preview opens the same document in
+                  the in-app viewer, download kept. */}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={openPdfPreview}
+                data-testid="ticket-ew-proposal-preview"
+              >
+                <Eye size={14} strokeWidth={2.2} aria-hidden="true" />
+                <span style={{ marginLeft: 6 }}>
+                  {t("extra_work:detail.pdf_preview_button")}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  void handleDownloadPdf();
+                }}
+                disabled={pdfBusy}
+                data-testid="ticket-ew-proposal-pdf"
+              >
+                <Download size={14} strokeWidth={2.2} aria-hidden="true" />
+                <span style={{ marginLeft: 6 }}>
+                  {pdfBusy
+                    ? t("extra_work:detail.pdf_download_busy")
+                    : t("extra_work:detail.pdf_download_button")}
+                </span>
+              </button>
+            </div>
+          )}
+          {isSeries && (
+            <>
+              <div className="detail-kv-label" style={{ marginTop: 12 }}>
+                {t("ew_agreement_days")}
+              </div>
+              <ul
+                className="ew-spawned-tickets-list"
+                data-testid="ticket-ew-series-days"
+              >
+                {sortedSpawned.map((day) => (
+                  <li
+                    key={day.id}
+                    className="ew-spawned-ticket-row"
+                    data-testid={`ticket-ew-series-day-${day.id}`}
+                  >
+                    {day.id === currentTicketId ? (
+                      <span style={{ fontSize: 14, fontWeight: 500 }}>
+                        {day.scheduled_start_at
+                          ? formatDate(day.scheduled_start_at)
+                          : "—"}
+                      </span>
+                    ) : (
+                      <Link
+                        to={`/tickets/${day.id}`}
+                        className="ew-spawned-ticket-link"
+                      >
+                        {day.scheduled_start_at
+                          ? formatDate(day.scheduled_start_at)
+                          : "—"}
+                      </Link>
+                    )}
+                    <StatusBadge
+                      status={{ kind: "ticket", value: day.status }}
+                      variant="cell"
+                    />
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      </CollapsibleCard>
+    )}
+    {/* W22 §2 — the cancel modal. The reason is the server's own
+        requirement (400 override_reason_required on in-flight work), so
+        the confirm stays disabled until one is written and the server's
+        refusal renders inside the modal. The warning states the one
+        thing the press does NOT do: this ticket is not auto-cancelled.
+        Same overlay classes as RejectReasonDialog — no new CSS. */}
+    {cancelOpen && (
+      <div
+        className="reject-modal-backdrop"
+        role="dialog"
+        aria-modal="true"
+        data-testid="ticket-ew-cancel-modal"
+      >
+        <div className="reject-modal">
+          <h3 className="reject-modal-title">
+            {t("extra_work:detail.cancel_dialog_title")}
+          </h3>
+          <p className="reject-modal-desc">
+            {t("extra_work:detail.cancel_dialog_spawned_warning_desc")}
+          </p>
+          {cancelError && (
+            <div
+              className="alert-error"
+              role="alert"
+              data-testid="ticket-ew-cancel-error"
+            >
+              {cancelError}
+            </div>
+          )}
+          <label
+            className="field-label"
+            htmlFor="ticket-ew-cancel-reason"
+          >
+            {t("ew_cancel_reason_label")}
+          </label>
+          <textarea
+            id="ticket-ew-cancel-reason"
+            className="field-textarea reject-modal-textarea"
+            rows={4}
+            value={cancelReason}
+            onChange={(event) => setCancelReason(event.target.value)}
+            data-testid="ticket-ew-cancel-reason"
+            autoFocus
+          />
+          <div className="reject-modal-actions">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setCancelOpen(false);
+                setCancelReason("");
+                setCancelError("");
+              }}
+              disabled={cancelBusy}
+              data-testid="ticket-ew-cancel-keep"
+            >
+              {t("extra_work:detail.cancel_dialog_keep")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger btn-sm"
+              onClick={() => void handleConfirmCancel()}
+              disabled={cancelBusy || cancelReason.trim() === ""}
+              data-testid="ticket-ew-cancel-confirm"
+            >
+              {t("extra_work:detail.cancel_dialog_confirm")}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    {/* W-HOURS4 Task 4 — rendered UNCONDITIONALLY and driven through the
+        ref (CLAUDE.md's rule for a native <dialog>). `withDownload`
+        stays on: a proposal is a document you keep. */}
+    <PdfPreviewDialog ref={pdfPreviewRef} />
+    </>
+  );
+}

@@ -6,13 +6,16 @@ import { getCustomer } from "../../../api/admin";
 import { getApiError } from "../../../api/client";
 import { listContracts } from "../../../api/contracts";
 import type { Contract } from "../../../api/contracts.types";
+import { CONTRACT_STATUS_TAG } from "../../../lib/contractStatusTag";
 import { Plus } from "lucide-react";
 
 import { useAuth } from "../../../auth/AuthContext";
 import { canManageContracts } from "../../../auth/permissions";
 import { ContractFormDialog } from "../contracts/ContractFormDialog";
 import { formatDate, formatMoney } from "../contracts/contractTables";
+import { contractSentence } from "../../../components/contracts/contractSentence";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
+import { ExtraWorkRegisterSection } from "./ExtraWorkRegisterSection";
 
 /**
  * Sprint 162 §4 — one customer's contracts, in the same place their
@@ -81,7 +84,7 @@ export function CustomerContractsPage() {
 
   return (
     <div data-testid="customer-contracts-page">
-      <CustomerSubPageHeader customerName={customerName} isActive={isActive} />
+      <CustomerSubPageHeader tab="contracts" customerName={customerName} isActive={isActive} />
 
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
@@ -139,24 +142,25 @@ export function CustomerContractsPage() {
                     <Link to={`/admin/contracts/${row.id}`}>
                       {row.contract_no}
                     </Link>
+                    {/* P-3 §C.1 — the sentence, wherever a contract is listed. */}
+                    <span
+                      className="contract-sentence"
+                      data-testid={`customer-contract-sentence-${row.id}`}
+                    >
+                      {contractSentence(row, t, locale)}
+                    </span>
                   </td>
                   <td>
-                    {row.buildings.length === 0 ? (
-                      <span className="muted-empty">—</span>
-                    ) : (
-                      row.buildings.map((b) => b.name).join(", ")
-                    )}
+                    {row.buildings.length === 0
+                      ? t("sentence.no_locations")
+                      : row.buildings.map((b) => b.name).join(", ")}
                   </td>
-                  <td>
-                    {row.contract_type_name ?? (
-                      <span className="muted-empty">—</span>
-                    )}
-                  </td>
+                  <td>{row.contract_type_name ?? ""}</td>
                   <td className="contract-num">
                     {formatMoney(row.monthly_amount, locale)}
                   </td>
                   <td>
-                    <span className={`cell-tag ${STATUS_TAG[row.status]}`}>
+                    <span className={`cell-tag ${CONTRACT_STATUS_TAG[row.status]}`}>
                       {t(`status.${row.status}`)}
                     </span>
                   </td>
@@ -197,6 +201,15 @@ export function CustomerContractsPage() {
           </div>
         )}
       </div>
+      {/* W16 — the extra works register, under the recurring
+          agreements and not mixed into them. Two kinds of money live on
+          this page and they must not be added up: above is what this
+          customer pays every month by agreement, below is what they
+          have taken on job by job. The reference system keeps its own
+          register out of the contract list for the same reason
+          (`ContractController.php:37`). */}
+      <ExtraWorkRegisterSection customerId={id} canManage={canManage} />
+
       {/* The SAME create dialog the main contracts list opens, with
           the customer fixed. A second form here is how two screens end
           up disagreeing about what a contract needs. */}
@@ -217,9 +230,3 @@ export function CustomerContractsPage() {
 
 /** Same mapping the contracts list and detail pages use — the design
  *  system's `cell-tag`, not a palette of this page's own. */
-const STATUS_TAG: Record<Contract["status"], string> = {
-  ACTIVE: "cell-tag-open",
-  DRAFT: "cell-tag-muted",
-  EXPIRED: "cell-tag-closed",
-  CANCELLED: "cell-tag-rejected",
-};

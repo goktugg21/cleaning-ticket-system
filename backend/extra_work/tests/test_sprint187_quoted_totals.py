@@ -363,7 +363,12 @@ class QuotedTotalsFrozenAtApprovalTests(_QuotedTotalsFixture):
 
         response = self._api(self.cust_user).post(
             f"/api/extra-work/{ew.id}/proposals/{proposal.id}/transition/",
-            {"to_status": ProposalStatus.CUSTOMER_REJECTED},
+            {
+                "to_status": ProposalStatus.CUSTOMER_REJECTED,
+                # P-16 repin - P-8R: a customer rejection carries its
+                # reason as `note` (rejection_note_required).
+                "note": "not needed",
+            },
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)

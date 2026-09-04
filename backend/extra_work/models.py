@@ -245,6 +245,31 @@ def compute_line_amounts(quantity, unit_price, vat_pct):
     return line_subtotal, line_vat, line_total
 
 
+class ExtraWorkCondition(models.TextChoices):
+    """When, relative to the handover ("oplevering"), the work happens.
+
+    NULLABLE ON PURPOSE, and that is a deliberate departure from the
+    reference system rather than an oversight.
+
+    Over there the value is `match($entry['condition'] ?? 'at')`, so a
+    slot nobody answered and a slot explicitly marked "at handover" are
+    the same five characters afterwards, and A7 §2.2 records the
+    consequence in one line: "The operator cannot tell 'explicitly at'
+    from 'not specified'." Here NULL means nobody was asked. That is the
+    honest state for the overwhelming majority of extra work, which is
+    ad-hoc and has no handover to be before or after; inventing
+    AT_HANDOVER for every existing row would be manufacturing data to
+    fill a column.
+
+    The multi-date form pre-selects AT_HANDOVER, so a batch that goes
+    through the picker carries a real answer.
+    """
+
+    AT_HANDOVER = "AT_HANDOVER", "At handover"
+    BEFORE_HANDOVER = "BEFORE_HANDOVER", "Before handover"
+    AFTER_HANDOVER = "AFTER_HANDOVER", "After handover"
+
+
 class ExtraWorkRequest(models.Model):
     """
     The single entity a customer-side user creates and a provider-
@@ -475,6 +500,18 @@ class ExtraWorkRequest(models.Model):
     #   deadline              by when it must be finished; the only one
     #                         that decides whether a row is late
     #
+    # W2-D added the sixth, `provider_planned_end_date`, which finishes
+    # the provider's own pair. Read the six as TWO PAIRS and one due
+    # date:
+    #
+    #   ASKED FOR / OWED   preferred_date -> planned_end_date, deadline
+    #   COMMITTED TO       provider_planned_date -> provider_planned_end_date
+    #
+    # The plan action writes the second pair ONLY. That is the whole
+    # point of holding two: months later "did we do what we promised, or
+    # what they asked for?" is a question with an answer, and a plan can
+    # never quietly move the date the provider is measured against.
+    #
     # Nullable and with no default: an extra work nobody has planned yet
     # must be distinguishable from one planned for today, which is the
     # whole distinction the Work Plan's undated lane rests on.
@@ -487,6 +524,181 @@ class ExtraWorkRequest(models.Model):
             "Distinct from `preferred_date` (the customer's wish) and "
             "from `deadline` (when it must be finished). NULL means "
             "nobody has planned it yet."
+        ),
+    )
+
+    # W2-D — the second half of the provider's pair. Set by the plan
+    # action (`extra_work.planning`), never by anything that touches
+    # the customer's dates.
+    #
+    # Nullable with no default for the same reason its start is: a job
+    # planned for one day and a job whose end nobody has committed to
+    # are different facts, and a default would erase the difference on
+    # every row that predates this column.
+    provider_planned_end_date = models.DateField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "W2-D — the day the PROVIDER expects to finish. With "
+            "`provider_planned_date` this is the COMMITTED window, held "
+            "separately from the customer's requested window "
+            "(`preferred_date` -> `planned_end_date`). NULL means the "
+            "provider has committed to a start but not to an end."
+        ),
+    )
+
+    # W5-B — day-by-day scheduling. See `ExtraWorkGroup` for what a
+    # group is and, more importantly, what it is not.
+    #
+    # `SET_NULL`, never CASCADE. Losing the batch receipt must never
+    # take real work with it. The reference system's group delete
+    # soft-deletes every member with no status check at all, so a group
+    # containing invoiced work can be removed in one click (A1); ours
+    # cannot express that, because there is no group-delete endpoint and
+    # because this FK could not carry it out if there were.
+    group = models.ForeignKey(
+        "extra_work.ExtraWorkGroup",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        default=None,
+        related_name="members",
+        help_text=(
+            "The multi-date batch this work was created in, or NULL for "
+            "an ordinary single work. A group is a creation and editing "
+            "convenience only: this work's status, price, hours and "
+            "invoice are entirely its own."
+        ),
+    )
+    #: Display order inside the group, 1..N at creation.
+    #:
+    #: DELIBERATELY NOT A HEADER FLAG. The reference system treats
+    #: `group_sequence == 1` as "this row is the group header", which
+    #: changes which rows a status filter returns and is the direct
+    #: cause of its list totals disagreeing with its own statistics
+    #: endpoint (A7 §2.1, A1 §1). Here it orders members and nothing
+    #: else; no query branches on it.
+    group_sequence = models.PositiveIntegerField(null=True, blank=True, default=None)
+    #: The time of day this occurrence is for. NULL means no time was
+    #: given (every pre-W5-B work, and any single work created without
+    #: one) — which is a different fact from midnight.
+    scheduled_time = models.TimeField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "Time of day for this occurrence. Held as a real column "
+            "rather than inside the title string."
+        ),
+    )
+    #: At / before / after handover. NULL means nobody was asked — see
+    #: `ExtraWorkCondition` for why that state has to exist.
+    condition = models.CharField(
+        max_length=32,
+        choices=ExtraWorkCondition.choices,
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "When this work happens relative to the handover. A REAL "
+            "COLUMN. The reference system keeps this value only as five "
+            "characters inside the title and every reader recovers it "
+            "with a regex, which is why two title formats now coexist "
+            "there and the parser only understands one of them "
+            "(A7 §1.3). Never parse this out of a title."
+        ),
+    )
+
+    # W2-D — BUDGET HOURS. The planned total for the job.
+    #
+    # THIS FIELD NEVER TOUCHES MONEY, and that is a rule, not an
+    # accident of the current wiring. `rowAmounts()` in
+    # `frontend/src/lib/billing.ts` and its server-side mirror
+    # (`extra_work.final_amounts`) are the one billing-total rule; a
+    # budget is a PLANNING and CONTROL number that answers "how long did
+    # we say this would take", and the moment an hours field reaches a
+    # price there are two money rules and they disagree by cents. Grep
+    # before wiring: nothing in `final_amounts.py`, `pricing.py`,
+    # `billing.py` or `invoicing/` reads this, and nothing should.
+    #
+    # NULL is "nobody has budgeted this", which is NOT the same fact as
+    # 0.00 ("we budgeted no hours"). Same distinction Sprint 188 drew
+    # for price: unpriced and free must never render the same.
+    budget_hours = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text=(
+            "W2-D — planned total hours for the job. A planning and "
+            "control number ONLY: it reaches no price anywhere. NULL "
+            "means unbudgeted, which is not the same as 0.00."
+        ),
+    )
+
+    # W2-D — the two completion requirements, set when the work is
+    # planned. BOTH DEFAULT FALSE.
+    #
+    # Stored and exposed here; ENFORCEMENT is deliberately not here. It
+    # belongs in the completion transition, in one place (wave 3), for
+    # the reason the reference system demonstrates: over there both
+    # flags are checked in the frontend only, so the same work completed
+    # through the API skips the check entirely.
+    file_upload_required = models.BooleanField(
+        default=False,
+        help_text=(
+            "W2-D — a file must be attached before this work may be "
+            "completed. Stored here; enforced in the completion "
+            "transition (wave 3)."
+        ),
+    )
+    completion_notes_required = models.BooleanField(
+        default=False,
+        help_text=(
+            "W2-D — a completion note must be written before this work "
+            "may be completed. Stored here; enforced in the completion "
+            "transition (wave 3)."
+        ),
+    )
+
+    # W13 — THE CUSTOMER MAY ASK TOO, AND IT IS A DIFFERENT FACT.
+    #
+    # The owner's father put the case plainly: "A person opens a ticket
+    # saying clean here, you left this dirty. I say I cleaned it.
+    # Uploading a photo is at my own initiative. But the person says I
+    # will see it, I want proof by photo. Then you cannot say finished
+    # without adding a photo."
+    #
+    # WHY TWO MORE COLUMNS RATHER THAN REUSING THE TWO ABOVE. Those are
+    # written at PLAN time by the provider; these are written at CREATE
+    # time by the customer, and each side may withdraw its own ask
+    # without touching the other's. Folding them into one pair would
+    # make the last writer win — a provider planning the job would erase
+    # the customer's demand for a photo by saving a form that never
+    # showed it. Two origins is the actual shape of the fact.
+    #
+    # The gate reads the UNION of the pairs, in
+    # `tickets.completion_requirements`, which is the one place
+    # completion is decided. Nothing else reads these.
+    customer_requires_photo = models.BooleanField(
+        default=False,
+        help_text=(
+            "W13 — the CUSTOMER asked for photo proof when they raised "
+            "this request. Independent of the provider's "
+            "`file_upload_required`; the completion gate requires "
+            "evidence if either is set."
+        ),
+    )
+    customer_requires_note = models.BooleanField(
+        default=False,
+        help_text=(
+            "W13 — the CUSTOMER asked for a written note when they "
+            "raised this request. Independent of the provider's "
+            "`completion_notes_required`; the completion gate requires "
+            "a note if either is set."
         ),
     )
 
@@ -802,6 +1014,32 @@ class ExtraWorkPricingLineItem(models.Model):
     # Notes — customer-visible explanation vs provider-only cost note.
     customer_visible_note = models.TextField(blank=True)
     internal_cost_note = models.TextField(blank=True)
+
+    # P-13 I — actual hours worked on an HOURS-unit legacy pricing
+    # line, closing the D7 gap from P-12: this path deliberately had no
+    # such column (Sprint 8B brief) so "Save hours to bill" and the
+    # timesheet prefill could not exist on legacy-priced requests.
+    # Owner-approved additive migration (2026-09-02). Same contract as
+    # the cart/proposal twins: NULL = bill the agreed `quantity`
+    # (old behaviour unchanged); NEVER overwrites `quantity`;
+    # `final_amounts.billable_quantity` substitutes it only when
+    # computing the final billable total.
+    actual_hours = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    actual_hours_entered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    actual_hours_entered_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -2226,3 +2464,281 @@ class ExtraWorkAssignment(models.Model):
 
     def __str__(self):
         return f"{self.extra_work_request_id}: {self.user_id} ({self.role})"
+
+
+class ExtraWorkPlannedHours(models.Model):
+    """
+    W2-D — the budget, distributed. One row per person on the job.
+
+    `ExtraWorkRequest.budget_hours` is the planned total; this is how
+    that total is spread across the people who will do the work. The two
+    are held apart on purpose: a budget nobody has distributed yet is a
+    real and normal state, and a total derived from the rows could never
+    express "we have eight hours for this and have not decided who does
+    what".
+
+    WHY THIS IS ITS OWN MODEL IN THIS APP, and not somewhere else:
+
+      * not on `tickets` — an extra work is planned before, and
+        independently of, the tickets it spawns, and one plan can span
+        several tickets;
+      * not in `timesheets` — that module has a deliberate no-money rule
+        and a different lifecycle (entered, saved, approved). These are
+        PLANNED hours: what we said the job would take, written once,
+        before anyone works. Actual hours live there and must keep
+        living there, or "planned vs actual" becomes one number
+        comparing itself.
+
+    THE PERSON, NOT THE ASSIGNMENT ROW. The FK is to the user, and the
+    write path requires that user to be assigned to this request at the
+    time of writing. Un-assigning them afterwards does NOT delete this
+    row, and the read surface reports it with `is_assigned: false`
+    rather than dropping it.
+
+    That is a deliberate answer to a live defect in the reference
+    system, recorded in `docs/reference/osius-reference-system/`
+    §4.4: over there the hours grid is built from the worker assignment
+    list and hours are matched onto it, so hours belonging to a removed
+    worker VANISH FROM THE SCREEN BUT STAY IN EVERY TOTAL. The screen
+    and the total then disagree and nobody can see why. Here the row
+    stays visible, stays counted, and says that the person is no longer
+    on the job — which is a thing an operator can act on.
+
+    `hours` has no upper bound and no cap against the parent's budget.
+    Overrun is a WARNING, never a block: in the reference system a
+    complete hard-cap function (`validateTotalHours()`) exists and is
+    never called, with the comment `// Hours validation removed per user
+    request` in the model's boot. Somebody built the block and the
+    business had it removed. We warn (see `extra_work.planning`).
+
+    Zero is legal and is not the same as no row at all: a person on the
+    crew with no hours budgeted yet is a real plan, and deleting their
+    row to say so would lose the fact that they are on it.
+    """
+
+    extra_work_request = models.ForeignKey(
+        ExtraWorkRequest,
+        on_delete=models.CASCADE,
+        related_name="planned_hours",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="extra_work_planned_hours",
+    )
+    #: W6-H — WHICH DAY these hours are planned for.
+    #:
+    #: NULL IS A REAL AND SUPPORTED STATE, not a migration artefact. It
+    #: means "planned, day not decided yet" — the only thing this model
+    #: could say before W6-H, and still the right answer for a job whose
+    #: window has not been set. Every row that existed before this
+    #: column is NULL and stays NULL: guessing a date onto historic rows
+    #: would manufacture a plan nobody made, and every comparison
+    #: against actuals would then be against a fiction.
+    #:
+    #: THE ASYMMETRY THIS CLOSES. `timesheets.TimeEntry` has carried a
+    #: `date` since it was written, so ACTUAL hours have always been
+    #: per-day while the PLAN was a single per-person total. You could
+    #: see that Gokhan worked 6 hours on Monday and that he was planned
+    #: 43 hours in total, and nothing could tell you what Monday was
+    #: supposed to be.
+    date = models.DateField(
+        null=True,
+        blank=True,
+        default=None,
+        db_index=True,
+        help_text=(
+            "The day these hours are planned for, or NULL for "
+            "'planned, day not decided'. A planning number: it reaches "
+            "no price anywhere."
+        ),
+    )
+    #: W7 — WHICH KIND OF HOUR. The gap this closes is functional, not
+    #: cosmetic: `timesheets.TimeEntry` has carried `hour_type` since it
+    #: was written, so the hours panel renders "Noah Bakker | Normale
+    #: uren | Aug 10 | 3.00" for work already DONE — while the plan had
+    #: no way to say a night shift was coming. You could RECORD one and
+    #: not PLAN one, and planned-vs-actual compared a weighted actual
+    #: against a plan that could not be weighted.
+    #:
+    #: THE EXISTING CATALOG, NOT A SECOND ONE. `timesheets.HourType` is
+    #: the per-company list an operator already maintains (Normale 1.0,
+    #: Nacht 1.3, Weekend 1.5) and the one the actuals are keyed to. A
+    #: planning-only copy would drift from it within a sprint and turn
+    #: planned-vs-actual into a join between two vocabularies.
+    #:
+    #: NULL IS A REAL STATE AND IT MEANS ORDINARY HOURS. Every row
+    #: written before this column is NULL, and that reading is what
+    #: keeps them valid: a plan made when the only kind of hour the
+    #: model knew was an unqualified one was a plan for ordinary hours.
+    #: It is also the right answer for an operator who does not care to
+    #: split the day.
+    #:
+    #: PROTECT, matching `TimeEntry.hour_type`: an hour type a plan
+    #: depends on cannot be deleted out from under it. Archiving
+    #: (`is_active=False`) is the supported way to retire one and it
+    #: leaves existing plans intact — the same contract the actuals get.
+    #:
+    #: A MULTIPLIER IS A WEIGHT, NOT A RATE. Nothing here multiplies it
+    #: by money and the no-money rule is unchanged: these are planning
+    #: numbers and they reach no price anywhere.
+    hour_type = models.ForeignKey(
+        "timesheets.HourType",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        default=None,
+        related_name="extra_work_planned_hours",
+        help_text=(
+            "Which kind of hour is planned, or NULL for ordinary "
+            "hours. The same per-company catalog the timesheets "
+            "actuals use. A planning number: it reaches no price "
+            "anywhere."
+        ),
+    )
+    hours = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text=(
+            "Planned hours for this person on this job. A planning "
+            "number: it reaches no price anywhere."
+        ),
+    )
+    set_at = models.DateTimeField(auto_now=True)
+    set_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="extra_work_planned_hours_set",
+    )
+
+    class Meta:
+        # W7 — the grain is now (work, person, DAY, HOUR TYPE).
+        #
+        # W6-H moved it from (work, person) to (work, person, day) and
+        # needed TWO constraints to do it, because Postgres treats NULLs
+        # as distinct in a unique index: the plain constraint covered
+        # dated rows and a partial one restored "one undated row per
+        # person per job". Adding a second nullable column to the key
+        # would have turned that into four combinations and four
+        # constraints.
+        #
+        # `nulls_distinct=False` collapses all of it into ONE. Postgres
+        # 15 added `UNIQUE NULLS NOT DISTINCT` and Django 5.0 exposes
+        # it; this deployment is on Postgres 16. Two rows for the same
+        # person on the same job with the same day and the same hour
+        # type now collide whether or not either nullable column is
+        # NULL, which is the rule we actually want and could only
+        # approximate before.
+        #
+        # THE TWO OLD CONSTRAINTS ARE REPLACED, NOT DROPPED-AND-LOST.
+        # The new one is strictly stronger: everything the pair forbade
+        # it still forbids, and it additionally forbids the (person,
+        # NULL day, two rows) case the pair only caught via its partial
+        # arm. No existing row can violate it — a row set legal under
+        # the old pair is legal under this one, because before this
+        # sprint every row's `hour_type` is NULL and the key therefore
+        # reduces to exactly (work, person, date).
+        constraints = [
+            models.UniqueConstraint(
+                fields=["extra_work_request", "user", "date", "hour_type"],
+                name="uniq_ew_planned_hours_person_day_type",
+                nulls_distinct=False,
+            ),
+        ]
+        ordering = ["date", "hour_type_id", "id"]
+        indexes = [
+            models.Index(fields=["extra_work_request"]),
+            # The grid reads a whole job's plan ordered by day.
+            models.Index(fields=["extra_work_request", "date"]),
+        ]
+        verbose_name_plural = "extra work planned hours"
+
+    def __str__(self):
+        return f"{self.extra_work_request_id}: {self.user_id} = {self.hours}h"
+
+
+# ---------------------------------------------------------------------------
+# W5-B — day-by-day (multi-date) Extra Work
+# ---------------------------------------------------------------------------
+class ExtraWorkGroup(models.Model):
+    """A batch of Extra Works created from one multi-date pick.
+
+    WHAT A GROUP IS, AND WHAT IT IS EMPHATICALLY NOT
+    ------------------------------------------------
+    A group is a convenience for CREATING and EDITING several works at
+    once. It is not a second entity that owns anything. Every member is
+    a real `ExtraWorkRequest` with its own status, its own price, its
+    own hours and its own invoice line; deleting or cancelling one
+    member must leave the others untouched, and no total anywhere is
+    computed from a group. Money continues to flow per work through
+    `rowAmounts()` and its server-side mirror.
+
+    That is the line the reference system does not hold. Over there the
+    group is also a bulk-write surface with its own endpoints, and each
+    one loses something: `bulkUpdateGroupStatus` is a query-builder mass
+    update that "bypasses Eloquent events entirely: no `*_by` stamp, no
+    `*_at` stamp, no system comment, no broadcast, no FCM, no activity
+    row, no draft publication" (A7 §2.1), and `bulkDeleteGroup`
+    soft-deletes every member "with no status check at all -- a group
+    containing invoiced works can be deleted this way" (A1 §
+    `bulkDelete`). We have no group-status endpoint and no group-delete
+    endpoint for exactly those reasons: a status change is a workflow
+    transition and goes through the state machine, one work at a time.
+
+    THE COMPANY / CUSTOMER / BUILDING ANCHORS ARE THE TENANT FLOOR.
+    They are stored here, not merely implied by the members, so "a group
+    never spans customers or companies" is a database fact rather than a
+    convention the create path is trusted to have honoured. The batch
+    endpoint sets them from the one payload every member shares, and the
+    member's own scoping is unchanged.
+
+    NO `member_count` COLUMN. The reference freezes `group_total` at
+    creation and never decrements it, then computes two OTHER counts by
+    two different routes -- one of which bypasses the soft-delete scope
+    -- so "three different member counts, computed three different ways"
+    disagree on the same screen (A7 §2.1). The count here is always
+    `self.members.count()`, derived, once.
+    """
+
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.CASCADE,
+        related_name="extra_work_groups",
+    )
+    customer = models.ForeignKey(
+        "customers.Customer",
+        on_delete=models.CASCADE,
+        related_name="extra_work_groups",
+    )
+    building = models.ForeignKey(
+        "buildings.Building",
+        on_delete=models.CASCADE,
+        related_name="extra_work_groups",
+    )
+    #: The title every member starts from. Members compose their own
+    #: title from this plus their slot; editing a member's title later
+    #: does NOT change this, and this is never parsed back out of a
+    #: member title.
+    standard_title = models.CharField(max_length=255)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_extra_work_groups",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["company", "customer"]),
+            models.Index(fields=["building"]),
+        ]
+
+    def __str__(self):
+        return f"Group {self.pk}: {self.standard_title}"

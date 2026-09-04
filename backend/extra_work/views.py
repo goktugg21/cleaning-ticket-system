@@ -22,20 +22,12 @@ from __future__ import annotations
 import logging
 
 from django.db import transaction
-from django.db.models import (
-    BooleanField,
-    Case,
-    Count,
-    Exists,
-    OuterRef,
-    Prefetch,
-    Q,
-    When,
-)
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, mixins, serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -59,11 +51,9 @@ from .models import (
     ExtraWorkRequest,
     ExtraWorkRequestIntent,
     ExtraWorkRequestItem,
-    ExtraWorkRoutingDecision,
     ExtraWorkStatus,
     ExtraWorkStatusHistory,
     Proposal,
-    ProposalLine,
     ProposalStatus,
 )
 from .scoping import scope_extra_work_for
@@ -72,11 +62,13 @@ from .label_validation import (
     validate_labels_for_customer,
 )
 from .dates import apply_extra_work_dates
+from .planning import PlanRejected, apply_plan
 from .serializers import (
     ERR_DEADLINE_PROVIDER_ONLY,
     ActualHoursEntrySerializer,
     ExtraWorkDatesSerializer,
     ExtraWorkLabelsSerializer,
+    ExtraWorkPlanSerializer,
     ExtraWorkPreviewSerializer,
     ExtraWorkPricingLineItemCustomerSerializer,
     ExtraWorkPricingLineItemSerializer,
@@ -88,6 +80,8 @@ from .serializers import (
     derive_actor_kind,
 )
 from .state_machine import TransitionError, apply_transition
+from .timeline import build_timeline
+from .views_financials import is_priced_expression
 
 
 logger = logging.getLogger(__name__)
@@ -114,6 +108,12 @@ PROVIDER_ROLES = {
     UserRole.COMPANY_ADMIN,
     UserRole.BUILDING_MANAGER,
 }
+
+# W2-D — one code for both refusals on the plan action (wrong role, and
+# right role without provider-side scope on this building). Same shape
+# as `ERR_DEADLINE_PROVIDER_ONLY`: the caller learns it may not plan
+# this work, and learns nothing about the work itself.
+ERR_PLAN_PROVIDER_ONLY = "plan_provider_only"
 
 
 # Sprint 28 Batch 9 — bucket definitions for the Extra Work stats
@@ -155,6 +155,7 @@ class ExtraWorkRequestViewSet(
 
     def get_queryset(self):
         from tickets.models import Ticket
+        from tickets.plan_provenance import with_own_plan
 
         # Sprint 180 §1 — "has an operational ticket been born from this
         # extra work?" is the ONE question the two list tracks split on,
@@ -177,37 +178,14 @@ class ExtraWorkRequestViewSet(
         # Sprint 188 — "has anyone put a price on this yet?", so a list can
         # print an em dash instead of EUR 0,00 for work nobody has priced.
         # Zero is a LEGAL price (free work, a goodwill line); the two must
-        # not render the same. This mirrors `active_priced_lines`'
-        # resolution order exactly — approved proposal wins, then the cart
-        # for an INSTANT route, then the legacy rows — because a display
-        # that disagreed with the money rule would be worse than no
-        # display at all. Three EXISTS subqueries for the whole page.
-        priced_proposal = ProposalLine.objects.filter(
-            proposal__extra_work_request_id=OuterRef("pk"),
-            proposal__status=ProposalStatus.CUSTOMER_APPROVED,
-            is_approved_for_spawn=True,
-        )
-        any_approved_proposal = Proposal.objects.filter(
-            extra_work_request_id=OuterRef("pk"),
-            status=ProposalStatus.CUSTOMER_APPROVED,
-        )
-        cart_rows = ExtraWorkRequestItem.objects.filter(
-            extra_work_request_id=OuterRef("pk")
-        )
-        # NB the FK on the legacy row is `extra_work`, not
-        # `extra_work_request` like the other two.
-        legacy_rows = ExtraWorkPricingLineItem.objects.filter(
-            extra_work_id=OuterRef("pk")
-        )
-        is_priced = Case(
-            When(Exists(any_approved_proposal), then=Exists(priced_proposal)),
-            When(
-                routing_decision=ExtraWorkRoutingDecision.INSTANT,
-                then=Exists(cart_rows),
-            ),
-            default=Exists(legacy_rows),
-            output_field=BooleanField(),
-        )
+        # not render the same.
+        #
+        # W1-C moved the expression itself to `views_financials.
+        # is_priced_expression` when the money strip needed the same
+        # answer over an aggregate. One definition, two callers: a second
+        # copy would be a second opinion, and only one of them would be
+        # the one the money rule agrees with.
+        is_priced = is_priced_expression()
         return (
             scope_extra_work_for(self.request.user)
             .select_related(
@@ -216,6 +194,11 @@ class ExtraWorkRequestViewSet(
                 # lookup.
                 "company", "building", "customer", "created_by",
                 "department", "work_type",
+                # W5-B — the day-by-day series, so the list serializer's
+                # `group` block does not fetch the group per row. The
+                # per-page memo in `get_group` covers the member COUNTS;
+                # this covers the group row itself.
+                "group",
             )
             .annotate(
                 annotated_has_operational_ticket=Exists(spawned),
@@ -228,10 +211,27 @@ class ExtraWorkRequestViewSet(
                 # needs four columns of a ticket, not a ticket.
                 Prefetch(
                     "operational_tickets",
-                    queryset=Ticket.objects.filter(
-                        deleted_at__isnull=True
+                    queryset=with_own_plan(
+                        Ticket.objects.filter(deleted_at__isnull=True)
                     )
-                    .only("id", "ticket_no", "status", "extra_work_request_id")
+                    # W12 §2 put the ticket's own schedule on this
+                    # payload; the two columns joined the `.only()` in
+                    # FE-2 because a deferred field fetches per row —
+                    # exactly the N+1 this prefetch exists to kill
+                    # (ListQueryGrowthTests pins it).
+                    .only(
+                        "id",
+                        "ticket_no",
+                        "status",
+                        "extra_work_request_id",
+                        "scheduled_start_at",
+                        "schedule_status",
+                        # P-2 — `display_phase` asks whether a person
+                        # planned the ticket; the occurrence FK and the
+                        # `job_own_plan` annotation answer without a
+                        # query per row.
+                        "planned_occurrence_id",
+                    )
                     .order_by("id"),
                     to_attr="prefetched_operational_tickets",
                 ),
@@ -406,7 +406,16 @@ class ExtraWorkRequestViewSet(
                 "has_ad_hoc": cart.has_ad_hoc,
             },
             "allowed_intents": allowed_intents,
-            "default_intent": derive_default_intent(cart),
+            # P-15 (P-14's S3 finding) — the default is only a default
+            # when THIS actor may actually use it; the preview used to
+            # advertise `default_intent: REQUEST_QUOTE` beside
+            # `allowed_intents: [AUTO_START_AFTER_PRICING]` for a
+            # provider. Null means: choose from allowed_intents.
+            "default_intent": (
+                derive_default_intent(cart)
+                if derive_default_intent(cart) in allowed_intents
+                else None
+            ),
         }
 
         if supplied_intent:
@@ -438,6 +447,67 @@ class ExtraWorkRequestViewSet(
         to_status = data["to_status"]
         is_override = data.get("is_override", False)
         note = data.get("note", "")
+
+        # P-16 (P-14 S4) — a caller saying `reason` meant the note; the
+        # key used to be silently dropped and the cancel landed without
+        # its why. An alias, not a second field: `note` wins when both
+        # are sent.
+        if not note.strip():
+            note = str(request.data.get("reason") or "").strip()
+
+        # P-16 (P-14 S4) — cancelling kills work somebody asked for;
+        # the record must say why. The rule the reject door already has
+        # (P-8R: "where the UI cannot be bypassed"), extended to the
+        # cancel: a CANCELLED transition needs a written reason in SOME
+        # field — `note`, the `reason` alias, or the override path's
+        # own `override_reason` (the late-stage cancels' existing
+        # mandatory gate). At the VIEW, not in `apply_transition` — the
+        # primitive walks states for seeders and tests (W13-FIX).
+        #
+        # ONLY for the EARLY cancels (the machine's own docstring:
+        # REQUESTED / UNDER_REVIEW / PRICING_PROPOSED → CANCELLED carry
+        # no machine-level reason gate). The late-stage pairs keep the
+        # machine's more SPECIFIC refusal (`override_reason_required` /
+        # `cancel_unbilled_requires_reason`) — a generic sentence must
+        # never preempt the one that names the actual missing thing.
+        if (
+            to_status == ExtraWorkStatus.CANCELLED
+            and extra_work.status
+            in (
+                ExtraWorkStatus.REQUESTED,
+                ExtraWorkStatus.UNDER_REVIEW,
+                ExtraWorkStatus.PRICING_PROPOSED,
+            )
+            and not note.strip()
+            and not str(data.get("override_reason") or "").strip()
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "A reason is required when cancelling: say why "
+                        "this work stops."
+                    ),
+                    "code": "cancel_note_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # W-PLAN — the workflow card's direct UNDER_REVIEW ->
+        # PRICING_PROPOSED leg is a pricing door too (the proposal
+        # views are the other two). Same gate, same bypass. At the
+        # VIEW, not in `apply_transition` — the primitive walks states
+        # for seeders and tests, and W13-FIX's lesson stands: a
+        # form-completeness rule on the primitive is the wrong layer.
+        if to_status == ExtraWorkStatus.PRICING_PROPOSED:
+            from .planning import check_pricing_plan_gate
+
+            gate = check_pricing_plan_gate(
+                extra_work, request.data, actor=request.user
+            )
+            if gate is not None:
+                return Response(
+                    gate, status=status.HTTP_400_BAD_REQUEST
+                )
         customer_reject_reason = data.get(
             "customer_reject_reason", ""
         ).strip()
@@ -716,6 +786,112 @@ class ExtraWorkRequestViewSet(
             payload["tickets_moved"] = ticket_result["moved"]
             payload["tickets_kept_own_date"] = ticket_result["kept_own_date"]
         return Response(payload)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="plan",
+        # JSON ONLY, and this is a correctness fix rather than a
+        # preference. DRF's `BooleanField.get_value` treats a boolean
+        # that is ABSENT from HTML form input as `False` — because an
+        # unchecked checkbox sends nothing — so with the default parser
+        # set a form-encoded plan that never mentioned
+        # `file_upload_required` would silently write it to False on
+        # every work it touched. That is precisely the reference
+        # system's defect, rebuilt in our own code by a framework
+        # default. The payload carries a nested list (`planned_hours`)
+        # that form encoding cannot express anyway.
+        parser_classes=[JSONParser],
+    )
+    def plan(self, request, pk=None):
+        """W2-D — plan the work; start it only on an explicit `start: true`.
+
+        P-8R A2 — an absent `start` used to mean "plan AND start"; it now
+        means "plan only". Starting is its own explicit ask.
+
+        Body (every field optional; ABSENT MEANS LEAVE UNCHANGED):
+
+            {"budget_hours": "8.00",
+             "provider_planned_date": "2026-09-01",
+             "provider_planned_end_date": "2026-09-03",
+             "planned_hours": [{"user": 12, "hours": "4.00"}, ...],
+             "file_upload_required": true,
+             "completion_notes_required": false,
+             "start": true}
+
+        The rules and the evidence behind them are in
+        `extra_work.planning`; the three that decide how this endpoint
+        BEHAVES are worth repeating where somebody reads the HTTP layer:
+
+        * **Overrun warns, it never blocks.** Distributing more hours
+          than the budget returns 200 with a `hours_overrun` warning in
+          the `plan` block. The save has already happened.
+        * **A start that cannot happen is reported, not raised.** Once
+          the work has an operational ticket its status follows that
+          ticket (Sprint 181 §1), so `started` comes back false with
+          `start_skipped: "operational_status_follows_ticket"` and the
+          plan still lands. Throwing away a correct plan because of a
+          state the operator can see on their screen would be the wrong
+          trade.
+        * **The customer's dates are not touched.** `preferred_date`,
+          `planned_end_date` and `deadline` have their own endpoint
+          (`/dates/`); this one writes the provider's committed window
+          only, so planning can never move the date we are measured
+          against.
+
+        Role gate FIRST (before `get_object`), exactly as `dates` and
+        `actual_hours` do, so a customer-side or STAFF actor gets a
+        stable 403 instead of a scope-driven 404.
+        """
+        user = request.user
+
+        if user.role not in PROVIDER_ROLES:
+            return Response(
+                {
+                    "detail": "This role cannot plan Extra Work. "
+                    "Planning is a provider action.",
+                    "code": ERR_PLAN_PROVIDER_ONLY,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        extra_work = self.get_object()  # 404 if out-of-scope (cross-tenant)
+
+        if user.role != UserRole.SUPER_ADMIN and not user_has_osius_permission(
+            user,
+            "osius.ticket.view_building",
+            building_id=extra_work.building_id,
+        ):
+            return Response(
+                {
+                    "detail": "You do not have provider-side scope for this "
+                    "Extra Work request.",
+                    "code": ERR_PLAN_PROVIDER_ONLY,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        payload = ExtraWorkPlanSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        # `PlanRejected` propagates OUT of the atomic block on purpose:
+        # caught inside it, a refusal would commit whatever had already
+        # been written. `apply_plan` resolves everything before it
+        # writes anything, so this is belt and braces — but the belt is
+        # what makes it true regardless of how `apply_plan` changes.
+        try:
+            with transaction.atomic():
+                result = apply_plan(
+                    extra_work, payload.validated_data, actor=user
+                )
+        except PlanRejected as exc:
+            return Response(exc.body, status=status.HTTP_400_BAD_REQUEST)
+
+        data = ExtraWorkRequestDetailSerializer(
+            extra_work, context={"request": request}
+        ).data
+        data["plan"] = result
+        return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="actual-hours")
     def actual_hours(self, request, pk=None):
@@ -1016,6 +1192,26 @@ class ExtraWorkRequestViewSet(
                 rows, many=True, context={"request": request}
             ).data
         )
+
+    @action(detail=True, methods=["get"], url_path="timeline")
+    def timeline(self, request, pk=None):
+        """FE-2 (Addendum D §D.4) — the requester's folded timeline.
+
+        The request's own history and its spawned ticket's milestones
+        as ONE chronological list of phase EVENTS (machine keys the
+        frontend translates). Free text from history rows is never
+        copied in, so the B1/B7 note-privacy floor holds by
+        construction for every viewer. Scope is `get_object` — the same
+        404 wall every other read on this ViewSet stands behind.
+        """
+        extra_work = self.get_object()  # 404 if out-of-scope
+        spawned = list(
+            extra_work.operational_tickets.filter(deleted_at__isnull=True)
+            .order_by("id")
+            .prefetch_related("status_history__changed_by")
+        )
+        rows = build_timeline(extra_work, spawned)
+        return Response({"entries": rows, "count": len(rows)})
 
     @action(detail=True, methods=["post"], url_path="spawn")
     def spawn(self, request, pk=None):

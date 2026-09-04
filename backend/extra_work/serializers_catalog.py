@@ -678,6 +678,17 @@ class CustomerServicePriceSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(
         source="service.name", read_only=True
     )
+    # P-4 (Part A) — the UNIT the service is priced per, read off the
+    # catalog row so the meerwerk cart can say "per uur" / "per m²" /
+    # "vast" beside the price and the quantity. Existing data only:
+    # `Service.unit_type` and its `custom_unit_label` (kept in step with
+    # the managed unit's current label by the catalog serializer).
+    service_unit_type = serializers.CharField(
+        source="service.unit_type", read_only=True
+    )
+    service_unit_label = serializers.CharField(
+        source="service.custom_unit_label", read_only=True
+    )
     # Sprint 143 §3 — the customer's own folder. Writable so a row can be
     # moved into or out of one; the view validates the folder belongs to
     # the URL-bound customer (a folder id from another customer would
@@ -694,6 +705,8 @@ class CustomerServicePriceSerializer(serializers.ModelSerializer):
             "id",
             "service",
             "service_name",
+            "service_unit_type",
+            "service_unit_label",
             "customer",
             "folder",
             "unit_price",
@@ -707,6 +720,8 @@ class CustomerServicePriceSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "service_name",
+            "service_unit_type",
+            "service_unit_label",
             "customer",
             "created_at",
             "updated_at",

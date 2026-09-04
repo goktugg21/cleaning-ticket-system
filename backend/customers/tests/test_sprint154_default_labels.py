@@ -101,12 +101,19 @@ class ExtraWorkAlwaysLabelledTests(TenantFixtureMixin, APITestCase):
             "building": self.building.id,
             "title": "Deep clean",
             "description": "After the event",
+            # P-16 repin — two rules that postdate this fixture: the
+            # per-line requested_date was retired (P-8 §4; the
+            # request-level preferred_date is the cart's date), and a
+            # PROVIDER's non-agreed cart must choose its intent (P-15,
+            # intent_required). The label defaults under test are
+            # unchanged.
+            "preferred_date": "2026-06-15",
+            "request_intent": "AUTO_START_AFTER_PRICING",
             "line_items": [
                 {
                     "custom_description": "Ad-hoc line",
                     "quantity": "1.00",
                     "unit_price": "100.00",
-                    "requested_date": "2026-06-15",
                 }
             ],
         }

@@ -78,8 +78,8 @@ from tickets.models import (
     TicketAttachment,
     TicketManagerAssignment,
     TicketMessage,
+    TicketCategory,
     TicketStaffAssignment,
-    WorkCategory,
 )
 from timesheets.models import (
     ContractHours,
@@ -93,6 +93,18 @@ from timesheets.models import (
 # the timesheets one twice and the customers one not at all. Two
 # different nouns that happen to share a word.
 from timesheets.models import WorkType as TimesheetWorkType
+# W4-R — the per-person hourly rate. It lives in `reports` because a
+# wage may not live in `timesheets` (that module computes no money), and
+# it is audited for the reason every wage-bearing row is: a corrected
+# rate re-prices the period it covers, so who changed it and from what
+# has to be recoverable afterwards.
+from reports.models import EmployeeHourlyRate
+# W6 §2 — the per-company SLA warning thresholds. W4-Q built the model
+# and the screen that edits it and could not register it here, because
+# this file was held by another chat that sprint. Registering it now
+# closes an H-10 gap: a threshold change is a change to WHO gets warned
+# and WHEN, and until this line it was unattributable.
+from sla.models import SlaWarningThreshold
 from contracts.models import (
     Contract,
     ContractBuilding,
@@ -747,6 +759,82 @@ def _on_building_staff_visibility_post_save_update(
         )
 
 
+# W-H §1 — `Ticket` ARCHIVE fields, and ONLY those three.
+#
+# `Ticket` is deliberately NOT on the full-CRUD list above: its audit
+# trail is `TicketStatusHistory`, and CLAUDE.md / H-11 are explicit that
+# the history row IS the trail and must not be doubled up on the generic
+# AuditLog. Archiving is not a status transition, so it writes no history
+# row and would otherwise leave no trace at all.
+#
+# So this is the narrowest possible handler: three fields, UPDATE only.
+# Every other edit to a Ticket still records nothing here, exactly as
+# before. The UNARCHIVE reason rides `AuditLog.reason`, which the view
+# sets through `audit.context.set_current_reason` before saving — the
+# same channel every other privileged mutation uses.
+_TICKET_ARCHIVE_TRACKED_FIELDS = (
+    "archived_at",
+    "archived_by_id",
+    "archive_note",
+)
+
+
+def _ticket_archive_snapshot_for_pre_save(instance):
+    if instance.pk is None:
+        return None
+    from tickets.models import Ticket
+
+    try:
+        previous = Ticket.objects.get(pk=instance.pk)
+    except Ticket.DoesNotExist:
+        return None
+    return {
+        field: serialize_value(getattr(previous, field))
+        for field in _TICKET_ARCHIVE_TRACKED_FIELDS
+    }
+
+
+def _on_ticket_pre_save(sender, instance, **kwargs):
+    try:
+        _state_map()[("tickets.Ticket.archive", instance.pk)] = (
+            _ticket_archive_snapshot_for_pre_save(instance)
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: Ticket archive pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_ticket_post_save_archive_update(sender, instance, created, **kwargs):
+    """UPDATE-only, archive-fields-only. A ticket save that touches none
+    of the three writes nothing, which is what keeps every other Ticket
+    edit off this log."""
+    if created:
+        _state_map().pop(("tickets.Ticket.archive", instance.pk), None)
+        return
+    try:
+        snapshot = _state_map().pop(
+            ("tickets.Ticket.archive", instance.pk), None
+        )
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _TICKET_ARCHIVE_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = serialize_value(getattr(instance, field))
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            return
+        _create_log(instance, AuditAction.UPDATE, diff)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: Ticket archive post_save UPDATE failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
 # Sprint 14E — `TicketStaffAssignment` slot fields. The model is on the
 # membership-style CREATE / DELETE handlers (the slot CREATE = "staff
 # assigned"; DELETE = "slot removed"). This pair adds the UPDATE-diff
@@ -764,6 +852,12 @@ _TSA_TRACKED_FIELDS = (
     "completed_at",
     "completed_by_id",
     "unable_to_complete_reason",
+    # W-VIEWER §10 — the reason an operator closed somebody else's slot.
+    # Tracked because the whole point of the field is accountability:
+    # "who completed it, whether it was completed on someone else's
+    # behalf, and why" (the ruling's own words), and an untracked reason
+    # can be edited out of existence.
+    "completed_on_behalf_reason",
     # Sprint 4 — `sub_task` is now a manager-writable PATCH field; track its
     # FK id (JSON-safe via serialize_value, like completed_by_id) so a
     # re-placement / detach lands as a TicketStaffAssignment UPDATE row.
@@ -1493,15 +1587,16 @@ def _connect():
         # a state machine. So the full CRUD trio is the right shape.
         BuildingType,
         ManagedUnit,
-        # Sprint 185 E §1 — the work-category catalog, registered with
-        # its five siblings for the reason `BuildingType` is: every
-        # melding points at the category by id, so RENAMING one silently
-        # reclassifies every melding carrying it, and the category report
-        # and the meldingen filter both change underneath whoever was
-        # reading them. Editable name / is_active / sort_order, no
-        # FileField, no `*StatusHistory` to double-write against (H-11) —
-        # the full CRUD trio is the right shape.
-        WorkCategory,
+        # W13 — the ticket-category catalog, registered with its five
+        # siblings for the reason `BuildingType` is: every melding points
+        # at the category by id, so RENAMING one silently reclassifies
+        # every melding carrying it, and the category report and the
+        # meldingen filter both change underneath whoever was reading
+        # them. Editable labels / colour / is_active / sort_order /
+        # available_at_intake, no FileField, no `*StatusHistory` to
+        # double-write against (H-11) — the full CRUD trio is the right
+        # shape.
+        TicketCategory,
         # M5 A — customer custom price lines (ad-hoc, no service FK)
         # carry the same provider price / VAT / validity data and have
         # create / update / soft-delete endpoints, so they get the same
@@ -1640,12 +1735,46 @@ def _connect():
         # The generic introspection covers every field on all four —
         # they carry no FileField (the reason `Document` needs
         # hand-written handlers) and no `*StatusHistory` to double-write
-        # against (H-11): this module has no state machine, and a
-        # revision is a business version rather than a status history.
+        # against (H-11): the P-15 lifecycle guard
+        # (`contracts/state_machine.py`) deliberately has NO history
+        # model — THIS diff row, stamped with the `contract_transition`
+        # reason, IS its history surface — and a revision is a business
+        # version rather than a status history.
         ContractType,
         Contract,
         ContractRevision,
         ContractLine,
+        # W4-R — EmployeeHourlyRate. The full CRUD trio, and every arm
+        # of it earns its place: a CREATE is a raise, an UPDATE is a
+        # correction that re-prices the period the row covers, and a
+        # DELETE drops that period back to whatever the previous row or
+        # the deployment fallback says. All three change what past work
+        # is recorded as having cost, so all three are attributable.
+        # Generic introspection covers every field — no FileField, and
+        # no `*StatusHistory` to double-write against (H-11): this model
+        # has no state machine.
+        EmployeeHourlyRate,
+        # W6 §2 — SlaWarningThreshold. The full CRUD trio, for the same
+        # reason EmployeeHourlyRate above has it: every arm changes
+        # behaviour that somebody will later ask about.
+        #
+        #   * CREATE is a company leaving the deployment defaults.
+        #   * UPDATE is the one that matters most — widening
+        #     `cooldown_hours` or pushing `manager_review_business_hours`
+        #     out makes warnings arrive later or not at all, and the
+        #     symptom ("we stopped being told") shows up weeks after the
+        #     edit, when the only way back to a cause is this diff.
+        #   * DELETE drops the company back to the deployment defaults,
+        #     which is a silent behaviour change unless it is recorded.
+        #
+        # Generic introspection covers every field: seven small integer
+        # thresholds plus `updated_by`, no FileField (the reason
+        # `Document` needs hand-written handlers), and no
+        # `*StatusHistory` to double-write against (H-11) — this model
+        # has no state machine. `updated_at` is auto_now and would fire
+        # on every save; it is already in `diff.NOISY_FIELDS`, so it
+        # never reaches a `changes` payload.
+        SlaWarningThreshold,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
@@ -1833,6 +1962,25 @@ def _connect():
         sender=ExtraWorkRequest,
         weak=False,
         dispatch_uid="audit:ewb:post_update:ExtraWorkRequest",
+    )
+
+    # W-H §1 — the three archive fields on Ticket, UPDATE only. Ticket
+    # is not in the CRUD trio above and must not be: its trail is
+    # TicketStatusHistory (H-11). Archiving writes no history row, so
+    # without this pair it would leave no trace anywhere.
+    from tickets.models import Ticket as _TicketModel
+
+    pre_save.connect(
+        _on_ticket_pre_save,
+        sender=_TicketModel,
+        weak=False,
+        dispatch_uid="audit:ticket:pre:archive",
+    )
+    post_save.connect(
+        _on_ticket_post_save_archive_update,
+        sender=_TicketModel,
+        weak=False,
+        dispatch_uid="audit:ticket:post_update:archive",
     )
 
     pre_save.connect(

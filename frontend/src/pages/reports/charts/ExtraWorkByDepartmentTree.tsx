@@ -10,6 +10,7 @@ import { useReport } from "../../../hooks/useReport";
 import { customerLabelName } from "../../../lib/customerLabelName";
 import { formatMoney } from "../../../lib/intl";
 import { ExportButtons } from "./ExportButtons";
+import { ChartSkeleton } from "./ChartSkeleton";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -58,9 +59,7 @@ export function ExtraWorkByDepartmentTree({ filters, refreshKey }: ChartProps) {
       </p>
 
       {loading && (
-        <div className="loading-bar" style={{ marginTop: 12, height: 120 }}>
-          <div className="loading-bar-fill" />
-        </div>
+        <ChartSkeleton height={120} />
       )}
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 12 }}>

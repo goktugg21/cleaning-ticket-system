@@ -172,6 +172,11 @@ class _LineSourceFixtureMixin:
             "title": "Line-source cart",
             "description": "cart for line-source tests",
             "category": ExtraWorkCategory.DEEP_CLEANING,
+            # W-EW1 §2 (fixed under P-13 I): the per-line
+            # `requested_date` these tests were written with is refused
+            # since 2026-08-24 — the request-level `preferred_date` is
+            # the one date for the whole cart.
+            "preferred_date": "2026-06-15",
             "line_items": lines,
         }
 
@@ -213,7 +218,6 @@ class CartLineContractTests(_LineSourceFixtureMixin, TestCase):
                 {
                     "service": self.service_priced.id,
                     "quantity": "2.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ]
@@ -246,7 +250,6 @@ class CartLineNeedsProposalTests(_LineSourceFixtureMixin, TestCase):
                     # for self.customer.
                     "service": self.service_unpriced.id,
                     "quantity": "100.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ]
@@ -282,7 +285,6 @@ class ProposalLineContractTests(_LineSourceFixtureMixin, TestCase):
                 {
                     "service": self.service_unpriced.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ]
@@ -340,7 +342,6 @@ class ProposalLineCustomOverrideTests(_LineSourceFixtureMixin, TestCase):
                 {
                     "service": self.service_unpriced.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ]
@@ -393,7 +394,6 @@ class ProposalLineCustomOverrideTests(_LineSourceFixtureMixin, TestCase):
                 {
                     "service": self.service_unpriced.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ]
@@ -448,7 +448,6 @@ class ProposalLineAdHocTests(_LineSourceFixtureMixin, TestCase):
                 {
                     "service": self.service_unpriced.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ]
@@ -495,13 +494,11 @@ class MixedCartTests(_LineSourceFixtureMixin, TestCase):
                 {
                     "service": self.service_priced.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 },
                 {
                     "service": self.service_unpriced.id,
                     "quantity": "10.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 },
             ]
@@ -546,7 +543,6 @@ class CustomerFacingFieldVisibilityTests(_LineSourceFixtureMixin, TestCase):
                 {
                     "service": self.service_priced.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ]
@@ -571,7 +567,6 @@ class CustomerFacingFieldVisibilityTests(_LineSourceFixtureMixin, TestCase):
                 {
                     "service": self.service_unpriced.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ]
@@ -617,7 +612,6 @@ class CustomerFacingFieldVisibilityTests(_LineSourceFixtureMixin, TestCase):
                 {
                     "service": self.service_unpriced.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ]
@@ -654,7 +648,6 @@ class CustomerFacingFieldVisibilityTests(_LineSourceFixtureMixin, TestCase):
                 {
                     "service": self.service_unpriced.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ]

@@ -258,6 +258,18 @@ class ExtraWorkBulkAssignView(APIView):
                     # Instance .delete() fires post_delete per row.
                     existing.delete()
                     removed += 1
+                    # P-7 S2.1 — the plan modal's X on the Extra Work page
+                    # comes through this door. The ticket-side doors
+                    # (`tickets.crew_sync.worker_removed`) clear the
+                    # person's today-and-future planned rows when they
+                    # leave; this one deleted the assignment and left the
+                    # open plan behind, so the person was gone and their
+                    # planned hours still counted. Same ruling here: open
+                    # plan goes, past rows are history and stay.
+                    if role == ExtraWorkAssignmentRole.WORKER:
+                        from tickets.crew_sync import _clear_open_plan
+
+                        _clear_open_plan(extra_work, user.id)
 
         return Response(
             {

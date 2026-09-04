@@ -37,10 +37,19 @@ import enStaffCredentials from "./en/staff_credentials.json";
 import enContracts from "./en/contracts.json";
 import enInvoices from "./en/invoices.json";
 
-// Default language is "nl" so unauthenticated routes (Login) render in Dutch.
-// Once the user is authenticated, useLanguageSync re-fires changeLanguage
-// based on me.language. The local storage cache key is intentionally not
-// configured — language is sourced from /auth/me/, not from the browser.
+// FE-4 (Addendum D §D.12 item 9) — the PRE-AUTH language follows the
+// browser: an English browser opening the login page met a Dutch screen
+// (the default was a hardcoded "nl"), which is the one way Dutch could
+// reach an English session with every string in the app going through
+// t(). Once the user is authenticated, useLanguageSync switches to
+// me.language — the profile stays the authority; the browser only
+// decides what the login page says. No localStorage cache, as before.
+const browserLanguage =
+  typeof navigator !== "undefined" &&
+  (navigator.language || "").toLowerCase().startsWith("en")
+    ? "en"
+    : "nl";
+
 i18n.use(initReactI18next).init({
   resources: {
     nl: {
@@ -74,7 +83,7 @@ i18n.use(initReactI18next).init({
       invoices: enInvoices,
     },
   },
-  lng: "nl",
+  lng: browserLanguage,
   fallbackLng: "nl",
   defaultNS: "common",
   ns: [
@@ -96,6 +105,16 @@ i18n.use(initReactI18next).init({
     escapeValue: false,
   },
   returnNull: false,
+  react: {
+    // Every page binds `useTranslation(["<page>", "common"])`, which only
+    // means "fall back to common" when nsMode says so. Without this,
+    // react-i18next binds `t` to namespaces[0] alone
+    // (react-i18next/useTranslation.js: `nsMode === "fallback" ? namespaces
+    // : namespaces[0]`), so any key that lives in common.json renders as its
+    // own key name. That is how `archive.show`, `archive.show_working`,
+    // `period.label` and `change.moved_to` reached the owner's screen.
+    nsMode: "fallback",
+  },
 });
 
 export default i18n;

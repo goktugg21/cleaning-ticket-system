@@ -1,9 +1,11 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus, SlidersHorizontal, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
+import { EmptyState } from "../../components/EmptyState";
+import { PageHeader } from "../../components/PageHeader";
 import { SortableHeader } from "../../components/SortableHeader";
 import type { SortState } from "../../components/SortableHeader";
 import {
@@ -39,19 +41,10 @@ type ActiveFilter = "true" | "false" | "all";
  */
 type SortField = "name" | "contact_email" | "is_active";
 
-/** Sprint 185 §3 — the lifecycle's colour, reusing the app's existing
- *  status tones rather than inventing a sixth palette. NOTICE is the one
- *  that costs money — you are still cleaning, still incurring cost — so
- *  it gets the waiting tone that means "needs attention", not the
- *  neutral one that means "nothing to see". */
-const LIFECYCLE_TONE: Record<string, string> = {
-  PROSPECT: "cell-tag-muted",
-  ONBOARDING: "cell-tag-in_progress",
-  ACTIVE: "cell-tag-open",
-  NOTICE: "cell-tag-waiting_customer_approval",
-  CHURNED: "cell-tag-closed",
-};
-
+/** Sprint 185 §3 gave the lifecycle its own coloured pill beside the
+ *  Active one. P-6 V3 — one pill family per row: the Active pill keeps
+ *  its colour, the lifecycle is a plain word (the filter still narrows
+ *  by it, and "Opzegtermijn" reads as loudly as any tone). */
 type SortDirection = "asc" | "desc";
 
 const DEBOUNCE_MS = 300;
@@ -256,9 +249,38 @@ export function CustomersAdminPage() {
   const hasActiveFilters = Boolean(
     searchActive ||
       activeFilter !== "true" ||
+      lifecycleFilter !== "" ||
       buildingFilter !== "" ||
       (companyFilter !== "" && !companyDropdownDisabled),
   );
+
+  const lifecycleLabel = (value: string) =>
+    t(`customers.lifecycle_${(value || "active").toLowerCase()}`);
+
+  // P-6 V3 — the filters behind ONE Filter fold with the active ones as
+  // chips (the contracts / tickets pattern); the search stays outside.
+  const activeFilterChips: string[] = [];
+  if (activeFilter === "false") activeFilterChips.push(t("admin.status_inactive"));
+  if (activeFilter === "all") activeFilterChips.push(t("admin.status_all"));
+  if (lifecycleFilter !== "") activeFilterChips.push(lifecycleLabel(lifecycleFilter));
+  if (companyFilter !== "" && !companyDropdownDisabled) {
+    activeFilterChips.push(companyName(companyFilter));
+  }
+  if (buildingFilter !== "") {
+    const buildingName = buildings.find((b) => b.id === buildingFilter)?.name;
+    if (buildingName) activeFilterChips.push(buildingName);
+  }
+
+  const previousLocked = loading
+    ? t("admin_list.page_loading")
+    : !previous || page <= 1
+      ? t("admin_list.page_first")
+      : undefined;
+  const nextLocked = loading
+    ? t("admin_list.page_loading")
+    : !next
+      ? t("admin_list.page_last")
+      : undefined;
 
   // --- sorting ---------------------------------------------------------
   //
@@ -430,34 +452,26 @@ export function CustomersAdminPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
-          </div>
-          <h2 className="page-title">{t("nav.customers")}</h2>
-          <p className="page-sub">
-            {loading
-              ? t("customers.loading")
-              : t("customers.count", { count })}
-          </p>
-        </div>
-        <div className="page-header-actions">
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={load}
-            disabled={loading}
+      {/* P-6 V3 — the shared header; "+ New" is the one primary action
+          (§D.6 rule 3). The Refresh button is gone: the list reloads on
+          every filter, sort and save. */}
+      <PageHeader
+        eyebrow={t("nav.admin_group")}
+        title={t("nav.customers")}
+        subtitle={
+          loading ? t("customers.loading") : t("customers.count", { count })
+        }
+        actions={
+          <Link
+            className="btn btn-primary btn-sm"
+            to="/admin/customers/new"
+            data-testid="customers-create-link"
           >
-            <RefreshCw size={14} strokeWidth={2.5} />
-            {t("refresh")}
-          </button>
-          <Link className="btn btn-primary btn-sm" to="/admin/customers/new">
             <Plus size={14} strokeWidth={2.5} />
             {t("admin.create_new")}
           </Link>
-        </div>
-      </div>
+        }
+      />
 
       {savedBanner && (
         <div className="alert-info" style={{ marginBottom: 16 }} role="status">
@@ -496,7 +510,15 @@ export function CustomersAdminPage() {
             <span className="summary-stat-label">
               {t("customers.stat_active")}
             </span>
-            <span className="summary-stat-value">{activeCount ?? "—"}</span>
+            {/* §D.6 rule 15 — the number when known, a word while it is
+                being counted, never a dash that reads as "none". */}
+            <span className="summary-stat-value">
+              {activeCount === null ? (
+                <span className="muted-empty">{t("admin_list.counting")}</span>
+              ) : (
+                activeCount
+              )}
+            </span>
             <span className="summary-stat-meta">
               {t("customers.stat_active_meta")}
             </span>
@@ -522,92 +544,6 @@ export function CustomersAdminPage() {
               onChange={(event) => setSearchInput(event.target.value)}
             />
           </div>
-          <div className="filter-field">
-            <span className="filter-label">{t("status")}</span>
-            <select
-              className="filter-control"
-              value={activeFilter}
-              onChange={(event) => {
-                setActiveFilter(event.target.value as ActiveFilter);
-                setPage(1);
-                setSelectedIds([]);
-              }}
-            >
-              <option value="true">{t("admin.status_active")}</option>
-              <option value="false">{t("admin.status_inactive")}</option>
-              <option value="all">{t("admin.status_all")}</option>
-            </select>
-          </div>
-          {/* Sprint 185 §3 — where the relationship IS, beside whether
-              the account is switched on. The one an operator reaches for
-              is "Notice period": who is leaving, and are we still
-              serving them properly. */}
-          <div className="filter-field">
-            <span className="filter-label">{t("customers.lifecycle")}</span>
-            <select
-              className="filter-control"
-              value={lifecycleFilter}
-              data-testid="customers-filter-lifecycle"
-              onChange={(event) => {
-                setLifecycleFilter(event.target.value);
-                setPage(1);
-                setSelectedIds([]);
-              }}
-            >
-              <option value="">{t("customers.lifecycle_all")}</option>
-              {CUSTOMER_LIFECYCLE_VALUES.map((value) => (
-                <option key={value} value={value}>
-                  {t(`customers.lifecycle_${value.toLowerCase()}`)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="filter-field">
-            <span className="filter-label">{t("company")}</span>
-            {/* Cap the Company select so it matches Search / Status / Building
-                instead of stretching the filter-bar's 1fr track. */}
-            <select
-              className="filter-control"
-              style={{ maxWidth: 220 }}
-              value={companyFilter === "" ? "" : String(companyFilter)}
-              onChange={(event) => {
-                const v = event.target.value;
-                setCompanyFilter(v === "" ? "" : Number(v));
-                setBuildingFilter("");
-                setPage(1);
-                setSelectedIds([]);
-              }}
-              disabled={companyDropdownDisabled}
-            >
-              <option value="">{t("admin.all_companies")}</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="filter-field">
-            <span className="filter-label">{t("building")}</span>
-            <select
-              className="filter-control"
-              value={buildingFilter === "" ? "" : String(buildingFilter)}
-              onChange={(event) => {
-                const v = event.target.value;
-                setBuildingFilter(v === "" ? "" : Number(v));
-                setPage(1);
-                setSelectedIds([]);
-              }}
-              disabled={companyFilter === "" || buildings.length === 0}
-            >
-              <option value="">{t("admin.all_buildings")}</option>
-              {buildings.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          </div>
           <div className="filter-actions">
             {hasActiveFilters && (
               <button
@@ -617,6 +553,7 @@ export function CustomersAdminPage() {
                 onClick={() => {
                   setSearchInput("");
                   setActiveFilter("true");
+                  setLifecycleFilter("");
                   if (!companyDropdownDisabled) setCompanyFilter("");
                   setBuildingFilter("");
                   setPage(1);
@@ -626,15 +563,153 @@ export function CustomersAdminPage() {
                 {t("clear")}
               </button>
             )}
+            {/* §D.6 rule 14 — the toggle has no title of its own, so the
+                reason it is off rides on the wrapper. */}
             {pageIds.length > 0 && (
-              <EditModeToggle
-                editMode={edit.editMode}
-                onToggle={edit.toggleMode}
-                disabled={bulkBusy}
-                testId="customers-edit-mode-toggle"
-              />
+              <span title={bulkBusy ? t("admin_list.edit_busy") : undefined}>
+                <EditModeToggle
+                  editMode={edit.editMode}
+                  onToggle={edit.toggleMode}
+                  disabled={bulkBusy}
+                  testId="customers-edit-mode-toggle"
+                />
+              </span>
             )}
           </div>
+          <details
+            className="filter-fold"
+            open={activeFilterChips.length > 0}
+            data-testid="customers-filter-fold"
+          >
+            <summary className="filter-fold-summary" data-testid="customers-filter-toggle">
+              <SlidersHorizontal size={14} strokeWidth={2.4} aria-hidden="true" />
+              {t("admin_list.filter_fold")}
+              {activeFilterChips.length > 0 && (
+                <span className="filter-fold-count">
+                  {t("admin_list.filter_active", { count: activeFilterChips.length })}
+                </span>
+              )}
+              {activeFilterChips.map((label) => (
+                <span className="filter-fold-chip" key={label}>
+                  {label}
+                </span>
+              ))}
+            </summary>
+            <div className="filter-fold-body">
+              <div className="filter-field">
+                <span className="filter-label">{t("status")}</span>
+                <select
+                  className="filter-control"
+                  value={activeFilter}
+                  onChange={(event) => {
+                    setActiveFilter(event.target.value as ActiveFilter);
+                    setPage(1);
+                    setSelectedIds([]);
+                  }}
+                >
+                  <option value="true">{t("admin.status_active")}</option>
+                  <option value="false">{t("admin.status_inactive")}</option>
+                  <option value="all">{t("admin.status_all")}</option>
+                </select>
+              </div>
+              {/* Sprint 185 §3 — where the relationship IS, beside whether
+                  the account is switched on. The one an operator reaches for
+                  is "Notice period": who is leaving, and are we still
+                  serving them properly. */}
+              <div className="filter-field">
+                <span className="filter-label">{t("customers.lifecycle")}</span>
+                <select
+                  className="filter-control"
+                  value={lifecycleFilter}
+                  data-testid="customers-filter-lifecycle"
+                  onChange={(event) => {
+                    setLifecycleFilter(event.target.value);
+                    setPage(1);
+                    setSelectedIds([]);
+                  }}
+                >
+                  <option value="">{t("customers.lifecycle_all")}</option>
+                  {CUSTOMER_LIFECYCLE_VALUES.map((value) => (
+                    <option key={value} value={value}>
+                      {lifecycleLabel(value)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="filter-field">
+                <span className="filter-label">{t("company")}</span>
+                {/* Cap the Company select so it matches Search / Status / Building
+                    instead of stretching the filter-bar's 1fr track. §D.6
+                    rule 14 — locked on a single-company deployment, and the
+                    title says so. */}
+                <select
+                  className="filter-control"
+                  style={{ maxWidth: 220 }}
+                  value={companyFilter === "" ? "" : String(companyFilter)}
+                  onChange={(event) => {
+                    const v = event.target.value;
+                    setCompanyFilter(v === "" ? "" : Number(v));
+                    setBuildingFilter("");
+                    setPage(1);
+                    setSelectedIds([]);
+                  }}
+                  disabled={companyDropdownDisabled}
+                  title={
+                    companyDropdownDisabled ? t("admin_list.company_single") : undefined
+                  }
+                >
+                  <option value="">{t("admin.all_companies")}</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                {companyDropdownDisabled && (
+                  <span className="muted small">{t("admin_list.company_single")}</span>
+                )}
+              </div>
+              {/* §D.6 rule 14 — the building filter is dead until a company
+                  is chosen (building ids are per company), and it SAYS so
+                  instead of sitting there grey. */}
+              <div className="filter-field">
+                <span className="filter-label">{t("building")}</span>
+                {companyFilter === "" ? (
+                  <span
+                    className="muted small"
+                    data-testid="customers-filter-building-needs-company"
+                  >
+                    {t("admin_list.building_needs_company")}
+                  </span>
+                ) : buildings.length === 0 ? (
+                  <span
+                    className="muted small"
+                    data-testid="customers-filter-building-none"
+                  >
+                    {t("admin_list.building_none")}
+                  </span>
+                ) : (
+                  <select
+                    className="filter-control"
+                    value={buildingFilter === "" ? "" : String(buildingFilter)}
+                    onChange={(event) => {
+                      const v = event.target.value;
+                      setBuildingFilter(v === "" ? "" : Number(v));
+                      setPage(1);
+                      setSelectedIds([]);
+                    }}
+                  >
+                    <option value="">{t("admin.all_buildings")}</option>
+                    {buildings.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+          </details>
         </form>
 
         {/* Sprint 153 §3.4 — the toolbar appears only with a selection. */}
@@ -741,7 +816,18 @@ export function CustomersAdminPage() {
                     role="link"
                     tabIndex={0}
                     aria-label={t("admin.view") + ": " + customer.name}
-                    onClick={openDetail}
+                    /* W14 §3 — one click, one history entry. The row
+                       navigates AND contains a `<Link>` to the same
+                       place, so a click on the link pushed twice and
+                       the browser's Back then landed on the page it was
+                       pressed from. Same defect, same fix, as the
+                       tickets list. */
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("a,button")) {
+                        return;
+                      }
+                      openDetail();
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
@@ -770,22 +856,17 @@ export function CustomersAdminPage() {
                       <Link to={detailPath}>{customer.name}</Link>
                     </td>
                     <td>{companyName(customer.company)}</td>
-                    <td>{customer.contact_email || "—"}</td>
+                    <td>
+                      {customer.contact_email || (
+                        <span className="muted-empty">{t("admin_list.no_email")}</span>
+                      )}
+                    </td>
                     <td>{customer.linked_building_count}</td>
                     <td>{customer.user_count}</td>
                     <td>{customer.contact_count}</td>
-                    <td>
-                      <span
-                        className={`cell-tag ${
-                          LIFECYCLE_TONE[customer.lifecycle] ?? "cell-tag-muted"
-                        }`}
-                        data-testid={`customers-lifecycle-${customer.id}`}
-                      >
-                        <i />
-                        {t(
-                          `customers.lifecycle_${(customer.lifecycle || "active").toLowerCase()}`,
-                        )}
-                      </span>
+                    {/* One pill family per row: the lifecycle is a word. */}
+                    <td data-testid={`customers-lifecycle-${customer.id}`}>
+                      {lifecycleLabel(customer.lifecycle)}
                     </td>
                     <td>
                       <span
@@ -868,6 +949,11 @@ export function CustomersAdminPage() {
                       <dt>{t("customers.col_contacts")}</dt>
                       <dd>{customer.contact_count}</dd>
                     </div>
+                    {/* P-6 V3 — the table's lifecycle column, mirrored. */}
+                    <div className="admin-card-meta-row">
+                      <dt>{t("customers.lifecycle")}</dt>
+                      <dd>{lifecycleLabel(customer.lifecycle)}</dd>
+                    </div>
                   </dl>
                 </Link>
                 <div className="admin-card-actions">
@@ -886,24 +972,27 @@ export function CustomersAdminPage() {
         </ul>
 
         {!loading && customers.length === 0 && (
-          <div className="empty-state">
-            <div className="empty-icon">＋</div>
-            <div className="empty-title">
-              {hasActiveFilters
+          <EmptyState
+            icon={Users}
+            title={
+              hasActiveFilters
                 ? t("customers.empty_filtered_title")
-                : t("customers.empty_initial_title")}
-            </div>
-            <p className="empty-sub">
-              {hasActiveFilters
+                : t("customers.empty_initial_title")
+            }
+            description={
+              hasActiveFilters
                 ? t("admin.empty_filtered_desc")
-                : t("customers.empty_initial_desc")}
-            </p>
-            {!hasActiveFilters && (
-              <Link className="btn btn-primary btn-sm" to="/admin/customers/new">
-                {t("customers.create")}
-              </Link>
-            )}
-          </div>
+                : t("customers.empty_initial_desc")
+            }
+            action={
+              !hasActiveFilters ? (
+                <Link className="btn btn-primary btn-sm" to="/admin/customers/new">
+                  {t("customers.create")}
+                </Link>
+              ) : undefined
+            }
+            testId="customers-empty"
+          />
         )}
 
         {(previous || next) && (
@@ -915,7 +1004,8 @@ export function CustomersAdminPage() {
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                disabled={loading || !previous || page <= 1}
+                disabled={previousLocked !== undefined}
+                title={previousLocked}
                 onClick={() => {
                   setPage((current) => Math.max(1, current - 1));
                   setSelectedIds([]);
@@ -926,7 +1016,8 @@ export function CustomersAdminPage() {
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                disabled={loading || !next}
+                disabled={nextLocked !== undefined}
+                title={nextLocked}
                 onClick={() => {
                   setPage((current) => current + 1);
                   setSelectedIds([]);
@@ -1238,6 +1329,12 @@ function CustomerQuickEditDialog({
               <option value="true">{t("admin.status_active")}</option>
               <option value="false">{t("admin.status_inactive")}</option>
             </select>
+            {/* §D.6 rule 14 — the sentence beside the locked control. */}
+            {statusLocked && (
+              <span className="muted small" data-testid="customer-quick-edit-status-locked">
+                {t("customer_view.settings.reactivate_consequence")}
+              </span>
+            )}
           </div>
         </div>
 
@@ -1272,6 +1369,7 @@ function CustomerQuickEditDialog({
               type="submit"
               className="btn btn-primary btn-sm"
               disabled={busy}
+              title={busy ? t("admin_list.saving_wait") : undefined}
               data-testid="customer-quick-edit-save"
             >
               {busy ? t("admin_form.saving") : t("admin_form.save_changes")}

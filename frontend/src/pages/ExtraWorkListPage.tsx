@@ -1,27 +1,37 @@
 // Sprint 26C — Extra Work list page.
 // Sprint 28 Batch 6 — translated through the `extra_work` i18n namespace.
-// Sprint 28 Batch 15.3 — rebuilt with KPI strip, filter bar, StatusBadge,
-//   formatMoney/formatDate, ClickableRow, mobile card list, EmptyState.
-//   Functional contract is unchanged; only the presentation layer moves.
-import type { LucideIcon } from "lucide-react";
+// P-8R A1 — every row the server returns is on this page; the guard line.
+// P-9 B — FOUR TABS. The list answers "where is my work?" the way the
+//   People page does: a `.customer-tabs` strip backed by the address
+//   (`/extra-work/<tab>`), one plain sentence per tab saying what the tab
+//   is for and what happens next, ONE money line, at most six columns
+//   with the row's one next step at the end, and the seven filter
+//   dropdowns folded behind one Filter button. The tab table lives in
+//   `lib/extraWorkTabs.ts` (exhaustive over `display_phase`), the next
+//   step in `components/extra-work/nextStep.ts` (the detail page's own
+//   source). Cancelled is not a tab: it is a link at the foot of
+//   Finished, and the P-8 guard still adds up over it.
+// P-10 B1/B2 — the chips say the ticket's own status words (the table
+//   in `lib/extraWorkTabs.ts`), each tab opens on the chip with work to
+//   do (`DEFAULT_CHIP`), and the chosen chip rides in the address
+//   (`?chip=<key>`) so a reload lands where the person was.
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  CheckCircle2,
-  Clock,
-  Inbox,
-  PlusCircle,
-  Search,
-  Sparkles,
-  Wallet,
-} from "lucide-react";
+  Link,
+  Navigate,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
+import { PlusCircle, Search, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { listAllCustomers, listCustomerBuildings } from "../api/admin";
 import { listLabels } from "../api/customerLabels";
 import {
   bulkAssignExtraWork,
+  bulkPlanExtraWork,
   bulkSetExtraWorkDates,
   listAllExtraWork,
   listExtraWorkAssignmentCandidates,
@@ -34,202 +44,125 @@ import type {
   ExtraWorkAssignmentRole,
   CustomerBuildingMembership,
   CustomerLabel,
-  ExtraWorkBilledTo,
-  ExtraWorkCategory,
+  ExtraWorkBulkPlanItem,
   ExtraWorkRequestIntent,
   ExtraWorkRequestList,
-  ExtraWorkStatus,
-  TicketStatus,
 } from "../api/types";
 import { getApiError } from "../api/client";
+import { describeExtraWorkRefusal } from "../lib/extraWorkRefusal";
 import { useAuth } from "../auth/AuthContext";
 import { isProviderManagementRole } from "../auth/permissions";
+import { StartHere } from "../components/guide/StartHere";
 import { ChoiceDialog } from "../components/ChoiceDialog";
-import { StatusTiles } from "../components/StatusTiles";
-import { TrackTabs } from "../components/extra-work/TrackTabs";
-import type { ExtraWorkTrack } from "../components/extra-work/TrackTabs";
-import { SpawnedTicketLinks } from "../components/extra-work/SpawnedTicketLinks";
-import {
-  extraWorkStatusLabelKey,
-  ticketStatusLabelKey,
-} from "../lib/enumLabels";
 import { EditModeToggle } from "../components/EditModeToggle";
+import { WhatHappens } from "../components/guide/WhatHappens";
+import { BulkPlanDialog } from "../components/extra-work/BulkPlanDialog";
+import { listNextStep } from "../components/extra-work/nextStep";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
 import { useEditMode } from "../lib/useEditMode";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
-import { RouteBadge } from "../components/RouteBadge";
-import { StatusBadge } from "../components/StatusBadge";
+import { PhaseBadge } from "../components/customer/PhaseBadge";
+import { SeriesHeaderRow } from "../components/extra-work/SeriesHeaderRow";
+import { foldSeries } from "../lib/extraWorkSeries";
 import { isPriced, rowAmounts } from "../lib/billing";
-import { formatDate, formatMoney } from "../lib/intl";
-import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
+import { formatDate, formatMoney, formatNumber } from "../lib/intl";
 import { customerLabelName } from "../lib/customerLabelName";
-
-const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
-  DEEP_CLEANING: "category.deep_cleaning",
-  WINDOW_CLEANING: "category.window_cleaning",
-  FLOOR_MAINTENANCE: "category.floor_maintenance",
-  SANITARY_SERVICE: "category.sanitary_service",
-  WASTE_REMOVAL: "category.waste_removal",
-  FURNITURE_MOVING: "category.furniture_moving",
-  EVENT_CLEANING: "category.event_cleaning",
-  EMERGENCY_CLEANING: "category.emergency_cleaning",
-  OTHER: "category.other",
-};
-
-// Sprint 182 §2 — this page's private status-label map is gone.
-//
-// It pointed at `extra_work:status.*`, where CUSTOMER_APPROVED reads
-// "Customer approved", while the badge two lines below rendered
-// `common:extra_work_status.*`, where the same status reads "Price
-// approved" — the crisp name, because what the customer approved is the
-// QUOTE. One row could therefore say one thing on screen and another in
-// the CSV taken from it. `extraWorkStatusLabelKey` is the one source now.
-
-/** Sprint 180 §3 — the two billing targets. A `Record` over the union
- *  rather than a second array literal: adding a third value to
- *  `ExtraWorkBilledTo` then fails the compiler here instead of rendering
- *  a blank cell (CLAUDE.md — a hardcoded array defeats exhaustiveness
- *  checking, which is how Sprint 126's headerless column shipped). */
-const BILLED_TO_I18N_KEY: Record<ExtraWorkBilledTo, string> = {
-  BUILDING: "billed_to.building",
-  CUSTOMER: "billed_to.customer",
-};
-
-/**
- * Sprint 181 §2 — nine chips became four, twice.
- *
- * The list used to show all nine Extra Work statuses as chips on both
- * tracks. The tracks already answer the biggest question, so the chips
- * were repeating it — and worse, most of them were STRUCTURALLY zero
- * wherever they sat. "In progress" and "Completed" cannot occur in a
- * track defined as "has no ticket"; "Awaiting pricing" cannot occur in
- * one defined as "the price is agreed and the work has begun". A chip
- * that can only ever read 0 costs attention and returns nothing.
- *
- * So each track offers only what can be non-zero within it, and the two
- * sets are of DIFFERENT KINDS, which is the whole of §1:
- *
- *   Quote & price   commercial states, read off the EXTRA WORK.
- *   Work started    operational states, read off the TICKET.
- *
- * `REQUESTED` and `UNDER_REVIEW` collapse into one chip: they are two
- * spellings of "nobody has priced this yet", and which one a row is in
- * changes nothing anybody does next.
- */
-interface ChipSpec<TStatus extends string> {
-  /** Group key. A chip can stand for several statuses, so this is not
-   *  necessarily an enum member. */
-  value: string;
-  statuses: ReadonlyArray<TStatus>;
-  labelKey: string;
-}
-
-const QUOTE_TRACK_CHIPS: ReadonlyArray<ChipSpec<ExtraWorkStatus>> = [
-  {
-    value: "AWAITING_PRICING",
-    statuses: ["REQUESTED", "UNDER_REVIEW"],
-    labelKey: "list.chip_awaiting_pricing",
-  },
-  {
-    value: "PRICING_PROPOSED",
-    statuses: ["PRICING_PROPOSED"],
-    labelKey: "list.chip_with_customer",
-  },
-  {
-    value: "CUSTOMER_REJECTED",
-    statuses: ["CUSTOMER_REJECTED"],
-    labelKey: "list.chip_rejected",
-  },
-  {
-    value: "CANCELLED",
-    statuses: ["CANCELLED"],
-    labelKey: "list.chip_cancelled",
-  },
-];
-
-/** Sprint 181 §1/§2 — the Work started chips are TICKET states, because
- *  on that track the ticket is the only authority for how the work is
- *  going. `WAITING_MANAGER_REVIEW` and `REOPENED_BY_ADMIN` fold into
- *  "In progress" (internal hops, not states this list needs a chip for),
- *  and both finished states fold into one "Finished" — an operator
- *  scanning the list wants to know whether it is done, not which of two
- *  doors it left by. */
-const STARTED_TRACK_CHIPS: ReadonlyArray<ChipSpec<TicketStatus>> = [
-  { value: "OPEN", statuses: ["OPEN"], labelKey: "list.chip_ticket_open" },
-  {
-    value: "IN_PROGRESS",
-    statuses: ["IN_PROGRESS", "WAITING_MANAGER_REVIEW", "REOPENED_BY_ADMIN"],
-    labelKey: "list.chip_ticket_in_progress",
-  },
-  {
-    value: "WAITING_CUSTOMER_APPROVAL",
-    statuses: ["WAITING_CUSTOMER_APPROVAL"],
-    labelKey: "list.chip_ticket_waiting_customer",
-  },
-  {
-    value: "FINISHED",
-    statuses: ["APPROVED", "CLOSED"],
-    labelKey: "list.chip_ticket_finished",
-  },
-];
-
-/** "" = no chip selected (the All tile). A chip value is a GROUP key,
- *  not necessarily a raw enum member. */
-type StatusFilter = string;
-
-/** Sprint 181 §1 — the operational status of a row on the Work started
- *  track, read off its ticket. The lowest-id ticket is the spawned one
- *  (`build_ticket_map` picks the same row), and one ticket per Extra
- *  Work has been the rule since Sprint 6A, so this is a lookup rather
- *  than a reduction. */
-function operationalStatus(row: ExtraWorkRequestList): TicketStatus | null {
-  return row.spawned_tickets[0]?.status ?? null;
-}
+import {
+  ALL_CHIP,
+  CANCELLED_VIEW,
+  DEFAULT_CHIP,
+  EXTRA_WORK_TABS,
+  SUB_CHIPS,
+  TAB_LABEL_KEY,
+  TAB_PURPOSE_KEY,
+  BUCKET_LABEL_KEY,
+  bucketOf,
+  chipFromParam,
+  daysSince,
+  deepLinkTarget,
+  firstTabWithRows,
+  isExtraWorkTab,
+  otherTabMatches,
+  searchMatches,
+  startsWhenPriced,
+  subChipMatches,
+  todayIso,
+} from "../lib/extraWorkTabs";
+import type {
+  DeepLinkTarget,
+  ExtraWorkBucket,
+  ExtraWorkTab,
+} from "../lib/extraWorkTabs";
 
 /** Sprint 180 §1(b) — a CUSTOMER_APPROVED request with zero operational
- *  tickets. It stays on the Quote & price track (operationally nothing
- *  has started, which is what the track means) but it is NOT normal: the
- *  spawn is synchronous with approval, so zero tickets means the spawn
- *  FAILED. A recovery button already exists on the detail page
- *  (POST /api/extra-work/<id>/spawn/); silence here is how that work
- *  gets lost. */
+ *  tickets. The spawn is synchronous with approval, so zero tickets
+ *  means the spawn FAILED. The detail page has the retry button;
+ *  silence here is how that work gets lost. */
 function isSpawnAnomaly(row: ExtraWorkRequestList): boolean {
   return row.status === "CUSTOMER_APPROVED" && !row.has_operational_ticket;
 }
-// Sprint 143 §6 — the filter is a catalog category NAME now, not an
-// `ExtraWorkCategory` enum member. "" = no filter. The enum still drives
-// the table's own "Categorie" COLUMN (a different field on the request,
-// left alone this sprint — see `## NEXT`), which is exactly why the two
-// were confusable and why this filter had to stop using it.
+
+/** Asked more than this many days ago and still unpriced reads red. */
+const AGE_WARN_DAYS = 5;
+
 type CategoryFilter = string;
 
-interface ExtraWorkKpis {
-  open: number; // REQUESTED + UNDER_REVIEW
-  awaiting: number; // PRICING_PROPOSED
-  approved: number; // CUSTOMER_APPROVED
-  totalValue: string; // decimal-string sum of earned amounts (excludes CANCELLED)
-}
+/** The columns of one tab, in render order. Page-local: nothing else
+ *  renders these tables. The next step is always the last column. */
+type ColumnKey =
+  | "what"
+  | "where"
+  | "asked"
+  | "after_pricing"
+  | "estimate"
+  | "sent"
+  | "price"
+  | "status"
+  | "planned"
+  | "people"
+  | "finished"
+  | "amount"
+  | "invoice"
+  | "next";
+
+const COLUMNS: Readonly<Record<ExtraWorkBucket, ReadonlyArray<ColumnKey>>> = {
+  "to-price": ["what", "where", "asked", "after_pricing", "estimate", "next"],
+  "with-customer": ["what", "where", "sent", "price", "status", "next"],
+  approved: ["what", "where", "planned", "people", "status", "next"],
+  finished: ["what", "where", "finished", "amount", "invoice", "next"],
+  cancelled: ["what", "where", "asked", "status", "next"],
+};
+
+const COLUMN_LABEL_KEY: Readonly<Record<ColumnKey, string>> = {
+  what: "list.column_what",
+  where: "list.column_where",
+  asked: "list.column_asked",
+  after_pricing: "list.column_after_pricing",
+  estimate: "list.column_estimate",
+  sent: "list.column_sent",
+  price: "list.column_price",
+  status: "list.column_status",
+  planned: "list.column_planned",
+  people: "list.column_people",
+  finished: "list.column_finished",
+  amount: "list.column_amount",
+  invoice: "list.column_invoice",
+  next: "list.column_next",
+};
+
+const RIGHT_ALIGNED: ReadonlySet<ColumnKey> = new Set(["estimate", "price", "amount"]);
 
 /** Sprint 176 §3 — set the deadline and/or the planned end on a selection.
  *
- *  The whole point of this dialog is what it does NOT send. Every field
- *  starts blank meaning "leave unchanged", exactly like every other bulk
- *  field in the app, and a blank field is OMITTED from the payload rather
- *  than sent as null — the server reads key presence, so an omitted key
- *  leaves the stored date alone. Without that, bulk-setting a deadline
- *  across ten rows would silently wipe the planned end date on the one row
- *  that had one.
- *
- *  Which means this dialog can SET a date but not CLEAR one: a blank
- *  field is already spoken for by "leave unchanged", and two different
- *  intentions cannot share one blank input. Clearing is deliberate,
- *  per-request work — the Details card's date editor does it. Offering a
- *  bulk clear would need a third state (a checkbox per field), and the
- *  operation it enables, wiping a date across a selection, is not one
- *  worth making easy to reach by accident. */
+ *  Every field starts blank meaning "leave unchanged", exactly like every
+ *  other bulk field in the app, and a blank field is OMITTED from the
+ *  payload rather than sent as null — the server reads key presence, so
+ *  an omitted key leaves the stored date alone. This dialog can SET a
+ *  date but not CLEAR one; clearing is per-request work on the detail
+ *  page. */
 function BulkDatesDialog({
   count,
   busy,
@@ -260,10 +193,9 @@ function BulkDatesDialog({
   }
 
   return (
-    // Same overlay idiom as `AssignPeopleDialog` next door — an inline
-    // positioned backdrop plus a `card`, NOT a native <dialog>. CLAUDE.md
-    // records why the imperative ones are trouble when mounted
-    // conditionally; this one is plain markup and mounts safely.
+    // Same overlay idiom as `AssignPeopleDialog` — an inline positioned
+    // backdrop plus a `card`, NOT a native <dialog> (CLAUDE.md records
+    // why the imperative ones are trouble when mounted conditionally).
     <div
       role="presentation"
       style={{
@@ -358,91 +290,77 @@ function BulkDatesDialog({
   );
 }
 
-function KpiCard({
-  icon: Icon,
-  label,
-  value,
-  meta,
-  testId,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: ReactNode;
-  meta: string;
-  testId: string;
-}) {
-  return (
-    <div className="ew-kpi-card" data-testid={testId}>
-      <div className="ew-kpi-card-icon" aria-hidden="true">
-        <Icon size={18} strokeWidth={1.9} />
-      </div>
-      <div className="ew-kpi-card-body">
-        <div className="ew-kpi-card-label">{label}</div>
-        <div className="ew-kpi-card-value">{value}</div>
-        <div className="ew-kpi-card-meta">{meta}</div>
-      </div>
-    </div>
-  );
-}
-
 /**
  * Sprint 169 §8 — ONE extra-work list, mounted twice.
  *
- * `CustomerExtraWorkPage` was a 296-line read-only re-implementation of
- * this 1202-line page: no checkbox column, no `MultiSelectToolbar`, no
- * `useEditMode`, no bulk assignment, no bulk status action. Everything
- * Sprints 158-164 built here was missing there, because they were two
- * independently-maintained copies of the same list — the failure mode
- * CLAUDE.md names explicitly.
- *
- * Copying the features across would have produced two copies that drift
- * again. So the list is this component, and the difference between the
- * two entry points is ONE prop:
- *
  *   from the sidebar        no customer fixed, the customer filter is
- *                           offered;
+ *                           offered, the tab is in the PATH
+ *                           (`/extra-work/<tab>`);
  *   from inside a customer  the customer is fixed and its filter is not
- *                           offered. Everything else is identical.
+ *                           offered; the tab lives in `?tab=`, because
+ *                           the customer page owns the path.
  *
- * Fixing the customer is a UI convenience and nothing more. The request
- * carries `customer=<id>` exactly as the picker would have set it, and
- * the SERVER still decides what the actor may see — a customer id the
- * actor has no access to returns their own rows, not that customer's.
+ * Fixing the customer is a UI convenience and nothing more: the SERVER
+ * still decides what the actor may see.
  */
 export function ExtraWorkList({
   customerId,
   hideHeader = false,
+  tab,
 }: {
   customerId?: number;
   /** The customer page draws its own header, so this one is suppressed
    *  rather than stacked under it. */
   hideHeader?: boolean;
+  /** The tab the route names (`/extra-work/<tab>`). Undefined on the
+   *  bare `/extra-work`, which lands on the first tab that has rows. */
+  tab?: ExtraWorkTab;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { me } = useAuth();
-  // M6.3 — additive "my work" deep-link reads. With both params absent
-  // these resolve to undefined below, so the fetch is unchanged.
+  // Read-only: every tab, chip-carrying redirect and view change is a
+  // <Link>, so the address stays the one source and Back works.
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
-  // Provider-only: the billing-month picker, invoice-status filter, and the
-  // invoiced column. The backend redacts the billing fields for CUSTOMER_USER
-  // anyway; this also hides the controls from them.
   const isProvider = isProviderManagementRole(me?.role);
+  const embedded = customerId !== undefined;
+  const today = todayIso();
+
+  // The deep links this address still honours, read once at mount:
+  // `?status=<ExtraWorkStatus|phase>` (dashboard widgets, RF-18) lands
+  // on the tab that holds it and preselects the matching chip;
+  // `?filter=quote_requests` (the customer page's Quotes shortcut) is
+  // the To price tab. P-10 B2 — the chip a deep link preselects is
+  // WRITTEN to the address (`?chip=`) by the redirect below, so nothing
+  // rides in `location.state` any more.
+  const [deepLink] = useState<DeepLinkTarget | null>(() => {
+    const byStatus = deepLinkTarget(searchParams.get("status"));
+    if (byStatus) return byStatus;
+    if (searchParams.get("filter") === "quote_requests") {
+      return { bucket: "to-price", chip: null };
+    }
+    return null;
+  });
+
+  const viewCancelled = searchParams.get("view") === CANCELLED_VIEW;
+  const urlTab = embedded ? searchParams.get("tab") : tab;
+  const namedTab: ExtraWorkTab | null = isExtraWorkTab(urlTab) ? urlTab : null;
+
   // Sprint 155 §1b — the create button asks which of the three.
   const [chooserOpen, setChooserOpen] = useState(false);
-  // Sprint 157 §2 — assign people to several requests at once, behind
-  // the Sprint 155 §4 edit gate like every other list.
+  // Sprint 157 §2 / W3-F / Sprint 176 §3 — the three bulk actions,
+  // behind the Sprint 155 §4 edit gate like every other list.
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignBusy, setAssignBusy] = useState(false);
   const [assignError, setAssignError] = useState("");
-  // Sprint 176 §3 — bulk deadline / planned end, behind the same edit gate.
+  const [planOpen, setPlanOpen] = useState(false);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planError, setPlanError] = useState("");
   const [datesOpen, setDatesOpen] = useState(false);
   const [datesBusy, setDatesBusy] = useState(false);
   const [datesError, setDatesError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
-  // Sprint 159 §2 — BOTH roles at once, so both candidate lists are
-  // held. Keyed by role because eligibility differs between them and one
-  // shared list would offer a worker as a manager.
   const [assignCandidates, setAssignCandidates] = useState<
     Record<ExtraWorkAssignmentRole, AssignmentCandidate[]>
   >({ WORKER: [], MANAGER: [] });
@@ -450,68 +368,26 @@ export function ExtraWorkList({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Filter state (client-side; the backend list endpoint IS paginated, but
-  // Sprint 120 switched this page to `listAllExtraWork`, which pages
-  // through every `next` until exhausted (capped, see api/extraWork.ts) —
-  // so `rows` below is the FULL matching set regardless of how many pages
-  // that takes, and filtering happens over the complete set, not one page.
+  // Each tab remembers its own sub-chip, so switching tabs and back
+  // does not lose a narrowing and a chip of one tab never narrows
+  // another. The address (`?chip=`) is the source for the tab on
+  // screen; this is the memory the tab links carry along. No entry
+  // means the tab's default chip (P-10 B2).
+  const [chipByTab, setChipByTab] = useState<Partial<Record<ExtraWorkBucket, string>>>(
+    () => (deepLink?.chip ? { [deepLink.bucket]: deepLink.chip } : {}),
+  );
+
+  // The Filter fold. The four cascade filters and the category are
+  // SERVER-side (they compose in `ExtraWorkRequestFilter`); planned and
+  // search narrow the loaded rows on the client.
   const [searchInput, setSearchInput] = useState("");
-  // Sprint 180 §1 — which of the two tracks is on screen. A VIEW, not a
-  // filter: one of the two is always selected, and each carries its own
-  // columns. Quote & price opens first because that is where work
-  // arrives and where somebody has to act on it. A deep link that lands
-  // on the wrong track is not left stranded — the empty state names the
-  // other one and offers the click (see the EmptyState `action` below).
-  const [track, setTrack] = useState<ExtraWorkTrack>("QUOTE");
-  // RF-18 (#107) — dashboard widgets deep-link with ?status=<EW status>;
-  // read once at mount (validated), the chips own the state after.
-  //
-  // Sprint 181 §2 — the chips are GROUPS now, so a deep link naming a
-  // raw status is matched against the groups rather than compared to
-  // one. A link to `?status=REQUESTED` lands on the "Awaiting pricing"
-  // chip, which is where that row now lives; an unrecognised value
-  // falls through to no filter rather than to an empty screen.
-  //
-  // Sprint 158's "open on what has not been actioned" default is GONE,
-  // and deliberately: it only ever made sense for one of the two
-  // tracks, and since Sprint 180 the track already answers "what should
-  // I look at". Opening pre-filtered on a chip the operator did not
-  // pick is the same confusion §2 is removing, one level up.
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
-    const raw = new URLSearchParams(window.location.search).get("status");
-    if (!raw || raw === "ALL") return "";
-    const match = QUOTE_TRACK_CHIPS.find((chip) =>
-      (chip.statuses as readonly string[]).includes(raw),
-    );
-    return match ? match.value : "";
-  });
+  // P-11 A5 — the cross-tab result list, opened from the one line
+  // under the results. Folded again when the search is cleared (the
+  // line renders only while a needle is typed).
+  const [elsewhereOpen, setElsewhereOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("");
   const [categoryOptions, setCategoryOptions] =
     useState<ExtraWorkCategoryOptions>({ live: [], historical: [] });
-
-  // Server-side filters (M4): these drive the 2d list endpoint
-  // (?billing_period / ?invoice_status). Search / status / category stay
-  // client-side. "" = no billing-month filter.
-  const [billingMonth, setBillingMonth] = useState("");
-  const [invoiceStatus, setInvoiceStatus] = useState<
-    "ALL" | "completed" | "invoiced"
-  >("ALL");
-
-  // Sprint 128 — provider label-cascade filters (Customer -> Building ->
-  // Department -> Work Type), all four server-side (they compose in the
-  // backend ExtraWorkRequestFilter). Building / Department / Work Type are
-  // per-customer, so they are disabled until a customer is chosen and cleared
-  // when it changes. Provider-only: a CUSTOMER_USER is already scoped to one
-  // customer, so a customer picker is meaningless for them.
-  // Seeded from the fixed customer when there is one. A plain initial
-  // value, not an effect: syncing a prop into state through an effect is
-  // the pattern CLAUDE.md bans, and the component is keyed by customer
-  // id at the mount site so a change remounts it.
-  const [deadlineSort, setDeadlineSort] = useState<"" | "asc" | "desc">("");
-  // Sprint 174 §4d — a FILTER, never a mode. Default ALL, and it is
-  // visible and clearable: the owner was explicit that planned extra
-  // work must still be findable if he changes his mind about planning
-  // it, so nothing may hide rows with no way back.
   const [plannedFilter, setPlannedFilter] = useState<
     "ALL" | "PLANNED" | "UNPLANNED"
   >("ALL");
@@ -522,8 +398,6 @@ export function ExtraWorkList({
   const [departmentFilter, setDepartmentFilter] = useState("");
   const [workTypeFilter, setWorkTypeFilter] = useState("");
   const [customers, setCustomers] = useState<CustomerAdmin[]>([]);
-  // The chosen customer's buildings + label lists, tagged with the customer
-  // id so a stale set from the previously chosen customer is never offered.
   const [customerScoped, setCustomerScoped] = useState<{
     customerId: number;
     buildings: CustomerBuildingMembership[];
@@ -531,9 +405,12 @@ export function ExtraWorkList({
     workTypes: CustomerLabel[];
   } | null>(null);
 
-  // #108 Part F — the mark/clear-invoiced run moved to the Facturen
-  // page (owner decision); this list keeps the billing-month +
-  // invoice-status FILTERS and a pointer link to /invoices.
+  // M6.3 — the "my work" deep-link reads. Read as VALUES so a `?tab=`
+  // or `?view=` change in embedded mode does not refetch the list.
+  const mineParam = searchParams.get("mine") === "1";
+  const intentParam =
+    (searchParams.get("request_intent") as ExtraWorkRequestIntent | null) ??
+    undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -541,22 +418,12 @@ export function ExtraWorkList({
       setError("");
       try {
         const allRows = await listAllExtraWork({
-          billing_period: billingMonth || undefined,
-          invoice_status: invoiceStatus === "ALL" ? undefined : invoiceStatus,
-          created_by:
-            searchParams.get("mine") === "1" && me?.id ? me.id : undefined,
-          request_intent:
-            (searchParams.get("request_intent") as
-              | ExtraWorkRequestIntent
-              | null) ?? undefined,
-          // Sprint 128 — the label cascade (all server-side). A foreign /
-          // stale child filter simply narrows to zero rows (scope-safe).
+          created_by: mineParam && me?.id ? me.id : undefined,
+          request_intent: intentParam,
           customer: customerFilter ? Number(customerFilter) : undefined,
           building: buildingFilter ? Number(buildingFilter) : undefined,
           department: departmentFilter ? Number(departmentFilter) : undefined,
           work_type: workTypeFilter ? Number(workTypeFilter) : undefined,
-          // Sprint 143 §6 — server-side now (was a client-side enum
-          // compare over rows that had already been fetched).
           category: categoryFilter || undefined,
         });
         if (!cancelled) setRows(allRows);
@@ -571,26 +438,17 @@ export function ExtraWorkList({
       cancelled = true;
     };
   }, [
-    billingMonth,
-    invoiceStatus,
-    searchParams,
+    mineParam,
+    intentParam,
     me?.id,
     customerFilter,
     buildingFilter,
     departmentFilter,
     workTypeFilter,
     categoryFilter,
-    // Sprint 176 §3 — a bulk date write changes rows this list is
-    // showing, so it bumps this counter to re-run the load. A counter
-    // rather than a hoisted `load()`: the fetch is guarded by the
-    // effect's own `cancelled` flag, and calling it from outside would
-    // escape that guard.
     reloadKey,
   ]);
 
-  // Sprint 143 §6 — the category dropdown's two groups. Own effect
-  // because it does not depend on any filter; a failure leaves the
-  // dropdown with just "all", which still lists everything.
   useEffect(() => {
     let cancelled = false;
     listExtraWorkCategoryOptions()
@@ -605,8 +463,6 @@ export function ExtraWorkList({
     };
   }, []);
 
-  // Sprint 128 — load the customer list once (provider only; a CUSTOMER_USER
-  // has no customer picker).
   useEffect(() => {
     if (!isProvider) return;
     let cancelled = false;
@@ -622,25 +478,22 @@ export function ExtraWorkList({
     };
   }, [isProvider]);
 
-  // Sprint 128 — LOAD-ONLY effect (no synchronous setState — CLAUDE.md §3):
-  // when the customer filter changes, load the chosen customer's buildings +
-  // active label lists. The three dependent filters are CLEARED in the
-  // customer <select> onChange (an event handler, not here), so a stale child
-  // id never reaches the fetch; `customerScoped` is guarded by customer id
-  // below so a stale option set is never shown either.
+  // Sprint 128 — LOAD-ONLY effect: the chosen customer's buildings and
+  // labels. The dependent filters are cleared in the <select>'s
+  // onChange, never here (CLAUDE.md: no setState in an effect body).
   useEffect(() => {
-    const customerId = customerFilter ? Number(customerFilter) : null;
-    if (!customerId) return;
+    const chosen = customerFilter ? Number(customerFilter) : null;
+    if (!chosen) return;
     let cancelled = false;
     Promise.all([
-      listCustomerBuildings(customerId),
-      listLabels(customerId, "department", { is_active: true }),
-      listLabels(customerId, "work_type", { is_active: true }),
+      listCustomerBuildings(chosen),
+      listLabels(chosen, "department", { is_active: true }),
+      listLabels(chosen, "work_type", { is_active: true }),
     ])
       .then(([buildingsRes, departments, workTypes]) => {
         if (!cancelled) {
           setCustomerScoped({
-            customerId,
+            customerId: chosen,
             buildings: buildingsRes.results,
             departments,
             workTypes,
@@ -650,7 +503,7 @@ export function ExtraWorkList({
       .catch(() => {
         if (!cancelled) {
           setCustomerScoped({
-            customerId,
+            customerId: chosen,
             buildings: [],
             departments: [],
             workTypes: [],
@@ -662,175 +515,120 @@ export function ExtraWorkList({
     };
   }, [customerFilter]);
 
-  // Sprint 180 §1 — the two tracks, split on the ONE question: has an
-  // operational ticket been born from this extra work? The answer comes
-  // from the server (`has_operational_ticket`, resolved through the
-  // canonical `Ticket.extra_work_request` FK — the same definition the
-  // invoice run uses), so this list cannot drift from the money.
-  const trackRows = useMemo(() => {
-    const quote: ExtraWorkRequestList[] = [];
-    const started: ExtraWorkRequestList[] = [];
-    for (const row of rows) {
-      (row.has_operational_ticket ? started : quote).push(row);
-    }
-    return { QUOTE: quote, STARTED: started };
-  }, [rows]);
-
-  const activeTrackRows = trackRows[track];
-  const isWorkStarted = track === "STARTED";
-  const otherTrack: ExtraWorkTrack = isWorkStarted ? "QUOTE" : "STARTED";
-
-  // Switching track is a VIEW change with two pieces of clean-up, and
-  // both belong in the event handler rather than an effect (syncing
-  // state through an effect body is the pattern CLAUDE.md bans).
-  const switchTrack = useCallback((value: ExtraWorkTrack) => {
-    setTrack(value);
-    // The two tracks hold different statuses almost by definition, so
-    // carrying "REQUESTED" onto Work started would show an empty table
-    // and read as "there is nothing here" rather than "you are still
-    // filtered".
-    setStatusFilter("ALL");
-    if (value === "QUOTE") {
-      // The two invoice filters have no control on this track, so they
-      // must not stay applied behind its back.
-      setBillingMonth("");
-      setInvoiceStatus("ALL");
-    }
-  }, []);
-
-  // §1(b) — approved-but-never-spawned rows, counted for the Quote &
-  // price tab's marker. They stay on this track (nothing operational has
-  // started) but they are a failure, not a state.
-  const spawnAnomalyCount = useMemo(
-    () => trackRows.QUOTE.filter(isSpawnAnomaly).length,
-    [trackRows],
-  );
-
-  // Sprint 181 §1/§2 — the chips for the ACTIVE track, with their real
-  // counts. Which set is on screen is the same question as which status
-  // the rows are judged by, so both come from one place: on Quote &
-  // price the Extra Work's own status, on Work started the ticket's.
-  //
-  // Counts come from the track's rows, not from `visibleRows` — every
-  // chip but the active one would otherwise read zero — and not from
-  // the whole set, or a chip would promise rows that live on the other
-  // track (Sprint 180).
-  const chips = isWorkStarted ? STARTED_TRACK_CHIPS : QUOTE_TRACK_CHIPS;
-
-  const chipMatches = useCallback(
-    (row: ExtraWorkRequestList, chipValue: string): boolean => {
-      const spec = (
-        chips as ReadonlyArray<ChipSpec<string>>
-      ).find((c) => c.value === chipValue);
-      if (!spec) return false;
-      const status = isWorkStarted ? operationalStatus(row) : row.status;
-      return status !== null && spec.statuses.includes(status);
-    },
-    [chips, isWorkStarted],
-  );
-
-  const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const chip of chips) {
-      counts[chip.value] = activeTrackRows.filter((row) =>
-        chipMatches(row, chip.value),
-      ).length;
-    }
-    return counts;
-  }, [activeTrackRows, chips, chipMatches]);
-
-  // KPI strip — computed from the full loaded set (not the filtered
-  // view, and not the active track) so the operator always sees the same
-  // headline numbers regardless of which filter is active. `rows` is the
-  // COMPLETE matching set (Sprint 120 — listAllExtraWork exhausts every
-  // page), so these totals no longer silently undercount past 100 rows.
-  // A backend aggregation endpoint remains a future option if request
-  // volume on very large tenants becomes a real cost; not needed for
-  // correctness.
-  const kpis = useMemo<ExtraWorkKpis>(() => {
-    let open = 0;
-    let awaiting = 0;
-    let approved = 0;
-    let totalNum = 0;
-    for (const r of rows) {
-      if (r.status === "REQUESTED" || r.status === "UNDER_REVIEW") open += 1;
-      else if (r.status === "PRICING_PROPOSED") awaiting += 1;
-      else if (r.status === "CUSTOMER_APPROVED") approved += 1;
-      // Earned = final actual-hours amount when present, else the quoted
-      // estimate (rowAmounts — the shared billing rule the /invoices widget
-      // uses), so this KPI agrees with the per-row Total column below.
-      if (r.status !== "CANCELLED") {
-        totalNum += rowAmounts(r).total;
-      }
-    }
-    return {
-      open,
-      awaiting,
-      approved,
-      totalValue: totalNum.toFixed(2),
+  // ---- bucketing -------------------------------------------------------
+  // Every row is bucketed ONCE by `display_phase` through the exhaustive
+  // tab table. `unmatched` is only reachable when the server sends a
+  // phase this build's union does not have; it is counted, never
+  // dropped, and the guard under the table goes red over it.
+  const { counts, unmatchedCount } = useMemo(() => {
+    const tally: Record<ExtraWorkBucket, number> = {
+      "to-price": 0,
+      "with-customer": 0,
+      approved: 0,
+      finished: 0,
+      cancelled: 0,
     };
+    let unmatched = 0;
+    for (const row of rows) {
+      const bucket = bucketOf(row);
+      if (bucket === null) unmatched += 1;
+      else tally[bucket] += 1;
+    }
+    return { counts: tally, unmatchedCount: unmatched };
   }, [rows]);
+  const countedTotal =
+    EXTRA_WORK_TABS.reduce((sum, key) => sum + counts[key], 0) +
+    counts.cancelled +
+    unmatchedCount;
 
-  const visibleRows = useMemo(() => {
-    const needle = searchInput.trim().toLowerCase();
-    const filtered = activeTrackRows.filter((r) => {
-      // Sprint 181 §2 — a chip stands for a GROUP of statuses, and on
-      // the Work started track for a group of TICKET statuses.
-      if (statusFilter && !chipMatches(r, statusFilter)) return false;
-      if (needle) {
-        const hay = `${r.title} ${r.building_name ?? ""} ${
-          r.customer_name ?? ""
-        }`.toLowerCase();
-        if (!hay.includes(needle)) return false;
+  // The tab on screen. Path mode without a tab is AUTO mode and redirects
+  // below; embedded mode without `?tab=` simply shows the first tab that
+  // has rows (the deep link wins when there is one).
+  const autoTab: ExtraWorkTab = (() => {
+    if (deepLink && deepLink.bucket !== CANCELLED_VIEW) return deepLink.bucket;
+    return firstTabWithRows(counts);
+  })();
+  const activeTab: ExtraWorkTab = namedTab ?? autoTab;
+  const activeBucket: ExtraWorkBucket = viewCancelled ? CANCELLED_VIEW : activeTab;
+  // P-10 B2 — the address names the chip; a missing or unknown `?chip=`
+  // falls back to what this tab remembers, then to the tab's default
+  // (the chip with work to do). "All" is one click away on every tab.
+  const urlChip = viewCancelled ? null : chipFromParam(activeTab, searchParams.get("chip"));
+  const chipKey = urlChip ?? chipByTab[activeBucket] ?? DEFAULT_CHIP[activeTab];
+  const chips = viewCancelled ? [] : SUB_CHIPS[activeTab];
+  const activeChip = chips.find((chip) => chip.key === chipKey) ?? ALL_CHIP;
+
+  // Plain derivations, deliberately not `useMemo`: the React-compiler
+  // lint (`preserve-manual-memoization`) could not keep a manual memo
+  // over `activeBucket` / `activeChip`, and a filter over a few hundred
+  // rows costs nothing per render.
+  const tabRows = rows.filter((row) => bucketOf(row) === activeBucket);
+
+  const needle = searchInput.trim().toLowerCase();
+  const urgencyRank = (row: ExtraWorkRequestList) =>
+    row.urgency === "URGENT" ? 0 : row.urgency === "HIGH" ? 1 : 2;
+  // P-12 F1 — urgent work sorts to the TOP of every tab; inside each
+  // urgency group the order stays as it was (a stable sort over the
+  // server's newest-first). The red badge on the title says why a row
+  // jumped the queue.
+  const visibleRows = tabRows
+    .filter((row) => {
+      if (!subChipMatches(activeChip, row)) return false;
+      if (plannedFilter !== "ALL") {
+        const planned = Boolean(row.provider_planned_date);
+        if (plannedFilter === "PLANNED" ? !planned : planned) return false;
       }
+      // P-11 A5 — the ONE search predicate, shared with the cross-tab
+      // line below so the two cannot disagree.
+      if (needle && !searchMatches(row, needle)) return false;
       return true;
-    });
-    // Sprint 174 §1/§4d — the deadline sort and the planned filter.
-    // Both are CLIENT-side over rows the server already scoped: the
-    // list is a page of rows the operator can see, and a second server
-    // round-trip to reorder what is already on screen would be slower
-    // and no more correct.
-    const narrowed =
-      plannedFilter === "ALL"
-        ? filtered
-        : filtered.filter((r) =>
-            plannedFilter === "PLANNED"
-              ? Boolean(r.preferred_date)
-              : !r.preferred_date,
-          );
-    if (!deadlineSort) return narrowed;
-    return [...narrowed].sort((a, b) => {
-      // A row with NO deadline sorts last in both directions: "nobody
-      // said when" is not earlier or later than a date, and putting it
-      // first would bury the rows the sort exists to surface.
-      if (!a.deadline && !b.deadline) return 0;
-      if (!a.deadline) return 1;
-      if (!b.deadline) return -1;
-      const order = a.deadline.localeCompare(b.deadline);
-      return deadlineSort === "asc" ? order : -order;
-    });
-  }, [
-    activeTrackRows,
-    chipMatches,
-    searchInput,
-    statusFilter,
-    deadlineSort,
-    plannedFilter,
-  ]);
+    })
+    .sort((a, b) => urgencyRank(a) - urgencyRank(b));
 
+  // P-11 A5 — search searches the tab you are in; matches elsewhere are
+  // one line under the results, opened on demand. The rows are already
+  // all in memory (`listAllExtraWork` pages everything), so this costs
+  // no request.
+  const elsewhereMatches = otherTabMatches(rows, activeBucket, needle);
 
-  // Sprint 157 §2 — the Edit gate + the bulk assign handlers. The
-  // controller is keyed on the CURRENTLY VISIBLE rows, so a selection
-  // cannot outlive a filter change (lib/useEditMode.ts derives both the
-  // mode and the selection for exactly this reason).
+  // P-12 F1 (§D.24 rule 2) — the tab's ONE thing waiting: its urgent
+  // rows, the oldest named with how long it has waited.
+  const urgentRows = tabRows
+    .filter((row) => row.urgency === "URGENT")
+    .sort((a, b) => (a.requested_at < b.requested_at ? -1 : 1));
+  const urgentOldest = urgentRows[0] ?? null;
+  const urgentAge = urgentOldest ? daysSince(urgentOldest.requested_at, today) : null;
+
+  // ---- money line ------------------------------------------------------
+  // ONE line per tab, from the loaded rows of that tab, through
+  // `rowAmounts` — the one billing-total rule. Nothing else about money
+  // above the table.
+  const moneyLine = ((): string | null => {
+    const sum = (subset: ExtraWorkRequestList[]) =>
+      subset.reduce((total, row) => total + rowAmounts(row).total, 0);
+    switch (activeBucket) {
+      case "to-price":
+        return t("tabs.money_to_price", { count: tabRows.length });
+      case "with-customer":
+        return t("tabs.money_with_customer", {
+          sent: formatMoney(sum(tabRows.filter((row) => row.display_phase !== "REJECTED"))),
+          declined: formatMoney(sum(tabRows.filter((row) => row.display_phase === "REJECTED"))),
+        });
+      case "approved":
+        return t("tabs.money_approved", { amount: formatMoney(sum(tabRows)) });
+      case "finished":
+        return t("tabs.money_finished", {
+          amount: formatMoney(sum(tabRows)),
+          open: formatMoney(sum(tabRows.filter((row) => row.display_phase === "DONE"))),
+        });
+      case "cancelled":
+        return null;
+    }
+  })();
+
+  // ---- edit gate + bulk actions ------------------------------------------
   const edit = useEditMode(visibleRows.map((row) => row.id));
 
-  // Sprint 158 §1 — eligibility is per (request, role) and comes from
-  // the SERVER. With several requests selected the offer is the
-  // INTERSECTION: somebody eligible at one building but not another
-  // would be rejected for the whole batch (the endpoint is
-  // all-or-nothing), so offering them would be offering a guaranteed
-  // failure.
   const loadAssignCandidates = useCallback(async (requestIds: number[]) => {
     if (requestIds.length === 0) {
       setAssignCandidates({ WORKER: [], MANAGER: [] });
@@ -863,7 +661,6 @@ export function ExtraWorkList({
     await loadAssignCandidates(edit.selection);
   }
 
-  /** ONE request for both roles — see `AssignPeopleDialog`. */
   async function runAssign(managerIds: number[], workerIds: number[]) {
     setAssignBusy(true);
     setAssignError("");
@@ -876,6 +673,7 @@ export function ExtraWorkList({
       });
       setAssignOpen(false);
       edit.exit();
+      setReloadKey((key) => key + 1);
     } catch (err) {
       setAssignError(getApiError(err));
     } finally {
@@ -883,14 +681,6 @@ export function ExtraWorkList({
     }
   }
 
-  /** Sprint 176 §3 — one date across a selection.
-   *
-   *  The payload is built by OMITTING what the operator left alone, never
-   *  by spreading the dialog's state: a blank field must mean "leave
-   *  unchanged", and sending it as `null` would clear that date on every
-   *  selected row — a data-loss bug that looks like a successful save.
-   *  The dialog therefore hands back only the fields it was actually
-   *  given. */
   async function runBulkDates(payload: {
     deadline?: string;
     planned_end_date?: string;
@@ -912,69 +702,381 @@ export function ExtraWorkList({
     }
   }
 
-  // M4 (3c) — client-side itemized CSV of the in-view rows. Mirrors the
-  // proposal-PDF Blob + object-URL + synthetic <a download> pattern. UTF-8
-  // BOM so Excel reads Dutch characters, CRLF line endings, quoted fields.
-  function exportCsv() {
-    const esc = (v: string | null | undefined) =>
-      `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const headers = [
-      t("list.column_title"),
-      t("list.column_customer"),
-      t("list.column_building"),
-      t("list.column_status"),
-      t("list.export_col_subtotal"),
-      t("list.export_col_vat"),
-      t("list.column_total"),
-      t("list.column_billing"),
-      t("list.export_col_invoice_date"),
-      t("list.column_requested"),
-    ];
-    const lines = [headers.map(esc).join(",")];
-    for (const row of visibleRows) {
-      // Earned (final-with-quoted-fallback) so the export matches the on-screen
-      // Total; the three columns stay coherent (subtotal + vat == total).
-      const amounts = rowAmounts(row);
-      lines.push(
-        [
-          row.title,
-          row.customer_name,
-          row.building_name,
-          // Sprint 181 §1 — the export carries the SAME status the
-          // screen does. An export that disagreed with the list it was
-          // taken from would be the drift this sprint removes, in a
-          // spreadsheet.
-          isWorkStarted
-            ? t(ticketStatusLabelKey(operationalStatus(row) ?? "OPEN"), {
-                ns: "common",
-              })
-            : t(extraWorkStatusLabelKey(row.status), { ns: "common" }),
-          amounts.subtotal.toFixed(2),
-          amounts.vat.toFixed(2),
-          amounts.total.toFixed(2),
-          row.is_invoiced
-            ? t("list.billing_invoiced")
-            : t("list.billing_to_invoice"),
-          row.invoice_date ? formatDate(row.invoice_date) : "",
-          formatDate(row.requested_at),
-        ]
-          .map(esc)
-          .join(","),
-      );
+  async function runBulkPlan(items: ExtraWorkBulkPlanItem[]) {
+    setPlanBusy(true);
+    setPlanError("");
+    try {
+      await bulkPlanExtraWork({ items });
+      setPlanOpen(false);
+      edit.exit();
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      // P-8R A3 — the coded sentence, at the dialog's own error line.
+      setPlanError(describeExtraWorkRefusal(err, t).sentence);
+    } finally {
+      setPlanBusy(false);
     }
-    const csv = "\uFEFF" + lines.join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `extra-work_${billingMonth}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
-  // Sprint 128 — the child options to OFFER right now, guarded inline so a set
-  // fetched for a previously chosen customer is never shown against the
-  // current one (and TS narrows `customerScoped`).
+  // ---- navigation helpers ------------------------------------------------
+  /** The search string a tab link keeps: the "my work" reads survive,
+   *  the one-shot deep-link params, the chip and the cancelled view do
+   *  not (a tab link names its own chip through `linkTo`). */
+  const keptSearch = (extra?: Record<string, string>): string => {
+    const params = new URLSearchParams(searchParams);
+    for (const key of ["status", "filter", "view", "tab", "chip"]) params.delete(key);
+    if (extra) for (const [key, value] of Object.entries(extra)) params.set(key, value);
+    const text = params.toString();
+    return text ? `?${text}` : "";
+  };
+  /** P-10 B2 — `chip` undefined carries the chip `target` remembers (a
+   *  deep link's, or one chosen earlier this visit); a key writes that
+   *  chip; the cancelled view never carries one. No chip in the
+   *  address means the tab's default. */
+  const linkTo = (
+    target: ExtraWorkTab,
+    view?: typeof CANCELLED_VIEW,
+    chip?: string,
+  ): string => {
+    const extra: Record<string, string> = {};
+    if (embedded) extra.tab = target;
+    if (view) extra.view = view;
+    const carried = chip ?? chipByTab[target];
+    if (carried && !view) extra.chip = carried;
+    return embedded
+      ? `${location.pathname}${keptSearch(extra)}`
+      : `/extra-work/${target}${keptSearch(extra)}`;
+  };
+
+  const [expandedSeries, setExpandedSeries] = useState<number[]>([]);
+
+  // AUTO MODE — the bare `/extra-work`: once the rows are in, go to the
+  // first tab that has any (or the deep link's tab), else To price. The
+  // deep link's chip is written to the address; its params are dropped.
+  if (!embedded && namedTab === null && !loading && !error) {
+    const target =
+      deepLink?.bucket === CANCELLED_VIEW
+        ? linkTo("finished", CANCELLED_VIEW)
+        : linkTo(autoTab);
+    return <Navigate to={target} replace />;
+  }
+  // A named tab reached with a one-shot deep-link param: rewrite the
+  // address once so the chip it preselects is the one the address
+  // says (P-10 B2), and the params do not survive into every tab link.
+  if (!embedded && namedTab !== null && (searchParams.has("status") || searchParams.has("filter"))) {
+    return <Navigate to={linkTo(namedTab, viewCancelled ? CANCELLED_VIEW : undefined)} replace />;
+  }
+
+  // ---- cells ---------------------------------------------------------------
+  const dash = (title?: string) => (
+    <span className="muted-empty" title={title}>
+      &mdash;
+    </span>
+  );
+  const money = (row: ExtraWorkRequestList) =>
+    isPriced(row) ? formatMoney(rowAmounts(row).total) : dash(t("list.total_not_priced_hint"));
+
+  const lineSummary = (row: ExtraWorkRequestList): string => {
+    const lines = row.line_summary;
+    if (!lines || lines.count === 0) return t("list.lines_none");
+    const more = lines.count - lines.names.length;
+    return more > 0
+      ? `${lines.names.join(", ")} ${t("list.lines_more", { count: more })}`
+      : lines.names.join(", ");
+  };
+
+  const cellWhat = (row: ExtraWorkRequestList, sub: ReactNode) => (
+    <td className="td-subject" key="what">
+      <Link to={`/extra-work/${row.id}`}>{row.title}</Link>
+      {/* P-12 F1 — why this row sits on top. */}
+      {row.urgency === "URGENT" && (
+        <span
+          className="cell-tag cell-tag-rejected"
+          style={{ marginLeft: 8 }}
+          data-testid={`extra-work-urgent-${row.id}`}
+        >
+          <i />
+          {t("list.urgent_badge")}
+        </span>
+      )}
+      <div className="muted small ew-cell-sub">{sub}</div>
+    </td>
+  );
+
+  const cellAsked = (row: ExtraWorkRequestList) => {
+    const age = daysSince(row.requested_at, today);
+    const stale = age !== null && age > AGE_WARN_DAYS;
+    return (
+      <td key="asked" className="td-date">
+        {formatDate(row.requested_at)}
+        <div className={`small ew-cell-sub${stale ? " ew-late" : " muted"}`}>
+          {age === null
+            ? null
+            : age <= 0
+              ? t("list.age_today")
+              : t("list.age_days", { count: age })}
+        </div>
+      </td>
+    );
+  };
+
+  const cellPlanned = (row: ExtraWorkRequestList) => {
+    const plannedDay =
+      row.provider_planned_date ?? row.spawned_tickets[0]?.scheduled_start_at ?? null;
+    if (plannedDay) {
+      const passed = daysSince(plannedDay, today) ?? 0;
+      const notStarted =
+        row.display_phase === "WAITING_PLANNING" || row.display_phase === "SCHEDULED";
+      const hours = row.budget_hours ? Number.parseFloat(row.budget_hours) : 0;
+      return (
+        <td key="planned" className="td-date">
+          {formatDate(plannedDay)}
+          {hours > 0 && (
+            <span className="muted">
+              {" · "}
+              {t("list.planned_hours", {
+                hours: formatNumber(hours, { maximumFractionDigits: 2 }),
+              })}
+            </span>
+          )}
+          {passed > 0 && notStarted && (
+            <div className="small ew-cell-sub ew-late">
+              {t("list.days_late", { count: passed })}
+            </div>
+          )}
+        </td>
+      );
+    }
+    if (row.deadline) {
+      const left = -(daysSince(row.deadline, today) ?? 0);
+      return (
+        <td key="planned" className="td-date">
+          <span className="muted">{t("common:phase.ew.WAITING_PLANNING")}</span>
+          <div className={`small ew-cell-sub${row.is_overdue ? " ew-late" : " muted"}`}>
+            {row.is_overdue
+              ? t("list.days_late", { count: Math.max(1, -left) })
+              : left <= 0
+                ? t("list.deadline_today")
+                : t("list.deadline_in", { count: left })}
+          </div>
+        </td>
+      );
+    }
+    return (
+      <td key="planned" className="td-date">
+        <span className="muted">{t("common:phase.ew.WAITING_PLANNING")}</span>
+      </td>
+    );
+  };
+
+  const cellStatus = (row: ExtraWorkRequestList) => {
+    if (row.display_phase === "REJECTED") {
+      return (
+        <td key="status">
+          <PhaseBadge kind="ew" phase={row.display_phase} testId="extra-work-row-phase" />
+          <div className="muted small ew-cell-sub ew-reason" title={row.rejection_note || undefined}>
+            {row.rejection_note || t("list.declined_no_reason")}
+          </div>
+        </td>
+      );
+    }
+    if (
+      row.display_phase === "WAITING_CUSTOMER_APPROVAL" ||
+      row.display_phase === "WAITING_YOUR_APPROVAL"
+    ) {
+      const waited = daysSince(row.pricing_proposed_at, today);
+      return (
+        <td key="status">
+          {waited === null ? (
+            <PhaseBadge kind="ew" phase={row.display_phase} testId="extra-work-row-phase" />
+          ) : (
+            <span className={waited >= 3 ? "ew-warn" : undefined} data-testid="extra-work-row-phase">
+              {waited <= 0
+                ? t("list.waiting_since_today")
+                : t("list.waiting_days", { count: waited })}
+            </span>
+          )}
+        </td>
+      );
+    }
+    return (
+      <td key="status">
+        <PhaseBadge kind="ew" phase={row.display_phase} testId="extra-work-row-phase" />
+        {isSpawnAnomaly(row) && (
+          <span
+            className="cell-tag cell-tag-rejected"
+            style={{ marginLeft: 6 }}
+            title={t("list.track_anomaly_title")}
+            data-testid="ew-no-ticket-marker"
+          >
+            {t("list.track_anomaly_marker")}
+          </span>
+        )}
+      </td>
+    );
+  };
+
+  const cellInvoice = (row: ExtraWorkRequestList) => {
+    if (row.is_invoiced) {
+      const ref = row.invoice_ref ?? null;
+      return (
+        <td key="invoice">
+          {ref?.number
+            ? t("list.on_invoice", { number: ref.number })
+            : t("list.on_invoice_concept")}
+          {ref?.sent_at && (
+            <div className="muted small ew-cell-sub">
+              {t("list.invoice_sent_on", { date: formatDate(ref.sent_at) })}
+            </div>
+          )}
+        </td>
+      );
+    }
+    const day = row.customer_invoice_day;
+    return (
+      <td key="invoice">
+        {t("list.not_invoiced_yet")}
+        {day !== null && day !== undefined && (
+          <div className="muted small ew-cell-sub">
+            {day === "LAST_OF_MONTH"
+              ? t("list.bills_month_end")
+              : t("list.bills_on_day", { day })}
+          </div>
+        )}
+      </td>
+    );
+  };
+
+  const cellNext = (row: ExtraWorkRequestList) => {
+    const step = listNextStep(row, { isProvider, today });
+    return (
+      <td key="next" className="td-next">
+        {step.buttonKey && (
+          <Link
+            to={step.to}
+            className={`btn btn-sm ${step.tone === "primary" ? "btn-primary" : "btn-secondary"}`}
+            data-testid="extra-work-next-step"
+          >
+            {t(step.buttonKey)}
+          </Link>
+        )}
+      </td>
+    );
+  };
+
+  const cellFor = (column: ColumnKey, row: ExtraWorkRequestList): ReactNode => {
+    switch (column) {
+      case "what":
+        return cellWhat(
+          row,
+          activeBucket === "approved" ? (
+            <>
+              {money(row)}
+              {row.customer_decided_at && (
+                <>
+                  {" · "}
+                  {t("list.approved_on", { date: formatDate(row.customer_decided_at) })}
+                </>
+              )}
+            </>
+          ) : (
+            lineSummary(row)
+          ),
+        );
+      case "where":
+        return (
+          <td key="where">
+            {row.building_name}
+            <div className="muted small ew-cell-sub">{row.customer_name}</div>
+          </td>
+        );
+      case "asked":
+        return cellAsked(row);
+      case "after_pricing":
+        return (
+          <td key="after_pricing">
+            {startsWhenPriced(row)
+              ? t("list.after_pricing_starts")
+              : t("list.after_pricing_to_customer")}
+          </td>
+        );
+      case "estimate":
+        return (
+          <td key="estimate" style={{ textAlign: "right" }}>
+            {row.contract_estimate_amount != null
+              ? formatMoney(row.contract_estimate_amount)
+              : dash(t("list.estimate_all_custom"))}
+          </td>
+        );
+      case "sent":
+        return (
+          <td key="sent" className="td-date">
+            {row.pricing_proposed_at ? formatDate(row.pricing_proposed_at) : dash()}
+            <div className="muted small ew-cell-sub">{row.contact_name || "—"}</div>
+          </td>
+        );
+      case "price":
+      case "amount":
+        return (
+          <td key={column} style={{ textAlign: "right" }}>
+            {money(row)}
+          </td>
+        );
+      case "status":
+        return cellStatus(row);
+      case "planned":
+        return cellPlanned(row);
+      case "people":
+        return (
+          <td key="people">
+            {row.people_names && row.people_names.length > 0 ? (
+              row.people_names.join(", ")
+            ) : (
+              <span className="muted">{t("list.nobody_yet")}</span>
+            )}
+          </td>
+        );
+      case "finished":
+        return (
+          <td key="finished" className="td-date">
+            {row.completed_at ? formatDate(row.completed_at) : dash()}
+          </td>
+        );
+      case "invoice":
+        return cellInvoice(row);
+      case "next":
+        return cellNext(row);
+    }
+  };
+
+  const columns = COLUMNS[activeBucket];
+
+  function renderRow(row: ExtraWorkRequestList, inSeries = false) {
+    return (
+      <ClickableRow
+        key={row.id}
+        className={inSeries ? "ew-series-member" : undefined}
+        to={`/extra-work/${row.id}`}
+        testId="extra-work-row"
+      >
+        {edit.editMode && (
+          <td className="td-select" onClick={(event) => event.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={edit.isSelected(row.id)}
+              onChange={() => edit.toggle(row.id)}
+              disabled={assignBusy}
+              aria-label={row.title}
+              data-testid={`extra-work-select-${row.id}`}
+            />
+          </td>
+        )}
+        {columns.map((column) => cellFor(column, row))}
+      </ClickableRow>
+    );
+  }
+
+  // ---- filter fold summary ---------------------------------------------------
   const scopedBuildings =
     customerScoped && String(customerScoped.customerId) === customerFilter
       ? customerScoped.buildings
@@ -988,30 +1090,55 @@ export function ExtraWorkList({
       ? customerScoped.workTypes
       : [];
   const customerChosen = customerFilter !== "";
+  const activeFilterLabels: string[] = [];
+  if (!embedded && customerChosen) {
+    activeFilterLabels.push(
+      customers.find((c) => String(c.id) === customerFilter)?.name ?? t("list.filter_customer"),
+    );
+  }
+  if (buildingFilter) {
+    activeFilterLabels.push(
+      scopedBuildings.find((b) => String(b.building_id) === buildingFilter)?.building_name ??
+        t("list.filter_building"),
+    );
+  }
+  if (departmentFilter) {
+    const label = scopedDepartments.find((d) => String(d.id) === departmentFilter);
+    activeFilterLabels.push(label ? customerLabelName(label.name, t) : t("list.filter_department"));
+  }
+  if (workTypeFilter) {
+    const label = scopedWorkTypes.find((w) => String(w.id) === workTypeFilter);
+    activeFilterLabels.push(label ? customerLabelName(label.name, t) : t("list.filter_work_type"));
+  }
+  if (categoryFilter) activeFilterLabels.push(categoryFilter);
+  if (plannedFilter !== "ALL") {
+    activeFilterLabels.push(
+      plannedFilter === "PLANNED" ? t("list.planned_only") : t("list.planned_none"),
+    );
+  }
+  if (searchInput.trim()) activeFilterLabels.push(searchInput.trim());
+
+  const showTable = !loading && !error && visibleRows.length > 0;
 
   return (
     <div data-testid="extra-work-list-page">
       {!hideHeader && (
-      <PageHeader
-        backLink={{ to: "/", label: t("back_to_dashboard") }}
-        eyebrow={t("common:ops")}
-        title={t("list.page_title")}
-        subtitle={t("list.page_subtitle")}
-        actions={
-          /* Sprint 155 §1b — this button used to go straight to the
-             direct-order form, which is only ONE of the three things
-             "new extra work" can mean here. It now asks. */
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => setChooserOpen(true)}
-            data-testid="extra-work-list-create-link"
-          >
-            <PlusCircle size={14} strokeWidth={2.2} />
-            <span style={{ marginLeft: 6 }}>{t("list.create_button")}</span>
-          </button>
-        }
-      />
+        <PageHeader
+          backLink={{ to: "/", label: t("back_to_dashboard") }}
+          eyebrow={t("common:ops")}
+          title={t("nav.meerwerk", { ns: "common" })}
+          actions={
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setChooserOpen(true)}
+              data-testid="extra-work-list-create-link"
+            >
+              <PlusCircle size={14} strokeWidth={2.2} />
+              <span style={{ marginLeft: 6 }}>{t("list.create_button")}</span>
+            </button>
+          }
+        />
       )}
 
       {assignOpen && (
@@ -1046,10 +1173,19 @@ export function ExtraWorkList({
         />
       )}
 
+      {planOpen && (
+        <BulkPlanDialog
+          rows={rows.filter((row) => edit.selection.includes(row.id))}
+          busy={planBusy}
+          error={planError}
+          onCancel={() => setPlanOpen(false)}
+          onConfirm={(items) => void runBulkPlan(items)}
+        />
+      )}
+
       {chooserOpen && (
         <ChoiceDialog
           title={t("list.create_chooser_title")}
-          subtitle={t("list.create_chooser_subtitle")}
           onCancel={() => setChooserOpen(false)}
           testIdPrefix="extra-work-create-chooser"
           choices={[
@@ -1060,30 +1196,86 @@ export function ExtraWorkList({
               onSelect: () => navigate("/extra-work/new"),
             },
             {
-              key: "quote",
-              label: t("list.create_chooser_quote"),
-              description: t("list.create_chooser_quote_desc"),
-              onSelect: () => navigate("/extra-work/request-quote"),
-            },
-            {
               key: "recurring",
               label: t("list.create_chooser_recurring"),
               description: t("list.create_chooser_recurring_desc"),
-              // Sprint 156 §2 — the recurring option was the odd one
-              // out: the other two open a FORM and this one opened the
-              // LIST, so "create" landed the operator on a page with
-              // nothing created. /planned-work/new is the existing
-              // create route (App.tsx) — no new route, no new page.
               onSelect: () => navigate("/planned-work/new"),
             },
           ]}
         />
       )}
 
+      {/* P-12 F1 (§D.24 rule 2) — the urgent work first, named. */}
+      {!viewCancelled && !loading && urgentOldest && (
+        <StartHere
+          testId="extra-work-start-here"
+          action={{
+            label: t("list.start_urgent_action"),
+            to: `/extra-work/${urgentOldest.id}`,
+          }}
+        >
+          {t("list.start_urgent", {
+            count: urgentRows.length,
+            title: urgentOldest.title,
+            days: urgentAge ?? 0,
+          })}
+        </StartHere>
+      )}
+
+      {/* The tab strip: the People page's `.customer-tabs`, one count
+          per tab. In path mode the tab IS the address. */}
+      <div
+        className="customer-tabs ew-tabs"
+        role="tablist"
+        aria-label={t("nav.meerwerk", { ns: "common" })}
+        data-testid="extra-work-tabs"
+      >
+        {EXTRA_WORK_TABS.map((key) => {
+          const active = !viewCancelled && key === activeTab;
+          return (
+            <Link
+              key={key}
+              to={linkTo(key)}
+              role="tab"
+              aria-selected={active}
+              className={`customer-tab${active ? " active" : ""}`}
+              data-testid={`extra-work-tab-${key}`}
+              data-count={counts[key]}
+            >
+              {t(TAB_LABEL_KEY[key])}
+              <span className="ew-tab-count" data-testid={`extra-work-tab-count-${key}`}>
+                {loading ? "…" : counts[key]}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+
       {loading && (
-        <div className="loading-bar">
-          <div className="loading-bar-fill" />
-        </div>
+        <>
+          <div className="loading-bar">
+            <div className="loading-bar-fill" />
+          </div>
+          {/* P-15 (P-14's S4 finding) — a blank pane under the bar read
+              as "there is nothing here" for the seconds the list took;
+              skeleton rows say a table is coming. */}
+          <div
+            className="skeleton-table"
+            aria-hidden="true"
+            data-testid="extra-work-skeleton"
+          >
+            {[0, 1, 2, 3, 4].map((row) => (
+              <div className="skeleton-row" key={row}>
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {error && (
@@ -1092,843 +1284,510 @@ export function ExtraWorkList({
         </div>
       )}
 
-      {/* KPI strip */}
-      <div className="ew-list-kpi-row" data-testid="extra-work-list-kpi-row">
-        <KpiCard
-          icon={Inbox}
-          label={t("kpi.open_label")}
-          value={kpis.open}
-          meta={t("kpi.open_meta")}
-          testId="extra-work-list-kpi-open"
-        />
-        <KpiCard
-          icon={Clock}
-          label={t("kpi.awaiting_label")}
-          value={kpis.awaiting}
-          meta={t("kpi.awaiting_meta")}
-          testId="extra-work-list-kpi-awaiting"
-        />
-        <KpiCard
-          icon={CheckCircle2}
-          label={t("kpi.approved_label")}
-          value={kpis.approved}
-          meta={t("kpi.approved_meta")}
-          testId="extra-work-list-kpi-approved"
-        />
-        <KpiCard
-          icon={Wallet}
-          label={t("kpi.value_label")}
-          value={formatMoney(kpis.totalValue)}
-          meta={t("kpi.value_meta")}
-          testId="extra-work-list-kpi-value"
-        />
-      </div>
-
-      {/* Sprint 180 §1 — the two tracks. An extra work has a commercial
-          life and an operational one; this is which of the two you are
-          looking at, and it decides the columns below. Above the status
-          tiles because it is the coarser question: first WHICH life,
-          then which step within it. */}
-      <TrackTabs
-        tabs={[
-          {
-            value: "QUOTE",
-            label: t("list.track_quote"),
-            count: trackRows.QUOTE.length,
-            anomalyCount: spawnAnomalyCount,
-            anomalyTitle: t("list.track_anomaly_title"),
-          },
-          {
-            value: "STARTED",
-            label: t("list.track_started"),
-            count: trackRows.STARTED.length,
-          },
-        ]}
-        active={track}
-        onChange={switchTrack}
-        testIdPrefix="extra-work-track"
-      />
-
-      <p className="ew-list-filters-hint muted small">
-        {track === "QUOTE"
-          ? t("list.track_quote_hint")
-          : t("list.track_started_hint")}
-      </p>
-
-      {/* Sprint 159 §3 — the statuses as TILES, the design the owner
-          picked for both work lists: the tile IS the filter, it carries
-          its own count, the active one is visibly selected.
-          Sprint 180 — counts are per TRACK, so a tile never promises
-          rows that live on the other one.
-          Sprint 181 §2 — FOUR tiles, not nine, and they change meaning
-          with the track: commercial states on Quote & price, TICKET
-          states on Work started. The old status dropdown that sat below
-          the search box is gone with them — it was a second control for
-          the same state, and nine options in a select was the least
-          readable of the two. */}
-      <StatusTiles
-        tiles={chips.map((chip) => ({
-          value: chip.value,
-          label: t(chip.labelKey),
-          count: statusCounts[chip.value] ?? 0,
-        }))}
-        active={statusFilter}
-        onChange={setStatusFilter}
-        totalCount={activeTrackRows.length}
-        testIdPrefix="extra-work-status"
-      />
-
-      {/* Filter bar */}
-      <div
-        className="card ew-list-filters"
-        data-testid="extra-work-list-filters"
-      >
-        <div className="filter-field search">
-          <Search size={14} strokeWidth={2.2} />
-          <input
-            className="filter-control"
-            type="search"
-            placeholder={t("list.search_placeholder")}
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-          />
-        </div>
-        {/* Sprint 181 §2 — the status <select> that stood here is gone.
-            It was a SECOND control over the same state as the tiles
-            above, offering the same nine options in the less readable
-            of the two shapes. A control earns its place by changing
-            what somebody does next; this one only offered a second way
-            to do what the tiles already do. */}
-        <div className="filter-field">
-          <span className="filter-label">
-            {t("list.filter_catalog_category")}
-          </span>
-          {/* Sprint 143 §6 — real catalog categories, filtered
-              SERVER-side (`?category=`, matched on the order-time
-              snapshot). Two groups: what the catalog still offers, and
-              names that only survive in history because the category was
-              renamed, archived or deleted after the order. The second
-              group is why the backend matches the snapshot rather than
-              the live FK — a join would silently drop exactly those
-              requests. */}
-          <select
-            className="filter-control"
-            value={categoryFilter}
-            onChange={(event) => setCategoryFilter(event.target.value)}
-            data-testid="extra-work-category-filter"
-          >
-            <option value="">{t("list.filter_all_categories")}</option>
-            {categoryOptions.live.length > 0 && (
-              <optgroup label={t("list.filter_category_group_live")}>
-                {categoryOptions.live.map((name) => (
-                  <option key={`live-${name}`} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </optgroup>
+      {!loading && !error && (
+        <>
+          {/* What this tab is for, and the one money line. */}
+          <div className="ew-tab-head" data-testid="extra-work-tab-head">
+            {viewCancelled ? (
+              <>
+                <div className="ew-tab-title" data-testid="extra-work-cancelled-title">
+                  {t("tabs.cancelled_title")}{" "}
+                  <span className="muted">({counts.cancelled})</span>
+                </div>
+                <p className="section-head-sub ew-tab-purpose" data-testid="extra-work-tab-purpose">
+                  {t("tabs.cancelled_purpose")}
+                </p>
+                <Link
+                  to={linkTo("finished")}
+                  className="btn btn-secondary btn-sm"
+                  data-testid="extra-work-back-to-finished"
+                >
+                  {t("tabs.back_to_finished")}
+                </Link>
+              </>
+            ) : (
+              <>
+                <p className="section-head-sub ew-tab-purpose" data-testid="extra-work-tab-purpose">
+                  {t(TAB_PURPOSE_KEY[activeTab])}
+                </p>
+                {moneyLine && (
+                  <p className="ew-tab-money" data-testid="extra-work-tab-money">
+                    {moneyLine}
+                  </p>
+                )}
+              </>
             )}
-            {categoryOptions.historical.length > 0 && (
-              <optgroup label={t("list.filter_category_group_historical")}>
-                {categoryOptions.historical.map((name) => (
-                  <option key={`hist-${name}`} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </select>
-        </div>
-        <div className="filter-field">
-          <span className="filter-label">{t("list.filter_planned")}</span>
-          <select
-            className="filter-control"
-            value={plannedFilter}
-            onChange={(event) =>
-              setPlannedFilter(
-                event.target.value as "ALL" | "PLANNED" | "UNPLANNED",
-              )
-            }
-            data-testid="extra-work-list-filter-planned"
-          >
-            <option value="ALL">{t("list.planned_all")}</option>
-            <option value="PLANNED">{t("list.planned_only")}</option>
-            <option value="UNPLANNED">{t("list.planned_none")}</option>
-          </select>
-        </div>
+          </div>
 
-        {isProvider && customerId === undefined && (
-          <>
-            {/* Sprint 128 — the label cascade: Customer -> Building ->
-                Department -> Work Type. The last three are per-customer, so
-                they are disabled (with a hint) until a customer is chosen and
-                clear when it changes. */}
-            <div className="filter-field">
-              <span className="filter-label">{t("list.filter_customer")}</span>
-              <select
-                className="filter-control"
-                value={customerFilter}
-                onChange={(event) => {
-                  // Clear the dependent (per-customer) filters here in the
-                  // event handler — never in the load effect (CLAUDE.md §3).
-                  setCustomerFilter(event.target.value);
-                  setBuildingFilter("");
-                  setDepartmentFilter("");
-                  setWorkTypeFilter("");
-                }}
-                data-testid="extra-work-list-filter-customer"
+          {/* Sub-chips, the Filter fold and the edit gate share one band. */}
+          <div className="ew-tab-band">
+            {chips.length > 0 && (
+              <div
+                className="composer-toggle ew-subtabs"
+                role="tablist"
+                aria-label={t(TAB_LABEL_KEY[activeTab])}
+                data-testid="extra-work-subchips"
               >
-                <option value="">{t("list.filter_all_customers")}</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+                {chips.map((chip) => {
+                  const count = tabRows.filter((row) => subChipMatches(chip, row)).length;
+                  const active = chip.key === activeChip.key;
+                  return (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      className={`composer-toggle-btn${active ? " active" : ""}`}
+                      onClick={() => {
+                        // P-10 B2 — remembered for the tab links, and
+                        // written to the address (replace: a chip is a
+                        // narrowing of this tab, not a place of its own)
+                        // so a reload lands on the same chip.
+                        setChipByTab((prev) => ({ ...prev, [activeBucket]: chip.key }));
+                        navigate(linkTo(activeTab, undefined, chip.key), { replace: true });
+                      }}
+                      data-testid={`extra-work-chip-${chip.key}`}
+                      data-count={count}
+                    >
+                      {t(chip.labelKey)}
+                      <span className="ew-chip-count">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div className="ew-tab-band-right">
+              {isProvider && (
+                <EditModeToggle
+                  editMode={edit.editMode}
+                  onToggle={edit.toggleMode}
+                  disabled={assignBusy}
+                  testId="extra-work-edit-mode-toggle"
+                />
+              )}
             </div>
-            <div className="filter-field">
-              <span className="filter-label">{t("list.filter_building")}</span>
-              <select
-                className="filter-control"
-                value={buildingFilter}
-                onChange={(event) => setBuildingFilter(event.target.value)}
-                disabled={!customerChosen}
-                title={
-                  customerChosen
-                    ? undefined
-                    : t("list.filter_pick_customer_hint")
-                }
-                data-testid="extra-work-list-filter-building"
-              >
-                <option value="">{t("list.filter_all_buildings")}</option>
-                {scopedBuildings.map((b) => (
-                  <option key={b.building_id} value={b.building_id}>
-                    {b.building_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="filter-field">
-              <span className="filter-label">
-                {t("list.filter_department")}
-              </span>
-              <select
-                className="filter-control"
-                value={departmentFilter}
-                onChange={(event) => setDepartmentFilter(event.target.value)}
-                disabled={!customerChosen}
-                title={
-                  customerChosen
-                    ? undefined
-                    : t("list.filter_pick_customer_hint")
-                }
-                data-testid="extra-work-list-filter-department"
-              >
-                <option value="">{t("list.filter_all_departments")}</option>
-                {scopedDepartments.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {customerLabelName(d.name, t)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="filter-field">
-              <span className="filter-label">
-                {t("list.filter_work_type")}
-              </span>
-              <select
-                className="filter-control"
-                value={workTypeFilter}
-                onChange={(event) => setWorkTypeFilter(event.target.value)}
-                disabled={!customerChosen}
-                title={
-                  customerChosen
-                    ? undefined
-                    : t("list.filter_pick_customer_hint")
-                }
-                data-testid="extra-work-list-filter-work-type"
-              >
-                <option value="">{t("list.filter_all_work_types")}</option>
-                {scopedWorkTypes.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {customerLabelName(w.name, t)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {/* Sprint 180 §1 — the two INVOICE filters belong to the
-                Work started track for the same reason the invoice
-                column does: a request with no operational ticket cannot
-                be invoiceable yet, so offering to filter it by billing
-                month invites a question the data cannot answer. Both
-                are CLEARED when the operator switches back (see the
-                TrackTabs handler) — a hidden filter that is still
-                applied is worse than no filter. */}
-            {isWorkStarted && (
-            <div className="filter-field">
-              <span className="filter-label">
-                {t("list.filter_billing_month")}
-              </span>
-              <span
-                style={{
-                  display: "inline-flex",
-                  gap: 6,
-                  alignItems: "center",
-                }}
-              >
+          </div>
+
+          <details
+            className="filter-fold ew-filter-fold"
+            open={activeFilterLabels.length > 0}
+            data-testid="extra-work-filter-fold"
+          >
+            <summary className="filter-fold-summary" data-testid="extra-work-filter-toggle">
+              <SlidersHorizontal size={14} strokeWidth={2.4} aria-hidden="true" />
+              {t("list.filter_fold_label")}
+              {activeFilterLabels.length > 0 && (
+                <span className="filter-fold-count">
+                  {t("list.filter_fold_active", { count: activeFilterLabels.length })}
+                </span>
+              )}
+              {activeFilterLabels.map((label) => (
+                <span className="filter-fold-chip" key={label}>
+                  {label}
+                </span>
+              ))}
+            </summary>
+            <div className="filter-fold-body ew-list-filters" data-testid="extra-work-list-filters">
+              {isProvider && !embedded && (
+                <>
+                  <div className="filter-field">
+                    <span className="filter-label">{t("list.filter_customer")}</span>
+                    <select
+                      className="filter-control"
+                      value={customerFilter}
+                      onChange={(event) => {
+                        // Clear the dependent filters here, in the handler.
+                        setCustomerFilter(event.target.value);
+                        setBuildingFilter("");
+                        setDepartmentFilter("");
+                        setWorkTypeFilter("");
+                      }}
+                      data-testid="extra-work-list-filter-customer"
+                    >
+                      <option value="">{t("list.filter_all_customers")}</option>
+                      {customers.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="filter-field">
+                    <span className="filter-label">{t("list.filter_building")}</span>
+                    <select
+                      className="filter-control"
+                      value={buildingFilter}
+                      onChange={(event) => setBuildingFilter(event.target.value)}
+                      disabled={!customerChosen}
+                      title={customerChosen ? undefined : t("list.filter_pick_customer_hint")}
+                      data-testid="extra-work-list-filter-building"
+                    >
+                      <option value="">{t("list.filter_all_buildings")}</option>
+                      {scopedBuildings.map((b) => (
+                        <option key={b.building_id} value={b.building_id}>
+                          {b.building_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="filter-field">
+                    <span className="filter-label">{t("list.filter_department")}</span>
+                    <select
+                      className="filter-control"
+                      value={departmentFilter}
+                      onChange={(event) => setDepartmentFilter(event.target.value)}
+                      disabled={!customerChosen}
+                      title={customerChosen ? undefined : t("list.filter_pick_customer_hint")}
+                      data-testid="extra-work-list-filter-department"
+                    >
+                      <option value="">{t("list.filter_all_departments")}</option>
+                      {scopedDepartments.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {customerLabelName(d.name, t)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="filter-field">
+                    <span className="filter-label">{t("list.filter_work_type")}</span>
+                    <select
+                      className="filter-control"
+                      value={workTypeFilter}
+                      onChange={(event) => setWorkTypeFilter(event.target.value)}
+                      disabled={!customerChosen}
+                      title={customerChosen ? undefined : t("list.filter_pick_customer_hint")}
+                      data-testid="extra-work-list-filter-work-type"
+                    >
+                      <option value="">{t("list.filter_all_work_types")}</option>
+                      {scopedWorkTypes.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {customerLabelName(w.name, t)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+              <div className="filter-field">
+                <span className="filter-label">{t("list.filter_catalog_category")}</span>
+                <select
+                  className="filter-control"
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value)}
+                  data-testid="extra-work-category-filter"
+                >
+                  <option value="">{t("list.filter_all_categories")}</option>
+                  {categoryOptions.live.length > 0 && (
+                    <optgroup label={t("list.filter_category_group_live")}>
+                      {categoryOptions.live.map((name) => (
+                        <option key={`live-${name}`} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {categoryOptions.historical.length > 0 && (
+                    <optgroup label={t("list.filter_category_group_historical")}>
+                      {categoryOptions.historical.map((name) => (
+                        <option key={`hist-${name}`} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              </div>
+              <div className="filter-field">
+                <span className="filter-label">{t("list.filter_planned")}</span>
+                <select
+                  className="filter-control"
+                  value={plannedFilter}
+                  onChange={(event) =>
+                    setPlannedFilter(event.target.value as "ALL" | "PLANNED" | "UNPLANNED")
+                  }
+                  data-testid="extra-work-list-filter-planned"
+                >
+                  <option value="ALL">{t("list.planned_all")}</option>
+                  <option value="PLANNED">{t("list.planned_only")}</option>
+                  <option value="UNPLANNED">{t("list.planned_none")}</option>
+                </select>
+              </div>
+              <div className="filter-field search">
+                <Search size={14} strokeWidth={2.2} />
                 <input
                   className="filter-control"
-                  type="month"
-                  value={billingMonth}
-                  onChange={(event) => setBillingMonth(event.target.value)}
-                  data-testid="extra-work-list-billing-month"
+                  type="search"
+                  placeholder={t("list.search_placeholder")}
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  data-testid="extra-work-list-search"
                 />
-                {billingMonth && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => setBillingMonth("")}
-                  >
-                    {t("list.filter_billing_month_clear")}
-                  </button>
-                )}
-              </span>
+              </div>
+              {isProvider && !embedded && !customerChosen && (
+                <div
+                  className="ew-list-filters-hint muted small"
+                  data-testid="extra-work-list-filter-hint"
+                >
+                  {t("list.filter_pick_customer_hint")}
+                </div>
+              )}
             </div>
-            )}
-            {isWorkStarted && (
-            <div className="filter-field">
-              <span className="filter-label">
-                {t("list.filter_invoice_status")}
-              </span>
-              <select
-                className="filter-control"
-                value={invoiceStatus}
-                onChange={(event) =>
-                  setInvoiceStatus(
-                    event.target.value as "ALL" | "completed" | "invoiced",
-                  )
-                }
-                data-testid="extra-work-list-invoice-status"
-              >
-                <option value="ALL">{t("list.invoice_status_all")}</option>
-                <option value="completed">
-                  {t("list.invoice_status_completed")}
-                </option>
-                <option value="invoiced">
-                  {t("list.invoice_status_invoiced")}
-                </option>
-              </select>
-            </div>
-            )}
-          </>
-        )}
-        {/* Sprint 138 §6 — the cascade hint used to be its own
-            `.filter-field`, so it floated between the controls and made
-            the bar look ragged. It now sits on ONE line beneath the
-            controls it describes (and as a `title` on each disabled
-            control), spanning the full row. */}
-        {isProvider && !customerChosen && (
-          <div
-            className="ew-list-filters-hint muted small"
-            data-testid="extra-work-list-filter-hint"
-          >
-            {t("list.filter_pick_customer_hint")}
-          </div>
-        )}
-      </div>
+          </details>
 
-      {/* M4 toolbar, reduced by #108 Part F — the mark/clear-invoiced
-          run lives on the Facturen page now; a muted pointer replaces
-          the buttons. The month label + CSV export stay. */}
-      {isProvider && billingMonth && (
-        <div
-          className="card"
-          data-testid="extra-work-list-invoice-run"
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            gap: 12,
-            marginBottom: 16,
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>
-            {t("list.invoice_run_label", { month: billingMonth })}
-          </span>
-          <span className="muted small">
-            {t("list.invoice_run_pointer_prefix")}{" "}
-            <Link to="/invoices" className="link">
-              {t("list.invoice_run_pointer_link")}
-            </Link>
-          </span>
-          <div style={{ marginLeft: "auto" }}>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={visibleRows.length === 0}
-              onClick={exportCsv}
-              data-testid="extra-work-list-export-csv"
-            >
-              {t("list.export_csv")}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Empty / list.
-          Sprint 180 §1 — the TRACK is a narrowing an operator did not
-          necessarily choose: a dashboard deep link (?status=COMPLETED)
-          lands on Quote & price, where by definition almost nothing
-          with that status lives. Rather than let the page read as
-          "there is nothing", the action below says how many rows are on
-          the other track and offers the one click. */}
-      {!loading && visibleRows.length === 0 && !error && (
-        <EmptyState
-          icon={Sparkles}
-          title={
-            billingMonth
-              ? t("list.empty_billing_month")
-              : rows.length === 0
-                ? t("list.empty_state")
-                : t("list.empty_filtered_title")
-          }
-          description={
-            billingMonth || rows.length === 0
-              ? undefined
-              : t("list.empty_filtered_desc")
-          }
-          action={
-            trackRows[otherTrack].length > 0 ? (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => switchTrack(otherTrack)}
-                data-testid="extra-work-track-switch"
-              >
-                {t("list.track_switch_to", {
-                  count: trackRows[otherTrack].length,
-                  track: t(
-                    otherTrack === "QUOTE"
-                      ? "list.track_quote"
-                      : "list.track_started",
-                  ),
-                })}
-              </button>
-            ) : undefined
-          }
-          testId="extra-work-list-empty"
-        />
-      )}
-
-      {isProvider && visibleRows.length > 0 && (
-        <div className="ew-list-edit-bar">
-          {edit.editMode && (
-            <MultiSelectToolbar
-              selectedCount={edit.selection.length}
-              onSelectAll={edit.selectAll}
-              onClearAll={edit.clear}
-              disabled={assignBusy}
-              actions={[
-                {
-                  key: "assign",
-                  label: t("assign.button"),
-                  onClick: openAssign,
-                },
-                // Sprint 176 §3 — a batch of jobs agreed for the same
-                // week is the normal case, not an edge one.
-                {
-                  key: "dates",
-                  label: t("list.bulk_dates_button"),
-                  onClick: () => {
-                    setDatesError("");
-                    setDatesOpen(true);
+          {isProvider && edit.editMode && visibleRows.length > 0 && (
+            <div className="ew-list-edit-bar">
+              <MultiSelectToolbar
+                selectedCount={edit.selection.length}
+                onSelectAll={edit.selectAll}
+                onClearAll={edit.clear}
+                disabled={assignBusy}
+                actions={[
+                  { key: "assign", label: t("assign.button"), onClick: openAssign },
+                  {
+                    key: "dates",
+                    label: t("list.bulk_dates_button"),
+                    onClick: () => {
+                      setDatesError("");
+                      setDatesOpen(true);
+                    },
                   },
-                },
-              ]}
-              testIdPrefix="extra-work-bulk"
+                  {
+                    key: "plan",
+                    label: t("plan.bulk_button"),
+                    onClick: () => {
+                      setPlanError("");
+                      setPlanOpen(true);
+                    },
+                  },
+                ]}
+                testIdPrefix="extra-work-bulk"
+              />
+              {/* P-15 (P-14's S3 finding) — the one line no fold ever
+                  carried: what this mode is for. Nothing destructive
+                  lives here; the pre-read says what the three doors do
+                  (the §1.2 contracts pattern). */}
+              <WhatHappens testId="extra-work-bulk-what">
+                {t("list.bulk_what")}
+              </WhatHappens>
+            </div>
+          )}
+
+          {visibleRows.length === 0 && (
+            <EmptyState
+              icon={Sparkles}
+              title={
+                rows.length === 0
+                  ? t("list.empty_state")
+                  : tabRows.length === 0
+                    ? t("tabs.empty_tab")
+                    : t("list.empty_filtered_title")
+              }
+              description={
+                rows.length === 0 || tabRows.length === 0
+                  ? undefined
+                  : t("list.empty_filtered_desc")
+              }
+              testId="extra-work-list-empty"
             />
           )}
-          <EditModeToggle
-            editMode={edit.editMode}
-            onToggle={edit.toggleMode}
-            disabled={assignBusy}
-            testId="extra-work-edit-mode-toggle"
-          />
-        </div>
-      )}
 
-      {visibleRows.length > 0 && (
-        <div className="responsive-table-wrap">
-          <div className="card" style={{ overflow: "hidden" }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  {edit.editMode && (
-                    <th className="th-select">
-                      <input
-                        type="checkbox"
-                        checked={edit.allSelected}
-                        onChange={() =>
-                          edit.allSelected ? edit.clear() : edit.selectAll()
-                        }
-                        disabled={assignBusy}
-                        aria-label={t("assign.button")}
-                        data-testid="extra-work-select-all"
-                      />
-                    </th>
-                  )}
-                  <th>{t("list.column_title")}</th>
-                  <th>{t("list.column_status")}</th>
-                  <th>{t("list.column_route")}</th>
-                  <th>{t("list.column_category")}</th>
-                  <th>{t("list.column_building")}</th>
-                  <th>{t("list.column_customer")}</th>
-                  <th style={{ textAlign: "right" }}>
-                    {t("list.column_total")}
-                  </th>
-                  {/* Sprint 180 §1/§2/§3 — the three columns that only
-                      make sense once work has actually started. The
-                      invoice column in particular: a row with no ticket
-                      CANNOT be invoiceable yet, so showing invoice state
-                      on the Quote & price track is exactly what confused
-                      people. It is not hidden there, it does not apply
-                      there. */}
-                  {isWorkStarted && <th>{t("list.column_ticket")}</th>}
-                  {isWorkStarted && isProvider && (
-                    <th>{t("list.column_billing")}</th>
-                  )}
-                  {isWorkStarted && <th>{t("list.column_billed_to")}</th>}
-                  <th>{t("list.column_requested")}</th>
-                  {/* Sprint 174 §1 — the DEADLINE, sortable. Sprint 173
-                      added the field and the API filter; nothing on any
-                      screen showed it, which is where the owner looked
-                      for it. */}
-                  <th>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() =>
-                        setDeadlineSort((current) =>
-                          current === "asc"
-                            ? "desc"
-                            : current === "desc"
-                              ? ""
-                              : "asc",
-                        )
-                      }
-                      data-testid="ew-sort-deadline"
-                    >
-                      {t("list.column_deadline")}
-                      {deadlineSort === "asc"
-                        ? " ▲"
-                        : deadlineSort === "desc"
-                          ? " ▼"
-                          : ""}
-                    </button>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleRows.map((row) => (
-                  <ClickableRow
-                    key={row.id}
-                    to={`/extra-work/${row.id}`}
-                    testId="extra-work-row"
-                  >
-                    {edit.editMode && (
-                      <td
-                        className="td-select"
-                        onClick={(event) => event.stopPropagation()}
+          {showTable && (
+            <div className="responsive-table-wrap">
+              <div className="card" style={{ overflowX: "auto" }}>
+                <table className="data-table data-table-dense data-table-fit ew-tab-table">
+                  <thead>
+                    <tr>
+                      {edit.editMode && (
+                        <th className="th-select">
+                          <input
+                            type="checkbox"
+                            checked={edit.allSelected}
+                            onChange={() =>
+                              edit.allSelected ? edit.clear() : edit.selectAll()
+                            }
+                            disabled={assignBusy}
+                            aria-label={t("assign.button")}
+                            data-testid="extra-work-select-all"
+                          />
+                        </th>
+                      )}
+                      {columns.map((column) => (
+                        <th
+                          key={column}
+                          style={RIGHT_ALIGNED.has(column) ? { textAlign: "right" } : undefined}
+                          data-testid={`extra-work-column-${column}`}
+                        >
+                          {t(COLUMN_LABEL_KEY[column])}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {foldSeries(visibleRows).map((entry) => {
+                      if (entry.kind === "row") return renderRow(entry.row);
+                      const open = expandedSeries.includes(entry.group.id);
+                      return (
+                        <Fragment key={`series-${entry.group.id}`}>
+                          <SeriesHeaderRow
+                            group={entry.group}
+                            onThisPage={entry.rows.length}
+                            columns={99}
+                            open={open}
+                            onToggle={() =>
+                              setExpandedSeries((prev) =>
+                                prev.includes(entry.group.id)
+                                  ? prev.filter((id) => id !== entry.group.id)
+                                  : [...prev, entry.group.id],
+                              )
+                            }
+                          />
+                          {open && entry.rows.map((row) => renderRow(row, true))}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile card fallback: the row's what, where, phase and
+                  its one next step. */}
+              <ul
+                className="admin-card-list"
+                data-testid="admin-card-list"
+                aria-label={t("nav.meerwerk", { ns: "common" })}
+              >
+                {visibleRows.map((row) => {
+                  const step = listNextStep(row, { isProvider, today });
+                  return (
+                    <li key={row.id} className="admin-card">
+                      <Link
+                        to={`/extra-work/${row.id}`}
+                        className="admin-card-link"
+                        data-testid="extra-work-card"
                       >
-                        <input
-                          type="checkbox"
-                          checked={edit.isSelected(row.id)}
-                          onChange={() => edit.toggle(row.id)}
-                          disabled={assignBusy}
-                          aria-label={row.title}
-                          data-testid={`extra-work-select-${row.id}`}
-                        />
-                      </td>
-                    )}
-                    <td className="td-subject">
-                      <Link to={`/extra-work/${row.id}`}>{row.title}</Link>
-                    </td>
-                    <td>
-                      {/* Sprint 181 §1 — ONE status per row, and on the
-                          Work started track it is the TICKET's.
-                          The owner clicked an Extra Work reading
-                          "Completed", scrolled down, and its ticket read
-                          "Open". Both were "true"; they were two copies
-                          of one fact. Once a ticket exists it is the
-                          only authority for how the work is going, so
-                          the pricing-stage status does not appear here
-                          at all — not as a column, not as a smaller
-                          second line. That is also what fixes the row
-                          that read "Customer approved" in a track full
-                          of started work: it now reads the ticket's
-                          "Open", i.e. approved, not started. */}
-                      {isWorkStarted ? (
-                        <StatusBadge
-                          status={{
-                            kind: "ticket",
-                            value: operationalStatus(row) ?? "OPEN",
-                          }}
-                          testId={`ew-operational-status-${row.id}`}
-                        />
-                      ) : (
-                        <StatusBadge
-                          status={{ kind: "extra-work", value: row.status }}
-                        />
-                      )}
-                      {/* Sprint 180 §1(b) — approved, but the spawn that
-                          is supposed to be synchronous with approval
-                          produced no ticket. The row belongs on this
-                          track, but saying nothing about it is how the
-                          work gets lost. The detail page has the retry
-                          button. */}
-                      {isSpawnAnomaly(row) && (
-                        <span
-                          className="cell-tag cell-tag-rejected"
-                          style={{ marginLeft: 6 }}
-                          title={t("list.track_anomaly_title")}
-                          data-testid="ew-no-ticket-marker"
-                        >
-                          {t("list.track_anomaly_marker")}
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      <RouteBadge value={row.routing_decision} />
-                    </td>
-                    <td>
-                      {/* Sprint 144 §1 — new shape first, enum fallback. */}
-                      {extraWorkCategoryName(row) ??
-                        t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
-                    </td>
-                    <td>{row.building_name}</td>
-                    <td>{row.customer_name}</td>
-                    <td style={{ textAlign: "right" }}>
-                      {isPriced(row) ? (
-                        formatMoney(rowAmounts(row).total)
-                      ) : (
-                        <span
-                          className="muted-empty"
-                          title={t("list.total_not_priced_hint")}
-                        >
-                          &mdash;
-                        </span>
-                      )}
-                    </td>
-                    {isWorkStarted && (
-                      <td data-testid={`ew-ticket-cell-${row.id}`}>
-                        {/* Sprint 181 §1b — one renderer for the ticket
-                            numbers, with a real separator. Sprint 180
-                            leaned on a margin here and joined with ", "
-                            in the mobile card below; two tickets rendered
-                            as `TCK-...207TCK-...208`. */}
-                        <SpawnedTicketLinks tickets={row.spawned_tickets} />
-                      </td>
-                    )}
-                    {isWorkStarted && isProvider && (
-                      <td>
-                        {row.is_invoiced ? (
-                          <span className="badge badge-approved">
-                            {t("list.billing_invoiced")}
-                          </span>
-                        ) : (
-                          <span className="badge badge-normal">
-                            {t("list.billing_to_invoice")}
-                          </span>
-                        )}
-                        {row.invoice_date && (
-                          <div
-                            style={{
-                              fontSize: "0.8em",
-                              marginTop: 2,
-                              color: "var(--text-muted)",
-                            }}
-                          >
-                            {formatDate(row.invoice_date)}
+                        <div className="admin-card-head">
+                          <span className="admin-card-title">{row.title}</span>
+                          <PhaseBadge
+                            kind="ew"
+                            phase={row.display_phase}
+                            testId="extra-work-card-phase"
+                          />
+                        </div>
+                        <dl className="admin-card-meta">
+                          <div className="admin-card-meta-row">
+                            <dt>{t("list.column_where")}</dt>
+                            <dd>
+                              {row.building_name} · {row.customer_name}
+                            </dd>
                           </div>
-                        )}
-                      </td>
-                    )}
-                    {isWorkStarted && (
-                      <td data-testid={`ew-billed-to-cell-${row.id}`}>
-                        {t(BILLED_TO_I18N_KEY[row.billed_to])}
-                      </td>
-                    )}
-                    <td>{formatDate(row.requested_at)}</td>
-                    <td className="td-date">
-                      {row.deadline ? formatDate(row.deadline) : (
-                        <span className="muted-empty">—</span>
+                          <div className="admin-card-meta-row">
+                            <dt>{t("list.column_amount")}</dt>
+                            <dd>{money(row)}</dd>
+                          </div>
+                        </dl>
+                      </Link>
+                      {step.buttonKey && (
+                        <Link to={step.to} className="btn btn-sm btn-secondary">
+                          {t(step.buttonKey)}
+                        </Link>
                       )}
-                      {/* The markers, in the status colours this app
-                          already has — a new pair would mean two
-                          vocabularies for "something is wrong". */}
-                      {row.is_overdue && (
-                        <span
-                          className="cell-tag cell-tag-rejected"
-                          style={{ marginLeft: 6 }}
-                          data-testid="ew-overdue-marker"
-                        >
-                          {t("list.overdue")}
-                        </span>
-                      )}
-                      {row.started_before_plan && (
-                        <span
-                          className="cell-tag cell-tag-open"
-                          style={{ marginLeft: 6 }}
-                          title={t("list.startedEarlyWhy")}
-                          data-testid="ew-started-early-marker"
-                        >
-                          {t("list.startedEarly")}
-                        </span>
-                      )}
-                    </td>
-                  </ClickableRow>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
-          {/* Mobile card fallback */}
-          <ul
-            className="admin-card-list"
-            data-testid="admin-card-list"
-            aria-label={t("list.page_title")}
-          >
-            {visibleRows.map((row) => (
-              <li key={row.id} className="admin-card">
-                <Link
-                  to={`/extra-work/${row.id}`}
-                  className="admin-card-link"
-                  data-testid="extra-work-card"
+          {/* P-11 A5 — search searches the tab you are in; what matches
+              ELSEWHERE is one line under the results, opened on demand,
+              each row named with its own tab. */}
+          {!viewCancelled && needle.length > 0 && elsewhereMatches.length > 0 && (
+            <div className="ew-elsewhere" data-testid="extra-work-search-elsewhere">
+              <p className="muted small">
+                {t("list.search_elsewhere", { count: elsewhereMatches.length })}{" "}
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => setElsewhereOpen((open) => !open)}
+                  data-testid="extra-work-search-elsewhere-toggle"
                 >
-                  <div className="admin-card-head">
-                    <span className="admin-card-title">{row.title}</span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        gap: 6,
-                        alignItems: "center",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      {/* Sprint 181 §1 — the card carries the same one
-                          status the table row does, from the same
-                          authority. */}
-                      {isWorkStarted ? (
-                        <StatusBadge
-                          status={{
-                            kind: "ticket",
-                            value: operationalStatus(row) ?? "OPEN",
-                          }}
-                        />
-                      ) : (
-                        <StatusBadge
-                          status={{ kind: "extra-work", value: row.status }}
-                        />
-                      )}
-                      <RouteBadge value={row.routing_decision} />
-                      {isSpawnAnomaly(row) && (
-                        <span
-                          className="cell-tag cell-tag-rejected"
-                          title={t("list.track_anomaly_title")}
-                        >
-                          {t("list.track_anomaly_marker")}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  <dl className="admin-card-meta">
-                    <div className="admin-card-meta-row">
-                      <dt>{t("list.column_route")}</dt>
-                      <dd>
-                        {row.routing_decision === "INSTANT"
-                          ? t("route_badge.instant", { ns: "common" })
-                          : t("route_badge.proposal", { ns: "common" })}
-                      </dd>
-                    </div>
-                    <div className="admin-card-meta-row">
-                      <dt>{t("list.column_category")}</dt>
-                      <dd>
-                        {extraWorkCategoryName(row) ??
-                          t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
-                      </dd>
-                    </div>
-                    <div className="admin-card-meta-row">
-                      <dt>{t("list.column_building")}</dt>
-                      <dd>{row.building_name}</dd>
-                    </div>
-                    <div className="admin-card-meta-row">
-                      <dt>{t("list.column_customer")}</dt>
-                      <dd>{row.customer_name}</dd>
-                    </div>
-                    <div className="admin-card-meta-row">
-                      <dt>{t("list.column_total")}</dt>
-                      <dd>
-                        {isPriced(row) ? (
-                          formatMoney(rowAmounts(row).total)
-                        ) : (
-                          <span className="muted-empty">&mdash;</span>
-                        )}
-                      </dd>
-                    </div>
-                    {/* Sprint 180 — the mobile card carries exactly the
-                        columns the table on this track carries. */}
-                    {isWorkStarted && (
-                      <div className="admin-card-meta-row">
-                        <dt>{t("list.column_ticket")}</dt>
-                        <dd>
-                          <SpawnedTicketLinks tickets={row.spawned_tickets} />
-                        </dd>
-                      </div>
-                    )}
-                    {isWorkStarted && (
-                      <div className="admin-card-meta-row">
-                        <dt>{t("list.column_billed_to")}</dt>
-                        <dd>{t(BILLED_TO_I18N_KEY[row.billed_to])}</dd>
-                      </div>
-                    )}
-                    {isWorkStarted && isProvider && (
-                      <div className="admin-card-meta-row">
-                        <dt>{t("list.column_billing")}</dt>
-                        <dd>
-                          {row.is_invoiced ? (
-                            <span className="badge badge-approved">
-                              {t("list.billing_invoiced")}
-                            </span>
-                          ) : (
-                            <span className="badge badge-normal">
-                              {t("list.billing_to_invoice")}
-                            </span>
-                          )}
-                          {row.invoice_date
-                            ? ` · ${formatDate(row.invoice_date)}`
-                            : ""}
-                        </dd>
-                      </div>
-                    )}
-                    <div className="admin-card-meta-row">
-                      <dt>{t("list.column_requested")}</dt>
-                      <dd>{formatDate(row.requested_at)}</dd>
-                    </div>
-                  </dl>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+                  {elsewhereOpen
+                    ? t("list.search_elsewhere_hide")
+                    : t("list.search_elsewhere_show")}
+                </button>
+              </p>
+              {elsewhereOpen && (
+                <ul
+                  className="ew-elsewhere-list"
+                  data-testid="extra-work-search-elsewhere-list"
+                >
+                  {elsewhereMatches.map(({ bucket, row }) => (
+                    <li key={row.id} className="ew-elsewhere-row">
+                      <Link
+                        to={`/extra-work/${row.id}`}
+                        data-testid={`extra-work-elsewhere-row-${row.id}`}
+                      >
+                        {row.title}
+                      </Link>
+                      <span className="muted small">
+                        {[row.building_name, row.customer_name]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                      <Link
+                        className="ew-elsewhere-tab"
+                        to={
+                          bucket === CANCELLED_VIEW
+                            ? linkTo("finished", CANCELLED_VIEW)
+                            : linkTo(bucket)
+                        }
+                        data-testid={`extra-work-elsewhere-tab-${row.id}`}
+                      >
+                        {t(BUCKET_LABEL_KEY[bucket])}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
+          {/* The foot: the cancelled door (Finished only) and the P-8
+              guard — quiet when it adds up, red when it does not. */}
+          <div className="ew-list-foot">
+            {activeTab === "finished" && !viewCancelled && (
+              <Link
+                to={linkTo("finished", CANCELLED_VIEW)}
+                className="ew-cancelled-link"
+                data-testid="extra-work-cancelled-link"
+                data-count={counts.cancelled}
+              >
+                {t("tabs.cancelled_link", { count: counts.cancelled })}
+              </Link>
+            )}
+            <p
+              className="muted small ew-list-guard-line"
+              data-testid="extra-work-list-loaded-count"
+              data-count={rows.length}
+            >
+              {t("list.loaded_count", { count: rows.length })}
+            </p>
+            {rows.length > 0 && countedTotal !== rows.length && (
+              <div className="alert-error" role="alert" data-testid="extra-work-list-guard">
+                {t("list.guard_mismatch", { loaded: rows.length, counted: countedTotal })}
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
 /**
- * The sidebar route. A wrapper, so the route keeps its own name while
- * the list itself is the shared component above.
+ * The sidebar route. `/extra-work` (no tab) lands on the first tab with
+ * rows; `/extra-work/<tab>` opens that tab.
  */
-export function ExtraWorkListPage() {
-  return <ExtraWorkList />;
+export function ExtraWorkListPage({ tab }: { tab?: ExtraWorkTab }) {
+  return <ExtraWorkList tab={tab} />;
 }

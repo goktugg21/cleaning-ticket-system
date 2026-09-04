@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, RefreshCw } from "lucide-react";
+import { Building2, Plus, SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import { bulkDeactivateCompanies, listCompanies } from "../../api/admin";
@@ -11,14 +11,18 @@ import { useSavedBanner } from "../../hooks/useSavedBanner";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { EditModeToggle } from "../../components/EditModeToggle";
+import { EmptyState } from "../../components/EmptyState";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
+import { PageHeader } from "../../components/PageHeader";
 import { SortableHeader } from "../../components/SortableHeader";
 import type { SortState } from "../../components/SortableHeader";
 import { useEditMode } from "../../lib/useEditMode";
 
 /** Every value here MUST exist in `CompanyViewSet.ordering_fields`;
- *  the backend allowlist is the authority and rejects anything else. */
-type SortField = "name" | "slug" | "is_active" | "created_at";
+ *  the backend allowlist is the authority and rejects anything else.
+ *  P-6 V3 — `slug` left the list (it is an Advanced value on the detail
+ *  page, §D.6 rule 12), so it is no longer a column to sort by. */
+type SortField = "name" | "is_active" | "created_at";
 
 type ActiveFilter = "true" | "false" | "all";
 
@@ -138,38 +142,60 @@ export function CompaniesAdminPage() {
 
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
 
+  // P-6 V3 (§D.6 rule 12) — the language as a word, never the raw code.
+  // The detail page says "Nederlands (nl)"; a list column has room for
+  // the word only.
+  const languageLabel = (code: string): string => {
+    if (code === "nl") return t("language_dutch");
+    if (code === "en") return t("language_english");
+    return code;
+  };
+
+  const statusLabel = (active: boolean) =>
+    active ? t("admin.status_active") : t("admin.status_inactive");
+
+  // P-6 V3 — the filters behind ONE Filter fold with the active ones as
+  // chips (the contracts / tickets pattern); the search stays outside.
+  const activeFilterChips: string[] = [];
+  if (activeFilter === "false") activeFilterChips.push(t("admin.status_inactive"));
+  if (activeFilter === "all") activeFilterChips.push(t("admin.status_all"));
+
+  const previousLocked = loading
+    ? t("admin_list.page_loading")
+    : !previous || page <= 1
+      ? t("admin_list.page_first")
+      : undefined;
+  const nextLocked = loading
+    ? t("admin_list.page_loading")
+    : !next
+      ? t("admin_list.page_last")
+      : undefined;
+
+  const createLink = isSuperAdmin ? (
+    <Link
+      className="btn btn-primary btn-sm"
+      to="/admin/companies/new"
+      data-testid="companies-create-link"
+    >
+      <Plus size={14} strokeWidth={2.5} />
+      {t("admin.create_new")}
+    </Link>
+  ) : undefined;
+
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
-          </div>
-          <h2 className="page-title">{t("nav.companies")}</h2>
-          <p className="page-sub">
-            {loading
-              ? t("companies.loading")
-              : t("companies.count", { count })}
-          </p>
-        </div>
-        <div className="page-header-actions">
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={load}
-            disabled={loading}
-          >
-            <RefreshCw size={14} strokeWidth={2.5} />
-            {t("refresh")}
-          </button>
-          {isSuperAdmin && (
-            <Link className="btn btn-primary btn-sm" to="/admin/companies/new">
-              <Plus size={14} strokeWidth={2.5} />
-              {t("admin.create_new")}
-            </Link>
-          )}
-        </div>
-      </div>
+      {/* P-6 V3 — the shared header; "+ New" is the one primary action
+          (§D.6 rule 3). The Refresh button is gone: the list reloads on
+          every filter, sort and save, so it only ever repeated what the
+          page had just done. */}
+      <PageHeader
+        eyebrow={t("nav.admin_group")}
+        title={t("nav.companies")}
+        subtitle={
+          loading ? t("companies.loading") : t("companies.count", { count })
+        }
+        actions={createLink}
+      />
 
       {savedBanner && (
         <div className="alert-info" style={{ marginBottom: 16 }} role="status">
@@ -182,39 +208,6 @@ export function CompaniesAdminPage() {
           {error}
         </div>
       )}
-
-      {/* Sprint 157 §3 — the tiles the buildings and customers lists
-          already had. `count` is the SERVER's total for the current
-          filter, not `companies.length`, which is one page. */}
-      <div
-        className="summary-grid summary-grid-chips"
-        data-testid="companies-stats"
-        style={{ marginBottom: 16 }}
-      >
-        {[
-          { key: "total", label: t("companies.stat_total"), value: count },
-          {
-            key: "active",
-            label: t("companies.stat_active"),
-            value: companies.filter((c) => c.is_active).length,
-          },
-          {
-            key: "inactive",
-            label: t("companies.stat_inactive"),
-            value: companies.filter((c) => !c.is_active).length,
-          },
-        ].map((stat) => (
-          <div
-            className="summary-stat"
-            key={stat.key}
-            style={{ cursor: "default" }}
-            data-testid={`companies-stat-${stat.key}`}
-          >
-            <span className="summary-stat-label">{stat.label}</span>
-            <span className="summary-stat-value">{stat.value}</span>
-          </div>
-        ))}
-      </div>
 
       <div className="card" style={{ overflow: "hidden" }}>
         <form
@@ -235,21 +228,6 @@ export function CompaniesAdminPage() {
               onChange={(event) => setSearchInput(event.target.value)}
             />
           </div>
-          <div className="filter-field">
-            <span className="filter-label">{t("status")}</span>
-            <select
-              className="filter-control"
-              value={activeFilter}
-              onChange={(event) => {
-                setActiveFilter(event.target.value as ActiveFilter);
-                setPage(1);
-              }}
-            >
-              <option value="true">{t("admin.status_active")}</option>
-              <option value="false">{t("admin.status_inactive")}</option>
-              <option value="all">{t("admin.status_all")}</option>
-            </select>
-          </div>
           <div className="filter-actions">
             {hasActiveFilters && (
               <button
@@ -266,14 +244,55 @@ export function CompaniesAdminPage() {
               </button>
             )}
             {pageIds.length > 0 && (
-              <EditModeToggle
-                editMode={edit.editMode}
-                onToggle={edit.toggleMode}
-                disabled={bulkBusy}
-                testId="companies-edit-mode-toggle"
-              />
+              /* §D.6 rule 14 — the toggle has no title of its own, so the
+                 reason it is off rides on the wrapper. */
+              <span title={bulkBusy ? t("admin_list.edit_busy") : undefined}>
+                <EditModeToggle
+                  editMode={edit.editMode}
+                  onToggle={edit.toggleMode}
+                  disabled={bulkBusy}
+                  testId="companies-edit-mode-toggle"
+                />
+              </span>
             )}
           </div>
+          <details
+            className="filter-fold"
+            open={activeFilterChips.length > 0}
+            data-testid="companies-filter-fold"
+          >
+            <summary className="filter-fold-summary" data-testid="companies-filter-toggle">
+              <SlidersHorizontal size={14} strokeWidth={2.4} aria-hidden="true" />
+              {t("admin_list.filter_fold")}
+              {activeFilterChips.length > 0 && (
+                <span className="filter-fold-count">
+                  {t("admin_list.filter_active", { count: activeFilterChips.length })}
+                </span>
+              )}
+              {activeFilterChips.map((label) => (
+                <span className="filter-fold-chip" key={label}>
+                  {label}
+                </span>
+              ))}
+            </summary>
+            <div className="filter-fold-body">
+              <div className="filter-field">
+                <span className="filter-label">{t("status")}</span>
+                <select
+                  className="filter-control"
+                  value={activeFilter}
+                  onChange={(event) => {
+                    setActiveFilter(event.target.value as ActiveFilter);
+                    setPage(1);
+                  }}
+                >
+                  <option value="true">{t("admin.status_active")}</option>
+                  <option value="false">{t("admin.status_inactive")}</option>
+                  <option value="all">{t("admin.status_all")}</option>
+                </select>
+              </div>
+            </div>
+          </details>
         </form>
 
         {edit.editMode && (
@@ -333,15 +352,6 @@ export function CompaniesAdminPage() {
                     column: t("admin.col_name"),
                   })}
                 />
-                <SortableHeader
-                  label={t("companies.col_slug")}
-                  sort={sortStateFor("slug")}
-                  testId="companies-sort-slug"
-                  onSort={() => handleSort("slug")}
-                  sortByLabel={t("companies.sort_by", {
-                    column: t("companies.col_slug"),
-                  })}
-                />
                 <th>{t("companies.col_default_language")}</th>
                 <SortableHeader
                   label={t("created")}
@@ -372,7 +382,18 @@ export function CompaniesAdminPage() {
                     role="link"
                     tabIndex={0}
                     aria-label={t("admin.view") + ": " + company.name}
-                    onClick={openDetail}
+                    /* W14 §3 — one click, one history entry. The row
+                       navigates AND contains a `<Link>` to the same
+                       place, so a click on the link pushed twice and
+                       the browser's Back then landed on the page it was
+                       pressed from. Same defect, same fix, as the
+                       tickets list. */
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("a,button")) {
+                        return;
+                      }
+                      openDetail();
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
@@ -404,17 +425,14 @@ export function CompaniesAdminPage() {
                     <td className="td-subject">
                       <Link to={detailPath}>{company.name}</Link>
                     </td>
-                    <td>{company.slug}</td>
-                    <td>{company.default_language}</td>
+                    <td>{languageLabel(company.default_language)}</td>
                     <td className="td-date">{formatDate(company.created_at, dateLocale)}</td>
                     <td>
                       <span
                         className={`cell-tag cell-tag-${company.is_active ? "open" : "closed"}`}
                       >
                         <i />
-                        {company.is_active
-                          ? t("admin.status_active")
-                          : t("admin.status_inactive")}
+                        {statusLabel(company.is_active)}
                       </span>
                     </td>
                     <td>
@@ -457,19 +475,13 @@ export function CompaniesAdminPage() {
                       className={`cell-tag cell-tag-${company.is_active ? "open" : "closed"}`}
                     >
                       <i />
-                      {company.is_active
-                        ? t("admin.status_active")
-                        : t("admin.status_inactive")}
+                      {statusLabel(company.is_active)}
                     </span>
                   </div>
                   <dl className="admin-card-meta">
                     <div className="admin-card-meta-row">
-                      <dt>{t("companies.col_slug")}</dt>
-                      <dd>{company.slug}</dd>
-                    </div>
-                    <div className="admin-card-meta-row">
                       <dt>{t("companies.col_default_language")}</dt>
-                      <dd>{company.default_language}</dd>
+                      <dd>{languageLabel(company.default_language)}</dd>
                     </div>
                     <div className="admin-card-meta-row">
                       <dt>{t("created")}</dt>
@@ -488,26 +500,29 @@ export function CompaniesAdminPage() {
         </ul>
 
         {!loading && companies.length === 0 && (
-          <div className="empty-state">
-            <div className="empty-icon">＋</div>
-            <div className="empty-title">
-              {hasActiveFilters
+          <EmptyState
+            icon={Building2}
+            title={
+              hasActiveFilters
                 ? t("companies.empty_filtered_title")
-                : t("companies.empty_initial_title")}
-            </div>
-            <p className="empty-sub">
-              {hasActiveFilters
+                : t("companies.empty_initial_title")
+            }
+            description={
+              hasActiveFilters
                 ? t("admin.empty_filtered_desc")
                 : isSuperAdmin
                   ? t("companies.empty_initial_desc_admin")
-                  : t("companies.empty_initial_desc_other")}
-            </p>
-            {isSuperAdmin && !hasActiveFilters && (
-              <Link className="btn btn-primary btn-sm" to="/admin/companies/new">
-                {t("companies.create")}
-              </Link>
-            )}
-          </div>
+                  : t("companies.empty_initial_desc_other")
+            }
+            action={
+              isSuperAdmin && !hasActiveFilters ? (
+                <Link className="btn btn-primary btn-sm" to="/admin/companies/new">
+                  {t("companies.create")}
+                </Link>
+              ) : undefined
+            }
+            testId="companies-empty"
+          />
         )}
 
         {(previous || next) && (
@@ -519,7 +534,8 @@ export function CompaniesAdminPage() {
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                disabled={loading || !previous || page <= 1}
+                disabled={previousLocked !== undefined}
+                title={previousLocked}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
               >
                 {t("previous")}
@@ -527,7 +543,8 @@ export function CompaniesAdminPage() {
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                disabled={loading || !next}
+                disabled={nextLocked !== undefined}
+                title={nextLocked}
                 onClick={() => setPage((current) => current + 1)}
               >
                 {t("next")}
@@ -567,4 +584,3 @@ export function CompaniesAdminPage() {
     </div>
   );
 }
-

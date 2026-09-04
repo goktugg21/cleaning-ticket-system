@@ -110,6 +110,11 @@ class RecurringJobReadSerializer(serializers.ModelSerializer):
     price_folder_name = serializers.CharField(
         source="price_folder.name", read_only=True, allow_null=True
     )
+    # W23 — the linked contract line, same null-safe name shape as the
+    # classifier labels above.
+    contract_line_name = serializers.CharField(
+        source="contract_line.name", read_only=True, allow_null=True
+    )
     default_staff_ids = serializers.SerializerMethodField()
     default_manager_ids = serializers.SerializerMethodField()
     occurrences_count = serializers.SerializerMethodField()
@@ -135,6 +140,8 @@ class RecurringJobReadSerializer(serializers.ModelSerializer):
             "service_category_name",
             "price_folder",
             "price_folder_name",
+            "contract_line",
+            "contract_line_name",
             "title",
             "description",
             "frequency",
@@ -230,6 +237,8 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
             "work_type",
             "service_category",
             "price_folder",
+            # W23 — same discipline: optional, tenant-validated below.
+            "contract_line",
             "title",
             "description",
             "frequency",
@@ -294,6 +303,63 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
                         field: serializers.ErrorDetail(
                             "This label belongs to a different customer.",
                             code="label_customer_mismatch",
+                        )
+                    }
+                )
+
+        # P-12 E3 — ask, don't force, never leave a hole: a rule saved
+        # without a department / work type stores the customer's seeded
+        # "Algemeen" pair (the extra-work create rule; one definition,
+        # `customers.signals.ensure_default_labels`). On CREATE an
+        # absent field fills; on PATCH only an explicit null does — a
+        # PATCH that does not mention the field never overwrites a
+        # choice. "None" is not an option in the data.
+        fill_department = ("department" in attrs and attrs["department"] is None) or (
+            instance is None and attrs.get("department") is None
+        )
+        fill_work_type = ("work_type" in attrs and attrs["work_type"] is None) or (
+            instance is None and attrs.get("work_type") is None
+        )
+        if fill_department or fill_work_type:
+            from customers.signals import ensure_default_labels
+
+            default_department, default_work_type = ensure_default_labels(customer)
+            if fill_department:
+                attrs["department"] = default_department
+            if fill_work_type:
+                attrs["work_type"] = default_work_type
+
+        # W23 — the contract-line link (tenant law, P0 class). Validated
+        # on the EFFECTIVE line — the incoming value, or on PATCH the
+        # stored one — so changing the job's customer/building can never
+        # strand a foreign line either. The line's contract must belong
+        # to this job's customer, and a line pinned to a building must
+        # match the job's building.
+        if "contract_line" in attrs:
+            contract_line = attrs.get("contract_line")
+        else:
+            contract_line = getattr(instance, "contract_line", None)
+        if contract_line is not None:
+            if contract_line.revision.contract.customer_id != customer.id:
+                raise serializers.ValidationError(
+                    {
+                        "contract_line": serializers.ErrorDetail(
+                            "This contract line belongs to a different "
+                            "customer.",
+                            code="contract_line_customer_mismatch",
+                        )
+                    }
+                )
+            if (
+                contract_line.building_id is not None
+                and contract_line.building_id != building.id
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "contract_line": serializers.ErrorDetail(
+                            "This contract line is pinned to a different "
+                            "building.",
+                            code="contract_line_building_mismatch",
                         )
                     }
                 )

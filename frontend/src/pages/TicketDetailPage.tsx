@@ -1,44 +1,80 @@
-import type { ChangeEvent, FormEvent } from "react";
+import type { ChangeEvent, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
+import {
+  Archive,
   ArrowRightLeft,
+  CalendarClock,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
   Download,
-  MapPin,
+  Eye,
   MessageSquare,
   Paperclip,
   TriangleAlert,
+  Undo2,
   UploadCloud,
-  UserPlus,
-  Users,
 } from "lucide-react";
 import axios from "axios";
 import { Trans, useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
+import { pointAtMissingPiece, useMissingPieceAnchor } from "../lib/missingPiece";
+import { createTimeEntry, listHourTypes } from "../api/timesheets";
+import { isoWeekOf, toDateString } from "../lib/isoWeek";
+import { planDoorAction } from "../lib/planDoor";
+import { describeTransitionRefusal } from "../lib/transitionRefusal";
+// W-UX1-B — reuse, not redesign: the same viewer the invoice preview
+// opens, with its download button switched off.
+import { PdfPreviewDialog } from "../components/PdfPreviewDialog";
+import type { PdfPreviewDialogHandle } from "../components/PdfPreviewDialog";
 import { markThreadRead, notifyInboxUnreadChanged } from "../api/inbox";
 import {
+  addTicketStaffAssignment,
   cancelStaffAssignmentRequest,
   createStaffAssignmentRequest,
   getStaffCompletionRoute,
+  getTransitionRequirements,
+  listAssignableStaff,
   listCustomerContacts,
   listStaffAssignmentRequests,
+  listTicketStaffAssignments,
+  removeTicketStaffAssignment,
 } from "../api/admin";
-import { listWorkCategories, setTicketCategory } from "../api/tickets";
+import {
+  listTicketAssignmentCandidates,
+  listTicketCategories,
+  setTicketCategory,
+} from "../api/tickets";
+import {
+  addManagerAssignments,
+  removeManagerAssignment,
+} from "../api/managerAssignments";
 import { getMessageRecipients } from "../api/notifications";
-import { downloadDocumentFromUrl } from "../api/staffCredentials";
-import { formatDateTime } from "../lib/intl";
-import { StaffSlotEditor } from "./tickets/StaffSlotEditor";
+import { formatDate as formatDay, formatDateTime, formatMoney } from "../lib/intl";
+import { MyPartsPanel } from "./tickets/MyPartsPanel";
+import type { OpenPart } from "./tickets/TicketTransitionModal";
+import { StaffAssignmentSection } from "./tickets/StaffAssignmentSection";
 import { SubTaskReadOnly } from "./tickets/SubTaskReadOnly";
 import { ResponsibleManagersSection } from "./tickets/ResponsibleManagersSection";
+import {
+  TicketTransitionModal,
+  type TransitionAnswers,
+} from "./tickets/TicketTransitionModal";
 import { TicketScheduleCard } from "./tickets/TicketScheduleCard";
+import type { AssignableStaff } from "../api/admin";
 import type {
   AssignableManager,
   AssignedStaffNamedEntry,
   Contact,
+  EwMessage,
   MessageRecipient,
   PaginatedResponse,
   StaffCompletionRoute,
@@ -48,30 +84,64 @@ import type {
   TicketMessageType,
   TicketStatus,
   TicketStatusChangePayload,
-  WorkCategory,
+  TicketCategory,
   TicketTimelineRow,
+  TransitionRequirements,
+  // W6 §3 — the SHARED upload-visibility wire type. W-FIX5 deleted the
+  // per-person explanation sentences and with them
+  // `UPLOAD_SOURCE_LABEL_KEY`, which was this page's only reader of
+  // `UploadVisibilitySource`.
+  TicketUploadVisibility,
 } from "../api/types";
+import {
+  getExtraWork,
+  listEwMessages,
+  listExtraWorkAssignments,
+  planExtraWork,
+} from "../api/extraWork";
+import type {
+  AssignmentCandidate,
+  ExtraWorkAssignment,
+  ExtraWorkPlanPayload,
+  ExtraWorkRequestDetail,
+} from "../api/types";
+import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
+import { publishCurrentTicketKind } from "../lib/currentTicketKind";
+import { PlannedVsWorkedPanel } from "../components/extra-work/PlannedVsWorkedPanel";
+import { BookHoursDialog } from "../components/extra-work/BookHoursDialog";
+import {
+  getTicketUploadVisibility,
+  setTicketUploadVisibility,
+} from "../api/uploadVisibility";
 import { getTicketAuditTimeline } from "../api/ticketTimeline";
 import { useAuth } from "../auth/AuthContext";
+import { useOriginBackLink } from "../hooks/useBackLink";
 import {
+  canAccessExtraWork,
+  canManageTimesheets,
   composerTiersForRole,
   isCustomerUser,
   isProviderAdmin,
   isProviderManagementRole,
-  isStaff as isStaffRoleFn,
 } from "../auth/permissions";
+import { TicketExtraWorkCards } from "../components/extra-work/TicketExtraWorkCards";
 import { AttachmentThumb } from "../components/AttachmentThumb";
+import { BillingCutoffNotice } from "../components/BillingCutoffNotice";
+import { BoundedList } from "../components/BoundedList";
 import { CollapsibleCard } from "../components/CollapsibleCard";
+import { TicketArchiveDialog } from "../components/TicketArchiveDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Toggle } from "../components/Toggle";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { ConvertToExtraWorkDialog } from "../components/ConvertToExtraWorkDialog";
 import { useToast } from "../components/ToastProvider";
-import { RouteBadge } from "../components/RouteBadge";
+import { PhaseBanner } from "../components/customer/PhaseBadge";
+import { DoneBanner } from "../components/guide/DoneBanner";
+import { useDoneBanner } from "../components/guide/useDoneBanner";
+import { DueChipCore } from "../components/workplan/WorkPlanCard";
 import { UnifiedTimeline } from "../components/UnifiedTimeline";
 import { SLABadge } from "../components/sla/SLABadge";
-import { useFormatSLATime } from "../utils/useFormatSLATime";
-import { useSLALabel } from "../utils/useSLALabel";
+import { describeTicketChange } from "../lib/describeTicketChange";
 import { ticketStatusLabelKey } from "../lib/enumLabels";
 
 // B7 four-tier note taxonomy — per-tier UI vocabulary. The bubble class
@@ -133,14 +203,6 @@ const NOTE_TIER_WHO_SEES_KEY: Record<TicketMessageType, string> = {
   CUSTOMER_INTERNAL: "composer_customer_internal_who_sees",
 };
 
-const NOTE_TIER_TONE_CLASS: Record<TicketMessageType, string> = {
-  PUBLIC_REPLY: "",
-  INTERNAL_NOTE: "internal",
-  STAFF_OPERATIONAL: "internal",
-  STAFF_COMPLETION: "",
-  CUSTOMER_INTERNAL: "internal",
-};
-
 // Sprint 15: backend is the source of truth for which transitions are
 // available. Previously the frontend carried a SUPER_ADMIN_UI_NEXT_STATUS
 // table that hard-coded a SUPER_ADMIN's next-step buttons; that table
@@ -154,18 +216,6 @@ function getVisibleWorkflowStatuses(ticket: TicketDetail): TicketStatus[] {
   return ticket.allowed_next_statuses;
 }
 
-function isAdminCustomerDecisionOverride(
-  currentStatus: TicketStatus,
-  nextStatus: TicketStatus,
-  role?: string,
-): boolean {
-  return (
-    (role === "SUPER_ADMIN" || role === "COMPANY_ADMIN") &&
-    currentStatus === "WAITING_CUSTOMER_APPROVAL" &&
-    (nextStatus === "APPROVED" || nextStatus === "REJECTED")
-  );
-}
-
 // Sprint 30 Batch 30.1.1.5 — progressive disclosure of workflow
 // transitions. SUPER_ADMIN sees up to 7 transitions on certain
 // statuses; cramming them all as primary buttons buries the obvious
@@ -176,16 +226,149 @@ function isAdminCustomerDecisionOverride(
 // transitions are legal — 30.1.1's `visibleNextStatuses` gate still
 // runs first; this only changes how the legal set is laid out.
 const PRIMARY_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
-  OPEN: ["IN_PROGRESS"],
-  IN_PROGRESS: ["WAITING_MANAGER_REVIEW", "CLOSED"],
-  WAITING_MANAGER_REVIEW: ["APPROVED", "REJECTED"],
+  // W13 §1 — ONE entry per status. The renderer takes the FIRST legal
+  // one and puts every other legal move behind "other actions".
+  //
+  // The owner's father, on a card offering three: "I press it, I don't
+  // know what it does, I don't know why I press it — because you are
+  // telling me to press it." Two buttons that both look like the next
+  // step mean the page has not decided, and a reader cannot decide
+  // either. The list is still a LIST because the first entry may be
+  // illegal for this actor; the second is then the primary, and so on.
+  //
+  // IN_PROGRESS carried three (manager review, customer approval, on
+  // hold). Manager review is first because it is the system's own
+  // default: `BuildingStaffVisibility.staff_completion_routes_to_customer`
+  // is false unless somebody set it, and when it IS set the backend
+  // narrows `allowed_next_statuses` to the customer route for that
+  // staffer, so the first LEGAL entry resolves to the right one without
+  // this table knowing anything about the flag.
+  OPEN: ["ACKNOWLEDGED"],
+  ACKNOWLEDGED: ["IN_PROGRESS"],
+  ON_HOLD: ["IN_PROGRESS"],
+  IN_PROGRESS: ["WAITING_MANAGER_REVIEW", "WAITING_CUSTOMER_APPROVAL"],
+  WAITING_MANAGER_REVIEW: ["WAITING_CUSTOMER_APPROVAL"],
+  // The customer's own decision is a genuine pair: approving and
+  // rejecting are opposite answers to one question, not two candidate
+  // next steps, and hiding "reject" behind a disclosure would be a
+  // dishonest screen. This is the one deliberate exception.
   WAITING_CUSTOMER_APPROVAL: ["APPROVED", "REJECTED"],
   APPROVED: ["CLOSED"],
   REJECTED: ["IN_PROGRESS"],
   CLOSED: [],
   REOPENED_BY_ADMIN: ["IN_PROGRESS"],
-  // Terminal — no further status moves once converted to Extra Work.
   CONVERTED_TO_EXTRA_WORK: [],
+};
+/**
+ * W9 §2 — WHICH MOVES UNDO PROGRESS, by rank rather than by list.
+ *
+ * The owner: "if something moves from In Progress to a customer-related
+ * status or another stage, there should be a clear way to move it back
+ * ... I couldn't clearly find where this exists in Tickets." He could
+ * not find it because it lived behind a text link called "Show
+ * correction actions", and on the status where it matters most it was
+ * not reachable at all (see WAITING_MANAGER_REVIEW above).
+ *
+ * WHY A RANK AND NOT A HARDCODED PAIR LIST. `ALLOWED_TRANSITIONS` has
+ * only two backward pairs, so a pair list looked right — and it was
+ * wrong for the one role that matters here. `allowed_next_statuses`
+ * (state_machine.py, the SUPER_ADMIN_ALLOWED_NEXT_ALL_STATUSES branch,
+ * Sprint 184 §2) deliberately hands a SUPER_ADMIN EVERY status except
+ * the current one and CONVERTED_TO_EXTRA_WORK. So for the owner's own
+ * role a backward move exists from every status, including the
+ * WAITING_CUSTOMER_APPROVAL -> IN_PROGRESS he asked about, and a
+ * two-entry list would have surfaced almost none of them.
+ *
+ * The rank is the normal progression. A move is a correction when it
+ * goes to a lower rank than where the ticket stands. That is true for
+ * whoever is looking: a manager sending work back, a SUPER_ADMIN
+ * pulling a job out of the customer's hands. Nothing here widens what
+ * anybody may do — every button still comes from the backend's
+ * `allowed_next_statuses` and the endpoint re-checks it.
+ */
+const STATUS_RANK: Record<TicketStatus, number> = {
+  OPEN: 0,
+  // W10 §1 — between open and started, which is what it means.
+  ACKNOWLEDGED: 0.5,
+  IN_PROGRESS: 1,
+  // W10 §2 — a hold is a PAUSE, not a step back. It ranks with the work
+  // it interrupts, so resuming reads as forward and parking does not
+  // read as a correction.
+  ON_HOLD: 1,
+  // Back in the crew's hands, so it ranks with IN_PROGRESS rather than
+  // after CLOSED, where its name would otherwise put it.
+  REOPENED_BY_ADMIN: 1,
+  WAITING_MANAGER_REVIEW: 2,
+  WAITING_CUSTOMER_APPROVAL: 3,
+  APPROVED: 4,
+  REJECTED: 4,
+  CLOSED: 5,
+  CONVERTED_TO_EXTRA_WORK: 5,
+};
+
+/**
+ * States whose backward-looking move is the ONLY thing to do next, and
+ * is therefore resumption rather than correction. A rejected job going
+ * back to IN_PROGRESS is the crew getting on with it — the existing
+ * `WORKFLOW_TONE` note makes the same call and calls it forward motion.
+ * Painting it amber under "Correct a mistake" would tell an operator
+ * that the normal path through a rejection is an error.
+ */
+const RESUME_TARGETS: Partial<Record<TicketStatus, TicketStatus[]>> = {
+  REJECTED: ["IN_PROGRESS"],
+  REOPENED_BY_ADMIN: ["IN_PROGRESS"],
+};
+
+/** Is this move a correction rather than a step forward? */
+function isCorrection(
+  currentStatus: TicketStatus,
+  nextStatus: TicketStatus,
+): boolean {
+  if ((RESUME_TARGETS[currentStatus] ?? []).includes(nextStatus)) return false;
+  return STATUS_RANK[nextStatus] < STATUS_RANK[currentStatus];
+}
+
+// Sprint 190 §3 — colour carries MEANING on the workflow rail, so the
+// mapping from "where this button sends the ticket" to "what colour it
+// wears" is a Record over the whole TicketStatus union, not a list of
+// the negative ones. A Record is exhaustive by construction: add a
+// tenth status to `TicketStatus` and this fails to compile until
+// somebody says whether it is a forward step or a rejection. A
+// `Set(["REJECTED"])` would instead silently paint the new status green
+// — which is exactly the class of bug CLAUDE.md's "iterate the shared
+// exported constant" note was written about.
+//
+// "advance" is every step that moves work along, INCLUDING CLOSED (the
+// normal end of a job) and INCLUDING IN_PROGRESS reached from REJECTED
+// (redoing the work is forward motion). Only an actual rejection is
+// "reject". CONVERTED_TO_EXTRA_WORK is filtered out of both render
+// arrays and never reaches a button; it is listed so the Record stays
+// total.
+type WorkflowTone = "advance" | "reject" | "hold";
+
+/** Work that is over. A finished job is never "upcoming", whatever its
+ *  planned start says. */
+const TERMINAL_UI_STATUSES = new Set<TicketStatus>([
+  "APPROVED",
+  "REJECTED",
+  "CLOSED",
+  "CONVERTED_TO_EXTRA_WORK",
+]);
+const WORKFLOW_TONE: Record<TicketStatus, WorkflowTone> = {
+  OPEN: "advance",
+  ACKNOWLEDGED: "advance",
+  IN_PROGRESS: "advance",
+  // Parking a job is neither progress nor a rejection. It gets the
+  // "needs a person to act" tone, which is what `--state-waiting` is
+  // for, rather than the green of a step completed.
+  ON_HOLD: "hold",
+  WAITING_MANAGER_REVIEW: "advance",
+  WAITING_CUSTOMER_APPROVAL: "advance",
+  APPROVED: "advance",
+  REJECTED: "reject",
+  CLOSED: "advance",
+  REOPENED_BY_ADMIN: "advance",
+  CONVERTED_TO_EXTRA_WORK: "advance",
 };
 
 function partitionTransitions(
@@ -200,7 +383,24 @@ function partitionTransitions(
   // overrides that.)
   const primaryOrder = PRIMARY_TRANSITIONS[currentStatus] ?? [];
   const allowedSet = new Set(allowed);
-  const primary = primaryOrder.filter((s) => allowedSet.has(s));
+  // W9 §2 — a correction never counts as a forward step, even when
+  // PRIMARY_TRANSITIONS names it. `WAITING_MANAGER_REVIEW` legitimately
+  // lists IN_PROGRESS as one of its two real targets; it belongs in the
+  // correction group, which is where the split below puts it.
+  const legalPrimaries = primaryOrder.filter(
+    (s) => allowedSet.has(s) && !isCorrection(currentStatus, s),
+  );
+  // W13 §1 — ONE primary, and the first legal one wins.
+  //
+  // The exception is a QUESTION PUT TO THE READER rather than a next
+  // step: approve and reject are the two answers to "do you accept
+  // this work", and putting one behind a disclosure would hide half
+  // the question. Everywhere else, a second forward button means the
+  // page has not decided.
+  const primary =
+    currentStatus === "WAITING_CUSTOMER_APPROVAL"
+      ? legalPrimaries
+      : legalPrimaries.slice(0, 1);
   const primarySet = new Set(primary);
   const secondary = allowed.filter((s) => !primarySet.has(s));
   return { primary, secondary };
@@ -215,6 +415,79 @@ function partitionTransitions(
 const CONVERTIBLE_TICKET_STATUSES: ReadonlySet<TicketStatus> = new Set<
   TicketStatus
 >(["OPEN", "IN_PROGRESS", "REOPENED_BY_ADMIN"]);
+
+// W4-M §4a — frontend mirror of the backend `_SCHEDULE_TERMINAL_STATUSES`
+// set that also guards PATCH /tickets/<id>/attachment-visibility-policy/
+// (400 `attachment_visibility_policy_not_allowed_terminal`). Declared
+// here rather than imported from TicketScheduleCard: that file is a card
+// component, not a constants module, and the two uses are independent.
+const PHOTO_POLICY_TERMINAL_STATUSES: ReadonlySet<TicketStatus> = new Set<
+  TicketStatus
+>(["APPROVED", "REJECTED", "CLOSED", "CONVERTED_TO_EXTRA_WORK"]);
+
+// W4-M §4b — the PER-TICKET half of the staff photo pre-permission.
+//
+// The field, the resolver and both endpoints are chat P's
+// (`backend/tickets/models.py::UploadVisibilityGrant`,
+// `backend/tickets/attachment_visibility.py`,
+// `backend/tickets/views_upload_visibility.py`). This page renders the
+// per-ticket scope only:
+//
+//   GET   /api/tickets/<id>/upload-visibility/
+//   PATCH /api/tickets/<id>/upload-visibility/<user_id>/
+//         { uploads_customer_visible: true | false | null }
+//
+// `null` is not `false`. null CLEARS the decision at this scope and lets
+// the standing permission answer again; false is an explicit refusal
+// that outranks the standing permission for this ticket. The control
+// below is therefore three-state, not a toggle — a toggle would have to
+// silently pick one of grant/clear and would make one of them
+// unreachable.
+//
+// W6 §3 — THE TYPES USED TO BE DECLARED HERE, AND ARE NOT ANY MORE.
+//
+// W4-P wrote local copies of `UploadVisibilitySource`,
+// `TicketUploadVisibilityPerson` and the response shape in this file,
+// with the note "declared here rather than in `api/types.ts` because the
+// same wave is writing that file for the STANDING scope". That was the
+// right call for one sprint and the wrong thing to leave behind: the
+// shared versions landed in `api/types.ts` in that same wave, together
+// with a typed client in `api/uploadVisibility.ts`, and two
+// independently maintained descriptions of one wire contract is the
+// Sprint 126/130 failure mode — the copy nobody edits goes quietly stale
+// and the compiler cannot tell you, because each copy is internally
+// consistent.
+//
+// Two deliberate differences absorbed by collapsing onto the shared
+// types, neither of which changes behaviour here:
+//
+//   * `ticket_id` is `number | null` on the shared type, because
+//     `UploadVisibilityGrantState` also describes the STANDING scope,
+//     which has no ticket. This page never reads the field.
+//   * `effective_visibility` is `AttachmentVisibility`, which IS
+//     `"INTERNAL" | "CUSTOMER"` — the same two strings the local copy
+//     spelled out, now derived from the same `as const` array the
+//     attachment types use.
+//
+// `UploadVisibilitySource` is now derived from the exported
+// `UPLOAD_VISIBILITY_SOURCES` constant, so the exhaustive Record below
+// is checked against the one list a new source would be added to.
+
+// The three states the <select> offers. A union type, not a `const`
+// array: nothing iterates the list (the three <option>s are written out
+// so each can carry its own scope-bearing label), so an array would be a
+// runtime value that exists only to be read as a type.
+type UploadGrantChoice = "INHERIT" | "GRANT" | "REFUSE";
+
+function grantChoiceOf(value: boolean | null): UploadGrantChoice {
+  if (value === null) return "INHERIT";
+  return value ? "GRANT" : "REFUSE";
+}
+
+function grantChoiceValue(choice: UploadGrantChoice): boolean | null {
+  if (choice === "INHERIT") return null;
+  return choice === "GRANT";
+}
 
 const ACCEPTED_ATTACHMENT_TYPES =
   ".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
@@ -314,21 +587,130 @@ function sanitizeStatusNote(raw: string | null | undefined): string {
 }
 
 
+/* W-TABS Task 4 — THE SAME SPINE AS THE EXTRA WORK PAGE ("chip chip").
+ * The exported ordered constant every consumer iterates (CLAUDE.md —
+ * a second, independently maintained render list is how the Sprint 126
+ * headerless column happened), the same `composer-toggle` pill classes,
+ * the same `?tab=` search param with `replace: true` and absence as the
+ * overview default. Visibility is resolved per render because the Money
+ * tab depends on the TICKET (extra-work origin), not only the role —
+ * absent entirely for tickets with no money dimension. */
+/* FE-3 (Addendum D §D.6 rule 5) — MESSAGES ARE NOT A TAB ANY MORE.
+ * The conversation sits on the overview UNDER the facts; a `?tab=
+ * messages` link from before FE-3 clamps to the overview below. */
+const TICKET_TABS = [
+  "overview",
+  "people",
+  "plan",
+  "money",
+] as const;
+type TicketTab = (typeof TICKET_TABS)[number];
+
+/** W-LATE 3c - the moves that mean "the work is done", the only ones
+ *  the open-parts warn line belongs to. */
+const COMPLETION_TARGETS: ReadonlySet<TicketStatus | null> = new Set<
+  TicketStatus | null
+>(["WAITING_MANAGER_REVIEW", "WAITING_CUSTOMER_APPROVAL", "APPROVED", "CLOSED"]);
+
+
+// FE-2 (§D.4) — the customer label view of the ticket workflow. Keys
+// resolve in `common` (`phase.ticket.*`); the map mirrors
+// backend/tickets/display_phase.py and exists for HISTORY rows, where
+// the server sends the raw enum per row.
+const CUSTOMER_TICKET_PHASE_KEY: Record<string, string> = {
+  OPEN: "phase.ticket.RECEIVED",
+  ACKNOWLEDGED: "phase.ticket.PLANNED",
+  IN_PROGRESS: "phase.ticket.IN_EXECUTION",
+  ON_HOLD: "phase.ticket.IN_EXECUTION",
+  WAITING_MANAGER_REVIEW: "phase.ticket.IN_EXECUTION",
+  REOPENED_BY_ADMIN: "phase.ticket.IN_EXECUTION",
+  WAITING_CUSTOMER_APPROVAL: "phase.ticket.WAITING_YOUR_APPROVAL",
+  APPROVED: "phase.ticket.DONE",
+  CLOSED: "phase.ticket.DONE",
+  REJECTED: "phase.ticket.REJECTED",
+  CONVERTED_TO_EXTRA_WORK: "phase.ticket.CONVERTED",
+};
+
 export function TicketDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  /**
+   * W14 §3 — "BACK TO TICKETS" NOW GOES TO TICKETS.
+   *
+   * All three of this page's back links were `<Link to="/">` under the
+   * label `back_to_tickets`. So the control that says "Back to tickets"
+   * landed on the DASHBOARD — the owner's "it throws me to the
+   * dashboard", in the literal sense that the link pointed there — and
+   * being a `<Link>` it PUSHED, so the browser's own Back then came
+   * straight back into the ticket.
+   *
+   * `/tickets` is the page the label names and the page the reader came
+   * from, and `useBackLink` steps the history back to it when it is the
+   * entry behind this one, so the list returns with its filters, its
+   * page and its scroll rather than remounted from scratch.
+   */
+  /* W17 §1 — BACK GOES WHERE YOU CAME FROM (the W15 rule, moved here
+   * with the destination). A chargeable row opens the TICKET now, and
+   * Chargeable work mounts on two routes (`/tickets/chargeable` and
+   * `/admin/customers/<id>/chargeable`), so the row puts its own
+   * address in history state. Read, never trusted for navigation
+   * beyond a same-origin path: anything that is not a string beginning
+   * with a single `/` falls back to the tickets list. */
+  const routeLocation = useLocation();
+  const chargeableFrom = (() => {
+    const raw = (routeLocation.state as { chargeableFrom?: unknown } | null)
+      ?.chargeableFrom;
+    if (typeof raw !== "string") return null;
+    // `//host` is a protocol-relative URL, not an in-app path.
+    if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+    return raw;
+  })();
+
+  /* W-TABS Task 4 — the tab, from the URL, the EW page's exact rule:
+     absence IS overview, so the plain /tickets/<id> every existing link
+     and notification uses stays the canonical address. Clamping against
+     the VISIBLE set happens below once the ticket is loaded. */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const requestedTicketTab: TicketTab = (
+    TICKET_TABS as readonly string[]
+  ).includes(tabParam ?? "")
+    ? (tabParam as TicketTab)
+    : "overview";
+  const setTicketTab = (next: TicketTab) => {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        if (next === "overview") params.delete("tab");
+        else params.set("tab", next);
+        return params;
+      },
+      { replace: true },
+    );
+  };
   const { me } = useAuth();
-  const { t } = useTranslation(["ticket_detail", "common"]);
+  // W-VIEWER §8 — `staff_slots` joins the list because the worker's own
+  // parts card now sits on THIS page's overview tab and its title and
+  // count line are that bundle's strings. Adding the namespace rather
+  // than copying two keys into `ticket_detail`: one string, one owner.
+  const { t, i18n } = useTranslation(["ticket_detail", "common", "staff_slots"]);
   // M2 P5 — type / customer-facing labels for the resolver-gated
   // credential summaries on assigned-staff entries (reuses the P4
   // namespace; keys are NOT duplicated here).
   const { t: tCred } = useTranslation("staff_credentials");
   const toast = useToast();
-  const slaLabel = useSLALabel();
-  const formatSLATime = useFormatSLATime();
 
   const tStatus = (status: TicketStatus | string | null): string => {
     if (!status) return t("status_default_created");
+    // FE-2 (Addendum D §D.4) — a CUSTOMER reads phase words, never the
+    // workflow enum. This is an i18n LABEL map of the server's own
+    // status→phase mapping (backend/tickets/display_phase.py) — a
+    // vocabulary choice, not client-side state inference: the current
+    // phase itself always comes from `ticket.display_phase`.
+    if (isCustomerUser(me?.role)) {
+      const phaseKey = CUSTOMER_TICKET_PHASE_KEY[String(status)];
+      if (phaseKey) return t(`common:${phaseKey}`);
+    }
     // Sprint 182 integration -- one vocabulary. See UnifiedTimeline.
     return t(`common:${ticketStatusLabelKey(status)}`);
   };
@@ -344,26 +726,72 @@ export function TicketDetailPage() {
     }
   };
 
-  // Sprint 27F-F1 — the inline "click again to confirm" banner copy is
-  // retained for cases where the override modal copy needs a short
-  // form (still wired via i18n). The two-press confirmation now lives
-  // in a modal — see `overrideDecision` state below.
-  const overrideModalSubmitLabel = (nextStatus: TicketStatus): string => {
-    if (nextStatus === "APPROVED")
-      return t("override_modal_submit_approve");
-    if (nextStatus === "REJECTED")
-      return t("override_modal_submit_reject");
-    return t("override_modal_submit_approve");
-  };
-
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
+  // FE-4 (Addendum D §D.12 item 1) — back goes where the reader came
+  // from: My Schedule (week and filters intact), Mijn meldingen, Tickets
+  // with its query; the role's home list when there is no in-app origin.
+  // P-11 A6 — a ticket born from extra work is found under Extra work,
+  // never on the Tickets page (P-10 B3), so its back link never reads
+  // "Back to Tickets": the fallback is the Approved tab and a recorded
+  // /tickets origin is refused. `canAccessExtraWork` gates the provider
+  // list — STAFF and customers keep their own homes.
+  const spawnedBack =
+    Boolean(ticket?.extra_work_origin) && canAccessExtraWork(me?.role);
+  const backToTickets = useOriginBackLink(me?.role, {
+    override: chargeableFrom,
+    ...(spawnedBack
+      ? {
+          fallbackTo: "/extra-work/approved",
+          fallbackLabelKey: "back_to.extra_work",
+          notFrom: /^\/tickets(?:[?#]|$)/,
+        }
+      : {}),
+  });
+  // The label never lies about the destination: it names the chargeable
+  // list exactly when the link goes there. Key reused from the bundle
+  // that already owns the phrase.
+  const backToTicketsLabel = chargeableFrom
+    ? t("extra_work:back_to_chargeable_work")
+    : backToTickets.label;
+  // P-4 (Part D) — tell the sidebar what kind of record this is, so a
+  // MEERWERK-kind ticket lights "Extra work" and not "Tickets".
+  const currentTicketId = ticket?.id ?? null;
+  const currentTicketKind = ticket?.kind ?? null;
+  useEffect(() => {
+    publishCurrentTicketKind(
+      currentTicketId !== null && currentTicketKind !== null
+        ? { id: currentTicketId, kind: currentTicketKind }
+        : null,
+    );
+    return () => publishCurrentTicketKind(null);
+  }, [currentTicketId, currentTicketKind]);
   /** Sprint 185 E §1 — the company's own kinds of WORK, for the picker.
    *  Loaded once; non-fatal on failure, like every other optional picker
    *  here — a catalog that would not load must not stop somebody reading
    *  the melding. */
-  const [workCategories, setWorkCategories] = useState<WorkCategory[]>([]);
+  const [categories, setCategories] = useState<TicketCategory[]>([]);
   const [categoryBusy, setCategoryBusy] = useState(false);
+  // W4-M §4a — the per-work photo-visibility switch (PA/SA only). One
+  // busy flag; the value itself is read straight off the ticket so the
+  // control can never drift from what the server stored.
+  const [photoPolicyBusy, setPhotoPolicyBusy] = useState(false);
+  // W4-M §4b — the per-ticket upload permission per assigned person.
+  // `null` while the read has not answered (or is not available to this
+  // viewer); the section renders nothing at all in that case rather than
+  // showing an empty control that cannot be used.
+  const [uploadGrants, setUploadGrants] =
+    useState<TicketUploadVisibility | null>(null);
+  const [uploadGrantBusyUserId, setUploadGrantBusyUserId] = useState<
+    number | null
+  >(null);
+  const [uploadGrantsNonce, setUploadGrantsNonce] = useState(0);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
+  // W18 — the Extra Work thread of the job this ticket was born from,
+  // shown read-only inside the ONE Messages card (merged by date). Both
+  // endpoints are server-filtered by the canonical visibility
+  // chokepoints; this is display only. A failed fetch collapses to the
+  // ticket thread alone.
+  const [ewMessages, setEwMessages] = useState<EwMessage[]>([]);
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
   // Sprint 32 — unified audit timeline for provider-audit roles (SA / CA /
   // BM). STAFF + CUSTOMER_USER never fetch it (the endpoint 403s them); they
@@ -385,6 +813,12 @@ export function TicketDetailPage() {
   // are otherwise condensed away while the drawer is open.
   const [activityOpen, setActivityOpen] = useState(false);
   const [showSystemEvents, setShowSystemEvents] = useState(false);
+  // W14 §2 — where the Activity card sits on the page, so a note that
+  // was just written can be shown ARRIVING instead of described.
+  const activityCardRef = useRef<HTMLDivElement>(null);
+  // Armed by `revealStatusNote()`, consumed by the effect that does the
+  // scrolling once the drawer and its rows are actually on the page.
+  const revealPendingRef = useRef(false);
   // Bumped on every ticket reload that follows an audited mutation (message,
   // attachment, assignment, status/override, completion). Drives a timeline
   // refetch so non-status audit rows appear without a full page reload, in
@@ -418,22 +852,6 @@ export function TicketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [statusNote, setStatusNote] = useState("");
   const [statusBusy, setStatusBusy] = useState<TicketStatus | null>(null);
-  // Sprint 30 Batch 30.1.1.5 — progressive workflow disclosure. The
-  // secondary transition list starts collapsed; the "More actions"
-  // toggle expands it. When the current status has no primary
-  // transitions (CLOSED), the secondary list renders inline-open
-  // and the toggle is hidden — see `shouldDefaultOpen` below.
-  const [secondaryOpen, setSecondaryOpen] = useState(false);
-  // #109 Part I — the Workflow "correction actions" disclosure is
-  // per-ticket. TicketDetailPage does NOT remount when only the :id
-  // route param changes, so this state would otherwise carry an open
-  // correction list across tickets. Reset it during render when the
-  // ticket id changes — the React-sanctioned "adjust state when a prop
-  // changes" pattern (a guarded setState during render, NOT in an
-  // effect), so no effect / eslint set-state-in-effect involvement.
-  const [correctionForTicketId, setCorrectionForTicketId] = useState<
-    number | null
-  >(null);
   // Sprint 27F-F1 — ticket-override modal state. Mirrors the
   // ExtraWorkDetailPage shape:
   //   overrideDecision  the target status the operator picked
@@ -446,6 +864,26 @@ export function TicketDetailPage() {
   //                     is in flight.
   const [overrideDecision, setOverrideDecision] =
     useState<TicketStatus | null>(null);
+  // W11 §1 — is the correction-actions list open, and ON WHICH TICKET.
+  //
+  // Storing the ticket id rather than a boolean is what makes the list
+  // collapse again when you navigate to the next melding. A boolean
+  // would need somebody to remember to reset it — an effect, or a key,
+  // or a bug. The route param already owns "which ticket am I looking
+  // at", so this just says which one the operator opened the door on,
+  // and any other id closes it by definition.
+  const [correctionsOpenFor, setCorrectionsOpenFor] =
+    useState<string | null>(null);
+  // FE-3 — the second fold ("Andere stappen"), keyed by ticket for the
+  // same reason as the one above.
+  const [otherStepsOpenFor, setOtherStepsOpenFor] =
+    useState<string | null>(null);
+  // FE-3 §D.6 rule 4 — the composer's recipient picker and private
+  // toggle unfold only while somebody is writing.
+  const [composerFocused, setComposerFocused] = useState(false);
+  // FE-3 — the customer contacts inside the Wie block: three shown,
+  // the rest behind one toggle (a bounded server list).
+  const [contactsOpen, setContactsOpen] = useState(false);
   const [overrideReason, setOverrideReason] = useState("");
   const [overrideError, setOverrideError] = useState<string | null>(null);
   const [overrideBusy, setOverrideBusy] = useState(false);
@@ -460,6 +898,28 @@ export function TicketDetailPage() {
   // `staff_completion_route_mismatch` on submit, which means the
   // BSV flag changed between open and submit.
   const [completeModalOpen, setCompleteModalOpen] = useState(false);
+  /* P-11 B3 — "Report done" asks per-person hours for THIS job: one
+     number per visible crew member, the day is the report day, written
+     as timesheet job lines (`TimeEntry`, source TICKET) after the
+     transition lands. The hour type is the company's default; the
+     office corrects a type on the Hours page's grid. */
+  const [completeHours, setCompleteHours] = useState<Record<number, string>>({});
+  // P-12 B4 (§D.24 rule 6, both ways) — after a report-done that wrote
+  // hours, the ticket says where they went and opens the door to the
+  // Hours side, routed per viewer.
+  const hoursDone = useDoneBanner(`ticket-${id}`);
+  const [completeHourType, setCompleteHourType] = useState<number | null>(null);
+  // Only the people this VIEWER may write hours for: the timesheets
+  // privacy floor lets a worker write their OWN entries only, so a
+  // STAFF reporter is asked about themselves — a field for a colleague
+  // would be a door the server slams (found on the P-11 crmtest walk:
+  // Ahmet's 3 h landed, Noah's write was refused).
+  const completionCrew = (ticket?.assigned_staff ?? []).flatMap((entry) =>
+    entry.anonymous ||
+    (!canManageTimesheets(me?.role) && entry.id !== me?.id)
+      ? []
+      : [{ id: entry.id, name: entry.full_name || entry.email || `#${entry.id}` }],
+  );
   const [completeNote, setCompleteNote] = useState("");
   const [completeRoute, setCompleteRoute] =
     useState<StaffCompletionRoute | null>(null);
@@ -573,6 +1033,128 @@ export function TicketDetailPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [attachmentHidden, setAttachmentHidden] = useState(false);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  /** W-UX1-B — the in-app viewer for credential / property documents.
+   *  One dialog for the whole section: it is opened imperatively with a
+   *  target, so a second instance per row would buy nothing. Rendered
+   *  UNCONDITIONALLY at the end of the page and driven entirely through
+   *  this ref — a native <dialog> mounted behind a condition is an
+   *  invisible dialog and a dead-looking button. */
+  const credentialPreviewRef = useRef<PdfPreviewDialogHandle>(null);
+
+  /** W-FIX-B — OPEN A BACKEND-EMITTED `document_url` IN THE VIEWER.
+   *
+   *  The credential / property payloads carry Django `reverse()` paths,
+   *  which begin "/api/..." (`tickets/serializers.py:1364`), while the
+   *  axios instance's baseURL ALREADY ends in "/api". Handing the raw
+   *  value to `PdfPreviewDialog.open()` made it fetch
+   *  "/api/api/users/<id>/credentials/<id>/download/", and the viewer
+   *  reported the only thing it could: "We couldn't find what you were
+   *  looking for". The badge was right, the document was there, and the
+   *  request went to a URL that does not exist.
+   *
+   *  The DOWNLOAD path has always known this — `downloadDocumentFromUrl`
+   *  (`api/staffCredentials.ts:169`) strips the same prefix and says why
+   *  in its docstring. The preview added in W-UX1-B simply did not
+   *  inherit it. One function here, used by all three preview call sites
+   *  (provider table badge, customer credential row, customer property
+   *  row), so the page cannot fix one and leave another broken.
+   *
+   *  AUTHORIZATION IS UNTOUCHED. The endpoint is unchanged and
+   *  `credential_document_visible_to_user` stays the only gate; this
+   *  corrects which URL the browser asks for, not who may be answered. */
+  function openDocumentPreview(documentUrl: string, filename: string) {
+    const path = documentUrl.startsWith("/api/")
+      ? documentUrl.slice("/api".length)
+      : documentUrl;
+    credentialPreviewRef.current?.open({ url: path, filename });
+  }
+
+  /** W-FIX3 — each assigned person's credentials, keyed by user id.
+   *  Straight off `ticket.assigned_staff`, which the SERVER has already
+   *  filtered through `accounts.visibility` for this viewer's role
+   *  (W-UX1-A widened that to every viewer). No filtering happens here:
+   *  a second ladder on the client is how the two drift apart. */
+  const credentialsByUserId = useMemo(() => {
+    const out: Record<
+      number,
+      { type: string; expiry_date?: string | null; document_url?: string | null }[]
+    > = {};
+    for (const entry of ticket?.assigned_staff ?? []) {
+      if ("anonymous" in entry && entry.anonymous) continue;
+      const named = entry as {
+        id: number;
+        credentials?: {
+          type: string;
+          expiry_date?: string | null;
+          document_url?: string | null;
+        }[];
+      };
+      if (named.credentials?.length) out[named.id] = named.credentials;
+    }
+    return out;
+  }, [ticket?.assigned_staff]);
+
+  /** W-FIX1 — the crew already on this ticket, as {id, label}. The modal
+   *  shows them as the settled default and NEVER posts them back: the
+   *  assignable-staff endpoint already excludes anyone holding a base
+   *  slot here (`views_staff_assignments.py:952`), so re-sending them is
+   *  a duplicate the server refuses with `staff_already_assigned`. */
+  /** W-LATE §3c — the parts still open, for the completion moves' warn
+   *  line. A part is open while it is not done; its quick action
+   *  completes the slots still ASSIGNED under it. */
+  const openParts = useMemo<OpenPart[]>(
+    () =>
+      (ticket?.sub_tasks ?? [])
+        .filter((part) => !part.is_done)
+        .map((part) => ({
+          id: part.id,
+          title: part.title,
+          slotIds: part.staff_assignments
+            .filter((slot) => slot.slot_status === "ASSIGNED")
+            .map((slot) => slot.id),
+        })),
+    [ticket],
+  );
+
+  const currentAssignees = useMemo(
+    () =>
+      (ticket?.assigned_staff ?? [])
+        .filter((entry) => !("anonymous" in entry && entry.anonymous))
+        .map((entry) => {
+          const named = entry as {
+            id: number;
+            full_name?: string;
+            email?: string;
+          };
+          return {
+            id: named.id,
+            label:
+              named.full_name?.trim() || named.email || String(named.id),
+          };
+        }),
+    [ticket?.assigned_staff],
+  );
+
+  /** R2 — the ticket's planned start as `<input type="datetime-local">`
+   *  wants it: LOCAL wall time, no zone, minute precision. Built by hand
+   *  rather than with `toISOString().slice(0,16)`, which would render the
+   *  UTC instant and show an operator east of Greenwich the wrong hour —
+   *  the mirror of the bug the modal's own confirm() comment warns about
+   *  in the other direction. */
+  // P-5 S1 — ONE PLAN, ONE DATE: the day the transition modal offers
+  // is the job's resolved window (`job_start_day`: the ticket's own,
+  // else the meerwerk plan's first work day). Server-decided day and
+  // clock (P-3 §A.3), no `Date` arithmetic in the browser's zone.
+  const currentStartDay = ticket?.scheduled_start_day ?? ticket?.job_start_day ?? "";
+  const currentStartTime = ticket?.scheduled_start_day
+    ? (ticket.scheduled_start_time ?? "")
+    : "";
+  const currentStartSource: "ticket" | "meerwerk" | null = ticket?.scheduled_start_day
+    ? "ticket"
+    : ticket?.job_start_day && ticket.plan_source === "PROVIDER_PLAN"
+      ? "meerwerk"
+      : null;
+
   const [downloadingAttachmentId, setDownloadingAttachmentId] =
     useState<number | null>(null);
   // RF-5 (Ramazan 2026-06-23) — in-app attachment preview. Clicking a tile
@@ -590,18 +1172,94 @@ export function TicketDetailPage() {
   const previewDialogRef = useRef<HTMLDialogElement>(null);
   // M2 P5 — busy marker for a staff credential/property document
   // download (keyed by document_url; one in flight at a time).
-  const [downloadingStaffDocUrl, setDownloadingStaffDocUrl] = useState<
-    string | null
-  >(null);
 
   const [assignableManagers, setAssignableManagers] = useState<
     AssignableManager[]
   >([]);
-  const [selectedAssigneeId, setSelectedAssigneeId] = useState<string>("");
-  const [assigningTicket, setAssigningTicket] = useState(false);
+
+  /** W-FIX-C — bumped when a staff assignment is written from OUTSIDE
+   *  `<StaffAssignmentSection>`, which owns a separate copy of the
+   *  roster. Today that is exactly one path: the transition modal posts
+   *  `assigned_staff_ids` with the move, so `changeStatus` bumps it on
+   *  success. Reloading the page's own ticket is not enough — that
+   *  refreshes the card's header count and the customer-side list, and
+   *  the provider's assignment TABLE is the section's own state. */
+  const [assignmentReloadNonce, setAssignmentReloadNonce] = useState(0);
+
+  // W13-FIX §1 — THE TRANSITION MODAL's state. `transitionTarget` is the
+  // status the operator pressed; while it is set the modal is open and
+  // NOTHING has been posted yet. The move only happens when the modal
+  // calls back with its answers.
+  const [transitionTarget, setTransitionTarget] =
+    useState<TicketStatus | null>(null);
+  const [transitionReqs, setTransitionReqs] =
+    useState<TransitionRequirements | null>(null);
+  /* P-9 ruling 12(b) / §D.6 rule 14 — NEVER A START BUTTON ON AN
+     UNPLANNED TICKET. The server refuses `-> IN_PROGRESS` without a crew
+     and a day (`transition_requirements_unmet`); the screen must say so
+     BEFORE the click. The same endpoint the modal asks is asked once,
+     when the page offers a start, and the answer is kept with the
+     ticket it describes so a stale one is never read. */
+  const [startReqs, setStartReqs] = useState<{
+    ticketId: number;
+    stamp: string;
+    target: TicketStatus;
+    unmet: string[];
+  } | null>(null);
+  const scheduleAnchor = useMissingPieceAnchor<HTMLDivElement>("schedule");
+  // P-9 12(b) — ask the server what the forward move still needs,
+  // whenever one is legal for THIS ticket in THIS state (the stamp
+  // changes with every save, so a plan set on the schedule card
+  // re-asks). P-10 C1 — the SAME gate covers "Mark as seen and planned"
+  // (`-> ACKNOWLEDGED` needs a day, `transition_requirements.py`): the
+  // walk found a spawned, unplanned ticket offering a live acknowledge
+  // button that the server refused with `transition_requirements_unmet`.
+  // The gated move is the one the banner OFFERS as primary — the first
+  // legal entry of `PRIMARY_TRANSITIONS` for this status, when it is a
+  // forward move the server puts requirements on (an OPEN ticket also
+  // allows IN_PROGRESS as a secondary move; its primary is the
+  // acknowledge, and that is the button that must not lie).
+  const startTarget: TicketStatus | null =
+    (ticket
+      ? (PRIMARY_TRANSITIONS[ticket.status] ?? []).find(
+          (status) =>
+            (status === "IN_PROGRESS" || status === "ACKNOWLEDGED") &&
+            ticket.allowed_next_statuses.includes(status),
+        )
+      : undefined) ?? null;
+  const startIsLegal = startTarget !== null;
+  const startTicketId = ticket?.id ?? null;
+  const startStamp = ticket ? `${ticket.status}:${ticket.updated_at}` : "";
+  useEffect(() => {
+    if (startTarget === null || startTicketId === null) return;
+    let cancelled = false;
+    getTransitionRequirements(startTicketId, startTarget)
+      .then((reqs) => {
+        if (cancelled) return;
+        setStartReqs({
+          ticketId: startTicketId,
+          stamp: startStamp,
+          target: startTarget,
+          unmet: reqs.requirements.filter((r) => !r.satisfied).map((r) => r.key),
+        });
+      })
+      .catch(() => {
+        // A failed read leaves the button live: the server still
+        // refuses, and the modal then says why (P-5's describer).
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [startIsLegal, startTarget, startTicketId, startStamp]);
+  const [transitionLoading, setTransitionLoading] = useState(false);
+  const [transitionStaff, setTransitionStaff] = useState<AssignableStaff[]>([]);
+  /* W-FIX1 C3 (audit F34) — why the assignee list is empty, when the
+     server refused it rather than answered it. */
+  const [transitionStaffError, setTransitionStaffError] = useState("");
+  const [transitionError, setTransitionError] = useState("");
 
   // Phase B — the dated staff-slot CRUD (Sprint 25A's flat add/remove
-  // superseded) now lives in <StaffSlotEditor>, which owns its own state.
+  // superseded) now lives in <StaffAssignmentSection>, which owns its own state.
 
   const [error, setError] = useState("");
 
@@ -624,19 +1282,74 @@ export function TicketDetailPage() {
   // Provider-management trio (SA + CA + BM). Drives note-author UI,
   // assignable-manager dropdown, etc. — the surface that may see+author
   // PROVIDER_INTERNAL notes (B7) and direct ticket assignment.
+  // W-T3 §1 — ERRORS AT THE ACTION.
+  //
+  // Seven mutations on this page reported failure by setting the
+  // page-level `error`, which renders in a banner at the very top of a
+  // long scrolling ticket. Flip the photo switch near the attachments,
+  // or fail to send a message from the composer, and the only sign was
+  // a sentence far above the fold, often off screen entirely: the
+  // control simply looked as if it had done nothing.
+  //
+  // The page already had the right shape in three places
+  // (`overrideError`, `requestAssignmentError`, `completeError`): a
+  // dedicated message rendered beside the control that failed. This is
+  // that pattern for the remaining seven. ONE keyed store rather than
+  // seven more `useState`s, because the per-person photo-permission
+  // buttons need a key per row and separate states cannot express that.
+  //
+  // `error` itself stays, and stays at the top, for the one thing that
+  // genuinely belongs there: the initial ticket LOAD failing, which is
+  // not an action anybody just took.
+  const [actionError, setActionError] = useState<Record<string, string>>({});
+
+  function failAt(key: string, err: unknown) {
+    setActionError((current) => ({ ...current, [key]: getApiError(err) }));
+  }
+  function clearAt(key: string) {
+    setActionError((current) => {
+      if (current[key] === undefined) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }
+  function actionErrorNode(key: string, testId: string) {
+    const message = actionError[key];
+    if (!message) return null;
+    return (
+      <div className="alert-error" role="alert" data-testid={testId}>
+        {message}
+      </div>
+    );
+  }
+
   const isStaff = isProviderManagementRole(me?.role);
 
-  // "Provider acting on a customer-decision step." Drive ENTIRELY off
-  // the per-record action `ticket.actions.can_override_customer_decision`
-  // (backend tightens it to True only when the viewer holds override
-  // authority AND the ticket is at WAITING_CUSTOMER_APPROVAL AND
-  // APPROVED/REJECTED is in `allowed_next_statuses`). Replaces the
-  // earlier `isProviderAdmin(me.role) && status==WCA` composition,
-  // which wrongly hid the override path from a BM with the B6 override
-  // key. Treat absent `actions` as False so the page hides the override
-  // arming UI until the detail loads.
-  const providerActsAsOverride =
-    ticket?.actions?.can_override_customer_decision === true;
+  // W26.4 — how many of this ticket's parts the VIEWER is on. Drives the
+  // choice between the worker's actionable "My parts" and the read-only
+  // split view; `MyPartsPanel` applies the same filter internally, so
+  // the two cannot disagree about what "mine" means.
+  const myPartCount = (ticket?.sub_tasks ?? []).filter((part) =>
+    part.staff_assignments.some((slot) => slot.user_id === me?.id),
+  ).length;
+
+  /**
+   * W11 §1 — IS THIS MOVE A DECISION TAKEN OUT OF THE CUSTOMER'S HANDS?
+   *
+   * Answered by the backend, per record:
+   * `actions.can_override_customer_decision` is True only when the
+   * viewer holds override authority AND the ticket stands at
+   * WAITING_CUSTOMER_APPROVAL AND the decision targets are in
+   * `allowed_next_statuses`. The page used to answer it a second time
+   * from the role name — which read SUPER_ADMIN and COMPANY_ADMIN and
+   * therefore missed a Building Manager holding the B6 override key,
+   * and would keep missing whoever the rule admits next. Two answers to
+   * one question, and the local one was the wrong one.
+   */
+  const isCustomerDecisionOverride = (toStatus: TicketStatus): boolean =>
+    ticket?.actions?.can_override_customer_decision === true &&
+    (toStatus === "APPROVED" || toStatus === "REJECTED");
 
   // Sprint 30 Batch 30.1.3 — STAFF completion-evidence gate (frontend
   // mirror of the backend `completion_evidence_required` rule). For
@@ -652,10 +1365,6 @@ export function TicketDetailPage() {
     () => attachments.some((a) => a.mime_type?.startsWith("image/")),
     [attachments],
   );
-  const staffCompletionEvidenceRequired =
-    isStaffRoleFn(me?.role) &&
-    !!ticket &&
-    ticket.status === "IN_PROGRESS";
 
   // Sprint 28 Batch 4 — read-only Customer Contacts panel.
   // Backend `IsSuperAdminOrCompanyAdminForCompany` gate on the
@@ -702,6 +1411,25 @@ export function TicketDetailPage() {
     CONVERTIBLE_TICKET_STATUSES.has(ticket.status) &&
     !ticket.extra_work_origin;
 
+  /* W-H §1 — THE ARCHIVE, and it is the same button in two directions.
+   *
+   * Terminal-only, so it can never take live work out of the list, and
+   * `TERMINAL_UI_STATUSES` is disjoint from `CONVERTIBLE_TICKET_STATUSES`
+   * — which is what keeps rule 2 (one primary action) true in the
+   * header: on a finished ticket Convert is impossible, and archiving IS
+   * the next thing to do. */
+  const isArchived = !!ticket?.archived_at;
+  const canArchive =
+    !!ticket &&
+    isProviderManagementRole(me?.role) &&
+    TERMINAL_UI_STATUSES.has(ticket.status) &&
+    !isArchived;
+  const canUnarchive =
+    !!ticket && isProviderManagementRole(me?.role) && isArchived;
+  const [archiveMode, setArchiveMode] = useState<
+    "archive" | "unarchive" | null
+  >(null);
+
   const loadTicket = useCallback(async () => {
     if (!id) return;
     try {
@@ -745,6 +1473,262 @@ export function TicketDetailPage() {
       .catch(() => {});
   }, [id]);
 
+  // W18 — the origin Extra Work's own thread, for the merged Messages
+  // card. Same gate as the Extra-work card mount (`canAccessExtraWork`:
+  // STAFF are hard-404'd by `scope_extra_work_for`, so the call must
+  // never fire for them; customers keep their surfaces). The endpoint
+  // is chokepoint-filtered server-side — display only. Failure or an
+  // ordinary ticket collapses to the ticket thread alone. State is set
+  // only in async callbacks / a microtask (no set-state-in-effect).
+  const ewOriginId = ticket?.extra_work_origin?.extra_work_request_id ?? null;
+
+  /* W-PLAN Task 2 — THE PLAN LIVES ON THE OPERATIONAL PAGE TOO.
+     One component, two mounts: this is the SAME PlanWorkDialog the
+     Extra Work page opens, bound to the SAME store — the plan has one
+     home (the EW: `provider_planned_*`, `ExtraWorkPlannedHours`,
+     `budget_hours`, the two proof toggles the ticket's own completion
+     gate already reads via `tickets/completion_requirements.py`), so
+     there is nothing to copy and nothing to fork. Delivery dates write
+     through the one date writer, which moves this ticket's schedule
+     (`extra_work/dates.py` -> `planned_date.py`). Crew changes stay in
+     the Assignment section: candidates are handed over EMPTY, so the
+     dialog's picker renders nothing and adds nobody. */
+  const [ewPlanOpen, setEwPlanOpen] = useState(false);
+  const [ewPlanDetail, setEwPlanDetail] = useState<
+    ExtraWorkRequestDetail | null
+  >(null);
+  const [ewPlanAssignments, setEwPlanAssignments] = useState<
+    ExtraWorkAssignment[]
+  >([]);
+  const [ewPlanLoading, setEwPlanLoading] = useState(false);
+  const [ewPlanBusy, setEwPlanBusy] = useState(false);
+  const [ewPlanError, setEwPlanError] = useState("");
+  /* P-4 (Part B) — the refusal itself, for field-level messages. */
+  const [ewPlanRawError, setEwPlanRawError] = useState<unknown>(null);
+  /* W-HOURS5 Task 2 — the plan modal owns the whole crew. People and
+     managers are added and removed through the TICKET's own endpoints
+     (the People tab's doors), and `tickets.crew_sync` mirrors every
+     change onto the plan's crew, so the modal, the People tab and the
+     plan read ONE crew. Candidates come from the ticket's own
+     eligibility helper, filtered against the plan's current crew. */
+  const [ewPlanCandidates, setEwPlanCandidates] = useState<
+    AssignmentCandidate[]
+  >([]);
+  const [ewPlanManagerCandidates, setEwPlanManagerCandidates] = useState<
+    AssignmentCandidate[]
+  >([]);
+  const [ewPlanCandidatesLoading, setEwPlanCandidatesLoading] =
+    useState(false);
+  const [ewCrewBusy, setEwCrewBusy] = useState(false);
+  const [ewCrewError, setEwCrewError] = useState("");
+
+  /* hours2 — the job's own hours door and the comparison beside it.
+     One record (`TimeEntry`), two doors: the admin week grid is one,
+     "Book hours" on this tab is the other. `hoursNonce` is bumped
+     after a booking so the comparison re-reads without a reload. */
+  const [bookHoursOpen, setBookHoursOpen] = useState(false);
+  const [hoursNonce, setHoursNonce] = useState(0);
+  /* W-FIX1 C3 (audit F33) — the plan read's failure, shown on the tab
+     instead of an eternal "Loading…". */
+  const [ewPlanReadError, setEwPlanReadError] = useState("");
+
+  /* W-TABS Task 4 — the Plan tab shows the plan it holds (planned
+     hours per person), read from the SAME store the dialog writes.
+     Lazy: fetched when the tab is looked at, refetched after a save
+     (submitEwPlan clears `ewPlanDetail`). */
+  useEffect(() => {
+    if (
+      requestedTicketTab !== "plan" ||
+      ewOriginId === null ||
+      ewPlanDetail !== null ||
+      !isProviderManagementRole(me?.role) ||
+      !canAccessExtraWork(me?.role)
+    ) {
+      return;
+    }
+    let cancelled = false;
+    // W-HOURS5 Task 2 — the crew arrives WITH the plan, so the
+    // comparison can say who is no longer on the job.
+    Promise.all([getExtraWork(ewOriginId), listExtraWorkAssignments(ewOriginId)])
+      .then(([detail, assignments]) => {
+        if (cancelled) return;
+        setEwPlanReadError("");
+        setEwPlanAssignments(assignments);
+        setEwPlanDetail(detail);
+      })
+      .catch((err) => {
+        // W-FIX1 C3 — a refused or failed read is said, not swallowed.
+        if (!cancelled) setEwPlanReadError(getApiError(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedTicketTab, ewOriginId, ewPlanDetail, me?.role]);
+
+  /** W-HOURS5 Task 2 — the plan's crew and who may still be added,
+   *  read together. Candidates are the TICKET's own eligibility answer
+   *  (the same helper its assign endpoints validate against), minus
+   *  everyone already on the plan's crew. */
+  async function loadEwPlanCrew(ticketId: number, ewId: number) {
+    const [assignments, workers, managers] = await Promise.all([
+      listExtraWorkAssignments(ewId),
+      listTicketAssignmentCandidates(ticketId, "WORKER"),
+      listTicketAssignmentCandidates(ticketId, "MANAGER"),
+    ]);
+    setEwPlanAssignments(assignments);
+    const onJob = new Set(assignments.map((a) => a.user_id));
+    setEwPlanCandidates(workers.filter((c) => !onJob.has(c.id)));
+    setEwPlanManagerCandidates(managers.filter((c) => !onJob.has(c.id)));
+  }
+
+  async function openEwPlan() {
+    if (ewOriginId === null || !ticket) return;
+    // W-FIX1 E1 — the modal route is gated like the doors.
+    if (TERMINAL_UI_STATUSES.has(ticket.status)) return;
+    setEwPlanError("");
+    setEwCrewError("");
+    setEwPlanLoading(true);
+    setEwPlanCandidatesLoading(true);
+    setEwPlanOpen(true);
+    try {
+      const [detail] = await Promise.all([
+        getExtraWork(ewOriginId),
+        loadEwPlanCrew(ticket.id, ewOriginId),
+      ]);
+      setEwPlanDetail(detail);
+    } catch (err) {
+      setEwPlanOpen(false);
+      toast.push({ variant: "error", title: getApiError(err) });
+    } finally {
+      setEwPlanLoading(false);
+      setEwPlanCandidatesLoading(false);
+    }
+  }
+
+  /* W-HOURS5 Task 2 — the modal's crew writes, all through the ticket's
+     own endpoints. A person gets a BASE slot dated as the ticket is
+     dated (the same seed spawn's carry-over uses); removal deletes
+     their base slot(s) on THIS ticket — the server cascades their part
+     slots and `crew_sync` clears only their today-and-future plan.
+     Managers go through the manager-assignment endpoints. After every
+     write the crew and the candidates are re-read from the server, and
+     the ticket itself is reloaded so the People tab and the hours door
+     see the same crew. */
+  async function addEwPlanPeople(userIds: number[]) {
+    if (!ticket || ewOriginId === null || userIds.length === 0) return;
+    setEwCrewBusy(true);
+    setEwCrewError("");
+    try {
+      for (const userId of userIds) {
+        await addTicketStaffAssignment(ticket.id, userId, {
+          scheduled_start_at: ticket.scheduled_start_at,
+          scheduled_end_at: ticket.scheduled_end_at,
+        });
+      }
+      await loadEwPlanCrew(ticket.id, ewOriginId);
+      await loadTicket();
+    } catch (err) {
+      setEwCrewError(getApiError(err));
+    } finally {
+      setEwCrewBusy(false);
+    }
+  }
+
+  async function removeEwPlanPerson(userId: number) {
+    if (!ticket || ewOriginId === null) return;
+    setEwCrewBusy(true);
+    setEwCrewError("");
+    try {
+      const page = await listTicketStaffAssignments(ticket.id);
+      const baseSlots = page.results.filter(
+        (slot) => slot.user_id === userId && slot.sub_task === null,
+      );
+      for (const slot of baseSlots) {
+        await removeTicketStaffAssignment(ticket.id, slot.id);
+      }
+      await loadEwPlanCrew(ticket.id, ewOriginId);
+      await loadTicket();
+    } catch (err) {
+      setEwCrewError(getApiError(err));
+    } finally {
+      setEwCrewBusy(false);
+    }
+  }
+
+  async function addEwPlanManagers(userIds: number[]) {
+    if (!ticket || ewOriginId === null || userIds.length === 0) return;
+    setEwCrewBusy(true);
+    setEwCrewError("");
+    try {
+      // W-FIX1 D10 (audit F35) — the endpoint takes the whole list;
+      // one request, one busy flag, one reload.
+      await addManagerAssignments(ticket.id, userIds);
+      await loadEwPlanCrew(ticket.id, ewOriginId);
+    } catch (err) {
+      setEwCrewError(getApiError(err));
+    } finally {
+      setEwCrewBusy(false);
+    }
+  }
+
+  async function removeEwPlanManager(userId: number) {
+    if (!ticket || ewOriginId === null) return;
+    setEwCrewBusy(true);
+    setEwCrewError("");
+    try {
+      await removeManagerAssignment(ticket.id, userId);
+      await loadEwPlanCrew(ticket.id, ewOriginId);
+    } catch (err) {
+      setEwCrewError(getApiError(err));
+    } finally {
+      setEwCrewBusy(false);
+    }
+  }
+
+  async function submitEwPlan(payload: ExtraWorkPlanPayload) {
+    if (ewOriginId === null) return;
+    setEwPlanBusy(true);
+    setEwPlanError("");
+    setEwPlanRawError(null);
+    try {
+      // `start: false` — starting is the TICKET's business after spawn
+      // (the EW's status follows the ticket); this save is a plan
+      // change, and it answers in one sentence via the toast while the
+      // timeline gains its "Plan changed: ..." row server-side.
+      await planExtraWork(ewOriginId, { ...payload, start: false });
+      setEwPlanOpen(false);
+      setEwPlanDetail(null);
+      toast.push({ variant: "success", title: t("ew_plan_saved") });
+      await loadTicket();
+    } catch (err) {
+      setEwPlanError(getApiError(err));
+      setEwPlanRawError(err);
+    } finally {
+      setEwPlanBusy(false);
+    }
+  }
+  useEffect(() => {
+    let cancelled = false;
+    if (ewOriginId === null || !canAccessExtraWork(me?.role)) {
+      queueMicrotask(() => {
+        if (!cancelled) setEwMessages([]);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    listEwMessages(ewOriginId)
+      .then((list) => {
+        if (!cancelled) setEwMessages(list);
+      })
+      .catch(() => {
+        if (!cancelled) setEwMessages([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ewOriginId, me?.role]);
+
   // Sprint 32 — provider-audit roles (SA / CA / BM, mirroring the backend
   // IsTicketAuditConsumer) get the UNIFIED audit timeline. STAFF /
   // CUSTOMER_USER are deliberately excluded: they must never call the
@@ -783,14 +1767,6 @@ export function TicketDetailPage() {
     auditTimelineHistoryLen,
     auditReloadNonce,
   ]);
-
-  useEffect(() => {
-    setSelectedAssigneeId(
-      ticket && ticket.assigned_to !== null
-        ? String(ticket.assigned_to)
-        : "",
-    );
-  }, [ticket?.id, ticket?.assigned_to]);
 
   // Sprint 27F-F1 — clear any pending override modal state when the
   // ticket loads or its status changes (so a successful transition
@@ -831,6 +1807,74 @@ export function TicketDetailPage() {
       cancelled.current = true;
     };
   }, [canSeeCustomerContacts, ticketCustomerId]);
+
+  // W4-M §4b — read the per-ticket upload permissions.
+  //
+  // Provider management only, mirroring the endpoint's own gate; the
+  // request does not even fire for anyone else. A failure is swallowed
+  // and the section stays unrendered: this permission is an optional
+  // refinement of a ticket page that has to keep working without it,
+  // and — while the two halves of this wave land in parallel — a 404
+  // from a backend that does not carry the endpoint yet must read as
+  // "not available here", never as a page-level error.
+  const canGrantUploadVisibility = isProviderManagementRole(me?.role);
+  const uploadGrantsTicketId = ticket?.id ?? null;
+  useEffect(() => {
+    const cancelled = { current: false };
+    if (!canGrantUploadVisibility || uploadGrantsTicketId === null) {
+      queueMicrotask(() => {
+        if (!cancelled.current) setUploadGrants(null);
+      });
+    } else {
+      getTicketUploadVisibility(uploadGrantsTicketId)
+        .then((data) => {
+          if (!cancelled.current) setUploadGrants(data);
+        })
+        .catch(() => {
+          if (!cancelled.current) setUploadGrants(null);
+        });
+    }
+    return () => {
+      cancelled.current = true;
+    };
+  }, [canGrantUploadVisibility, uploadGrantsTicketId, uploadGrantsNonce]);
+
+  // W4-M §4b — grant / refuse / clear one person's uploads on THIS
+  // ticket. The PATCH answers with that one person's new row, so the
+  // list is patched in place instead of refetched; the ticket itself is
+  // untouched by the call.
+  async function setUploadGrant(userId: number, choice: UploadGrantChoice) {
+    if (!id) return;
+    clearAt(`grant:${userId}`);
+    setUploadGrantBusyUserId(userId);
+    try {
+      const updated = await setTicketUploadVisibility(
+        id,
+        userId,
+        grantChoiceValue(choice),
+      );
+      setUploadGrants((previous) =>
+        previous === null
+          ? previous
+          : {
+              ...previous,
+              people: previous.people.map((person) =>
+                person.user_id === userId ? updated : person,
+              ),
+            },
+      );
+      // The grant writes an AuditLog row and no status history, so the
+      // timeline needs the same nudge the category change gives it.
+      setAuditReloadNonce((n) => n + 1);
+    } catch (err) {
+      failAt(`grant:${userId}`, err);
+      // A refused write must not leave the control showing the value the
+      // operator picked, so re-read the authoritative list.
+      setUploadGrantsNonce((n) => n + 1);
+    } finally {
+      setUploadGrantBusyUserId(null);
+    }
+  }
 
   useEffect(() => {
     if (!isStaff || !id) return;
@@ -890,6 +1934,97 @@ export function TicketDetailPage() {
     [ticket],
   );
 
+  const correctionsOpen = correctionsOpenFor === id;
+  const otherStepsOpen = otherStepsOpenFor === id;
+
+  // W4-M §2 — when did this job arrive at the status it is in? Read off
+  // `status_history` rather than any single timestamp column, because
+  // no one column covers every status (there is an `approved_at` and a
+  // `closed_at`, but nothing for OPEN or IN_PROGRESS). Ordering of the
+  // serialized rows is not contracted, so this takes the LATEST
+  // created_at among the rows that landed on the current status rather
+  // than trusting first/last. A ticket that never transitioned (still
+  // OPEN, no history) yields null and the line simply does not render.
+  const currentStatusSince = useMemo(() => {
+    if (!ticket) return null;
+    let latest: string | null = null;
+    for (const row of ticket.status_history ?? []) {
+      if (row.new_status !== ticket.status) continue;
+      if (latest === null || row.created_at > latest) latest = row.created_at;
+    }
+    return latest;
+  }, [ticket]);
+
+  /**
+   * W10 §5 — THE STEP JUST TAKEN, which is the only step there is
+   * anything to undo.
+   *
+   * Corrections used to be every reverse edge in the graph, listed at
+   * once, always. On a closed ticket a SUPER_ADMIN saw seven ways
+   * backwards — a menu of moves nobody had made and nobody wanted. A
+   * correction is only meaningful against a MISTAKE, and the mistake it
+   * can plausibly fix is the last transition.
+   *
+   * So this reads the newest history row's `old_status`: where the
+   * ticket came from. `status_history` already owns that fact, so
+   * nothing new is stored and there is no second place to keep it in
+   * step. A ticket that has never moved has no previous status and
+   * therefore offers no correction, which is right — there is nothing
+   * to take back.
+   *
+   * This applies to SUPER_ADMIN exactly as to everyone else; the owner
+   * asked for that by name. It removes no power: every other backward
+   * move a role holds is still in the quiet list below, and the backend
+   * still decides what is legal.
+   */
+  /**
+   * W10 §3 — is this job still in the future?
+   *
+   * True when a planned start exists, is still ahead of now, and the
+   * work is not finished. Derived on every render from the clock, so it
+   * turns itself off when the date arrives — no job, no flag, nobody
+   * remembering. `scheduled_start_at` is the single owner of when the
+   * work is due; this reads it and stores nothing.
+   */
+  // THE CLOCK IS NOT READ DURING RENDER. `Date.now()` in a memo is
+  // impure — and it is also wrong for this feature: a memo over the
+  // ticket never recomputes just because time passed, so the strip
+  // would still claim "upcoming" at midday on the day the job started.
+  // The tick is what makes "moves itself when the date arrives" true
+  // rather than a thing somebody has to reload the page for. It starts
+  // at 0 so the first render reads no clock at all; the immediate
+  // timeout fills it in a moment later, and the interval keeps it
+  // honest once a minute.
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const immediate = setTimeout(tick, 0);
+    const every = setInterval(tick, 60_000);
+    return () => {
+      clearTimeout(immediate);
+      clearInterval(every);
+    };
+  }, []);
+
+  const isUpcoming = useMemo(() => {
+    if (now === 0) return false;
+    if (!ticket?.scheduled_start_at) return false;
+    if (TERMINAL_UI_STATUSES.has(ticket.status)) return false;
+    return new Date(ticket.scheduled_start_at).getTime() > now;
+  }, [ticket, now]);
+
+  const previousStatus = useMemo<TicketStatus | null>(() => {
+    if (!ticket) return null;
+    let newest: { at: string; from: TicketStatus } | null = null;
+    for (const row of ticket.status_history ?? []) {
+      if (row.new_status !== ticket.status) continue;
+      if (newest === null || row.created_at > newest.at) {
+        newest = { at: row.created_at, from: row.old_status as TicketStatus };
+      }
+    }
+    return newest?.from ?? null;
+  }, [ticket]);
+
   // Sprint 30 Batch 30.1.1.5 — partition the already-legal transition
   // set into "obvious next step" primaries vs "edge-case" secondaries.
   // The partition is purely about visibility; both groups dispatch
@@ -903,13 +2038,6 @@ export function TicketDetailPage() {
           : { primary: [] as TicketStatus[], secondary: [] as TicketStatus[] },
       [ticket, visibleNextStatuses],
     );
-  // CLOSED has no primaries; render the disclosure inline-open by
-  // default so the only available action (REOPENED_BY_ADMIN) is one
-  // click away, without an extra toggle.
-  const shouldDefaultOpenSecondary =
-    primaryNextStatuses.length === 0 && secondaryNextStatuses.length > 0;
-  const isSecondaryOpen = secondaryOpen || shouldDefaultOpenSecondary;
-
   // Sprint 28 Batch 11 — the "Complete work" button only renders for
   // a STAFF user who is actually on the ticket's assignment set and
   // is looking at an IN_PROGRESS ticket. Backend enforces the same
@@ -920,22 +2048,33 @@ export function TicketDetailPage() {
     ticket.status === "IN_PROGRESS" &&
     ticket.is_assigned_staff === true;
 
-  /** Sprint 185 E §1 — set or clear the melding's work category.
-   *
-   *  Its own endpoint (`PATCH /tickets/<id>/category/`) because the
-   *  ticket viewset carries no update mixin; every single-field ticket
-   *  edit in this system is an action of its own. The response is the
-   *  full detail payload, so the page re-renders from the server's
-   *  answer rather than from an optimistic guess. */
-  // Sprint 185 E §1 — the pickable categories, loaded once. Non-fatal:
-  // a catalog that would not load must not stop somebody reading the
-  // melding, and the row falls back to the stored name.
+  // W13 — the pickable categories, loaded once. Non-fatal: a catalog
+  // that would not load must not stop somebody reading the melding, and
+  // the row falls back to the stored name.
+  //
+  // UNFILTERED, unlike the create forms. This screen must offer
+  // "Ongegrond" (§4 — the verdict is reached here) and must keep
+  // offering an archived category the melding already carries, so
+  // narrowing happens in the `.filter()` at the picker rather than in
+  // the request.
+  //
+  // W13-FIX §3 — SCOPED TO THIS MELDING'S COMPANY.
+  //
+  // The seven categories are seeded PER COMPANY, so an unfiltered read
+  // returns seven per tenant and the picker listed the owner's seven
+  // three times over. A melding belongs to exactly one company and can
+  // only ever carry that company's category, so the request says so.
+  // For a single-tenant operator this changes nothing; for a
+  // SUPER_ADMIN it is the difference between seven options and
+  // twenty-one.
   useEffect(() => {
     if (!isProviderManagementRole(me?.role)) return;
+    const companyId = ticket?.company;
+    if (!companyId) return;
     let cancelled = false;
-    listWorkCategories()
+    listTicketCategories({ company: companyId })
       .then((rows) => {
-        if (!cancelled) setWorkCategories(rows);
+        if (!cancelled) setCategories(rows);
       })
       .catch(() => {
         /* non-fatal: the melding still reads */
@@ -943,11 +2082,11 @@ export function TicketDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [me?.role]);
+  }, [me?.role, ticket?.company]);
 
   async function saveCategory(categoryId: number | null) {
     if (!id) return;
-    setError("");
+    clearAt("category");
     setCategoryBusy(true);
     try {
       const updated = await setTicketCategory(Number(id), categoryId);
@@ -956,34 +2095,47 @@ export function TicketDetailPage() {
       // so the timeline needs the same nudge assignment gives it.
       setAuditReloadNonce((n) => n + 1);
     } catch (err) {
-      setError(getApiError(err));
+      failAt("category", err);
     } finally {
       setCategoryBusy(false);
     }
   }
 
-  async function submitAssignment(event: FormEvent) {
-    event.preventDefault();
+  // W4-M §4a — flip Ticket.staff_uploads_customer_visible.
+  //
+  // What this changes is what happens to the NEXT staff upload on this
+  // work. It does not reach back: photos already stored keep the
+  // audience they were given, which is why the caption under the switch
+  // says so in words rather than leaving a manager to assume otherwise.
+  // The endpoint answers with the full ticket, so the response is the
+  // new state — no optimistic local value to get out of step.
+  async function setPhotoVisibilityPolicy(nextValue: boolean) {
     if (!id) return;
-    setError("");
-    setAssigningTicket(true);
+    clearAt("photo_policy");
+    setPhotoPolicyBusy(true);
     try {
-      const assignedTo =
-        selectedAssigneeId === "" ? null : Number(selectedAssigneeId);
-      const response = await api.post<TicketDetail>(
-        `/tickets/${id}/assign/`,
-        { assigned_to: assignedTo },
+      const response = await api.patch<TicketDetail>(
+        `/tickets/${id}/attachment-visibility-policy/`,
+        { staff_uploads_customer_visible: nextValue },
       );
       setTicket(response.data);
-      // Assignment changes emit an audit_log row but do NOT change the
-      // status-history length, so nudge the timeline to refetch.
+      // The flip writes an AuditLog row and no status history, so the
+      // timeline needs the same nudge the category change gives it.
       setAuditReloadNonce((n) => n + 1);
+      toast.push({
+        variant: "success",
+        title: nextValue
+          ? t("photo_policy_toast_on")
+          : t("photo_policy_toast_off"),
+        description: t("photo_policy_toast_scope"),
+      });
     } catch (err) {
-      setError(getApiError(err));
+      failAt("photo_policy", err);
     } finally {
-      setAssigningTicket(false);
+      setPhotoPolicyBusy(false);
     }
   }
+
 
   function openDeleteDialog() {
     setDeleteConfirmText("");
@@ -1011,24 +2163,113 @@ export function TicketDetailPage() {
     }
   }
 
-  async function changeStatus(toStatus: TicketStatus) {
+  /**
+   * W13-FIX §1 — the operator pressed a workflow move.
+   *
+   * This no longer posts. It asks the server what the step needs and
+   * opens the modal; `changeStatus` runs only when the modal calls back
+   * with the answers. The two customer-decision / override paths still
+   * arm the reason prompt as they did, because a reason is a different
+   * question from "what does this step need" and already has its own
+   * dedicated surface.
+   */
+  async function openTransition(toStatus: TicketStatus) {
+    if (!id || !ticket) return;
+    if (isCustomerDecisionOverride(toStatus)) {
+      // Unchanged Sprint 27F-F1 behaviour: arm the reason prompt.
+      setOverrideDecision(toStatus);
+      setOverrideReason("");
+      setOverrideError(null);
+      return;
+    }
+
+    setTransitionTarget(toStatus);
+    setTransitionReqs(null);
+    setTransitionError("");
+    setTransitionLoading(true);
+    try {
+      const reqs = await getTransitionRequirements(Number(id), toStatus);
+      setTransitionReqs(reqs);
+      // Only fetch the staff list when the step actually asks who is
+      // doing the work -- most moves do not, and an unused list is a
+      // request the operator waits on for nothing.
+      // W-FIX1 — WHENEVER THE BLOCK RENDERS, not only when the
+      // requirement is unmet. R2 made the assignee block render on a
+      // step that already has a crew, and this condition did not follow:
+      // the list stayed empty, so a modal on a fully-assigned ticket
+      // said "nobody available to assign" about a job with people on it.
+      if (reqs.requirements.some((r) => r.key === "assignee")) {
+        setTransitionStaffError("");
+        try {
+          setTransitionStaff(await listAssignableStaff(Number(id)));
+        } catch (err) {
+          // W-FIX1 C3 — and it says why (rendered under the picker).
+          setTransitionStaffError(getApiError(err));
+          // A caller without the staff-assign permission still gets the
+          // modal; the picker simply reports nobody available rather
+          // than the whole step failing.
+          setTransitionStaff([]);
+        }
+      } else {
+        setTransitionStaff([]);
+      }
+    } catch (err) {
+      setTransitionError(getApiError(err));
+    } finally {
+      setTransitionLoading(false);
+    }
+  }
+
+  async function changeStatus(
+    toStatus: TicketStatus,
+    answers?: TransitionAnswers,
+  ) {
     if (!id || !ticket) return;
 
     setError("");
 
-    // Sprint 27F-F1 — provider-driven customer-decision overrides now
-    // route through the dedicated override modal. The button click
-    // opens the modal (setting `overrideDecision`); the actual API
-    // call fires from `submitOverride` below, which posts
-    // `is_override + override_reason` per the 27F-B1 contract. The
-    // existing isAdminCustomerDecisionOverride gate still governs
-    // *who sees* the buttons — it has not moved.
-    const needsAdminDecisionOverride = isAdminCustomerDecisionOverride(
-      ticket.status,
-      toStatus,
-      me?.role,
-    );
+    // Sprint 27F-F1 — a provider taking the customer's decision arms
+    // the reason prompt BEFORE posting. The button click sets
+    // `overrideDecision`; the actual API call fires from
+    // `submitOverride` below, which posts the reason per the 27F-B1
+    // contract. This is the one case armed pre-emptively, because there
+    // the prompt is a deliberate speed bump rather than a reaction to a
+    // refusal.
+    const needsAdminDecisionOverride = isCustomerDecisionOverride(toStatus);
 
+    // W10 §4 — A REQUIRED FIELD THAT DOES NOT EXIST MAKES THE ACTION
+    // IMPOSSIBLE. This is the bug the owner hit: he tried to move a
+    // ticket back to Open, was told a reason was required, and had
+    // nowhere to type one.
+    //
+    // Sprint 184 §2 made EVERY jump outside `ALLOWED_TRANSITIONS` an
+    // override that demands `override_reason` — correctly, because a
+    // hand-typed jump was otherwise indistinguishable from a step
+    // somebody earned. But the page only ever collected a reason for
+    // ONE case, the provider driving a customer decision on
+    // WAITING_CUSTOMER_APPROVAL. Every other jump posted `note` alone
+    // and came back 400 `override_reason_required`, with no field on
+    // screen for the reason it was asking for. For a SUPER_ADMIN, whose
+    // `allowed_next_statuses` is every status, that is most of the
+    // buttons on the card.
+    //
+    // WHO KNOWS WHICH MOVES NEED A REASON. The state machine, and only
+    // the state machine. Mirroring `ALLOWED_TRANSITIONS` here to predict
+    // it would put one fact in two files and guarantee they drift — the
+    // failure this codebase has already had twice. So the page does not
+    // predict: it asks, the backend refuses with the stable code
+    // `override_reason_required`, and the catch below opens this same
+    // prompt and resubmits. One owner, and a page that cannot be wrong
+    // about a rule it does not hold.
+    //
+    // The pre-emptive branch stays for the customer-decision case only,
+    // because there the prompt is a deliberate speed bump rather than a
+    // reaction to a refusal.
+    //
+    // The status note is NOT the reason and is not repurposed as one:
+    // the note is the operational comment on the move, `override_reason`
+    // is the justification the audit row carries, and collapsing them
+    // would put one value in two meanings.
     if (needsAdminDecisionOverride) {
       setOverrideDecision(toStatus);
       setOverrideReason("");
@@ -1036,13 +2277,20 @@ export function TicketDetailPage() {
       return;
     }
 
+    // W13-FIX §1 — read the EFFECTIVE note. A customer rejecting through
+    // the modal types their reason into the modal, not into the card's
+    // inline note, so checking `statusNote` alone would refuse a
+    // rejection that was in fact explained.
+    const effectiveNote = (answers?.note ?? statusNote).trim();
     if (
       me?.role === "CUSTOMER_USER" &&
       ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
       toStatus === "REJECTED" &&
-      !statusNote.trim()
+      !effectiveNote
     ) {
-      setError(t("workflow_customer_rejection_required"));
+      const message = t("workflow_customer_rejection_required");
+      setError(message);
+      setTransitionError(message);
       return;
     }
 
@@ -1051,21 +2299,208 @@ export function TicketDetailPage() {
     try {
       const payload: TicketStatusChangePayload = {
         to_status: toStatus,
-        note: statusNote.trim(),
+        // The modal's note wins when it collected one; the card's
+        // inline status note stays the fallback for the paths that do
+        // not go through the modal.
+        note: effectiveNote,
+        ...(answers?.assigned_staff_ids
+          ? { assigned_staff_ids: answers.assigned_staff_ids }
+          : {}),
+        ...(answers?.scheduled_start_at
+          ? { scheduled_start_at: answers.scheduled_start_at }
+          : {}),
+        // W14 §4 — the modal asked for it because
+        // `transition-requirements` said this move is an override, so
+        // it travels with the move. Absent on every ordinary step, and
+        // `apply_transition` stores it only when it coerces the flag —
+        // whether this IS an override stays the backend's call.
+        ...(answers?.override_reason
+          ? { override_reason: answers.override_reason }
+          : {}),
+        // W-UX1 §4 — and the FLAG, on the one path that must send it.
+        // The comment above is still the rule everywhere else: whether a
+        // move is an override is the backend's call. The proof bypass is
+        // the exception, because the machine cannot infer it — the
+        // status pair is an ordinary completion, and what makes it an
+        // override is that the operator chose to skip required evidence.
+        // Without the flag `state_machine` writes
+        // `override_reason if is_override else ""` and the reason is
+        // dropped, so the bypass would cost nothing and record nothing.
+        ...(answers?.is_override ? { is_override: true } : {}),
       };
       const response = await api.post<TicketDetail>(
         `/tickets/${id}/status/`,
         payload,
       );
 
+      // W13 — the transition ANSWERS. It used to do exactly these two
+      // lines and nothing else, which is the father's "I press it, I
+      // don't know what it does": the page looked slightly different
+      // afterwards and you were left to work out whether that was you.
+      const said = describeTicketChange(ticket, response.data, t, tStatus);
       setTicket(response.data);
+      // W-FIX-C — the move CARRIED PEOPLE, so the card that lists them
+      // has to re-read. `setTicket` above refreshes the header count and
+      // the customer-side roster (both read `ticket.assigned_staff`,
+      // which the status response rebuilds from the database), but the
+      // provider's assignment table is `<StaffAssignmentSection>`'s own
+      // state and nothing here reaches it. Bumped only when people
+      // actually travelled with the move, so an ordinary status change
+      // costs no extra requests.
+      if (answers?.assigned_staff_ids?.length) {
+        setAssignmentReloadNonce((n) => n + 1);
+      }
       setStatusNote("");
+      setTransitionTarget(null);
+      setTransitionReqs(null);
+      // W14 §2 — EVERY ACTION ANSWERS (rule 4), and when the operator
+      // wrote something the answer has to account for it too. The
+      // sentence names the place, and `revealStatusNote()` below opens
+      // it, so the words and the page say the same thing.
+      const noteLine = effectiveNote ? t("change.note_recorded") : null;
+      if (said) {
+        const detail = [said.description, noteLine].filter(
+          (part): part is string => Boolean(part),
+        );
+        toast.push({
+          variant: "success",
+          title: said.title,
+          description: detail.length > 0 ? detail.join(" ") : undefined,
+        });
+      }
+      if (effectiveNote) revealStatusNote();
     } catch (err) {
-      setError(getApiError(err));
+      // W10 §4 — the backend asked for a reason, so give the operator
+      // somewhere to type one instead of an error they cannot act on.
+      // Matching the stable `code`, never the message.
+      if (axios.isAxiosError(err)) {
+        const data = err.response?.data as { code?: string } | undefined;
+        if (data?.code === "override_reason_required") {
+          // W14 §4 — THE MODAL STAYS OPEN AND SAYS WHAT IS MISSING.
+          //
+          // This used to close the modal and arm the small inline
+          // reason prompt in the workflow card instead. Walked on
+          // crmtest: the modal vanished, no toast was raised, nothing
+          // said the ticket had not moved, and a different form
+          // appeared somewhere else on the page. From the operator's
+          // chair the button simply did nothing — the owner's "I could
+          // not get them to work".
+          //
+          // With `transition-requirements` now reporting
+          // `override_reason` this branch should no longer be reached
+          // for a move the modal opened; it stays as the safety net for
+          // the case the two ever disagree, and a safety net that
+          // silently swallows the refusal is not one. So: same surface,
+          // requirement added, answers already typed kept, and the
+          // reason stated inside the modal that asked.
+          setTransitionReqs((current) =>
+            current === null || current.unmet.includes("override_reason")
+              ? current
+              : {
+                  ...current,
+                  requirements: [
+                    ...current.requirements,
+                    { key: "override_reason", satisfied: false },
+                  ],
+                  unmet: [...current.unmet, "override_reason"],
+                },
+          );
+          setTransitionError(t("transition.reason_required"));
+          setStatusBusy(null);
+          return;
+        }
+      }
+      // W13 — a failure is louder than a success and names the next
+      // move. `error` toasts are sticky in the provider, so this waits
+      // to be dismissed rather than vanishing unread, and it says the
+      // ticket did NOT move — the thing an operator has to know before
+      // pressing anything again.
+      // W-FIX1 — ONCE, and where the press happened. This used to do
+      // both: a sticky error toast AND the inline line, so one refusal
+      // arrived twice and the toast covered the modal it was about.
+      // The modal is the surface the operator is looking at, so when one
+      // is open it gets the refusal and the toast stays quiet.
+      // P-5 S0 — the error-body law: the server named its reason, so
+      // the screen says THAT (mapped by code to our own words), and the
+      // generic "not accepted" is left for a truly detail-less failure.
+      const refusal = describeTransitionRefusal(err, t);
+      setTransitionError(refusal);
+      if (transitionTarget === null) {
+        toast.push({
+          variant: "error",
+          title: t("change.failed"),
+          description: refusal,
+        });
+      }
     } finally {
       setStatusBusy(null);
     }
   }
+
+  // W14 §2 — SHOW THE NOTE LANDING.
+  //
+  // "Where does the note I write here go, what is it for? I write it and
+  // leave — does it show anywhere?"
+  //
+  // It was never swallowed. It is `TicketStatusHistory.note`, it comes
+  // back on `GET /api/tickets/<id>/` as `status_history[].note` and on
+  // `GET /api/audit/tickets/<id>/timeline/`, and BOTH timeline
+  // renderers on this page already print it against the transition row
+  // it belongs to. What was missing was the room: the Activity card is
+  // collapsed by default (RF-4, on purpose — "at a glance minimal") and
+  // sits under three other cards, so somebody who typed a note, pressed
+  // a button and left never saw it arrive and had no reason to believe
+  // it had.
+  //
+  // So the page shows them, once, at the only moment it is an answer to
+  // a question they just asked: the drawer opens and the card is
+  // scrolled to, right after a transition that carried something. Every
+  // other arrival at this page is untouched — RF-4's default still
+  // holds.
+  //
+  // THE SCROLL CANNOT HAPPEN HERE, and the first cut of this that did
+  // was measured not working: the card ended up at y=911 in a 1000px
+  // viewport, barely on screen. Two reasons, both real. The transition
+  // modal is a native `<dialog>`, and while one is open the page behind
+  // it is inert — a `scrollIntoView()` fired in the same synchronous
+  // block as `setTransitionTarget(null)` runs before the dialog is
+  // actually gone, and does nothing. And the row being scrolled to does
+  // not exist yet: the ticket has only just been replaced and the audit
+  // timeline has not refetched, so the card is still at its old height
+  // and its old place on the page. Both are fixed by deferring to the
+  // effect below, which runs after the dialog has unmounted and after
+  // the rows that move the card have rendered.
+  function revealStatusNote() {
+    revealPendingRef.current = true;
+    setActivityOpen(true);
+    // W-TABS Task 4 — the activity card lives on the Overview tab now;
+    // a reveal fired from anywhere else must land where the card is.
+    setTicketTab("overview");
+  }
+
+  // W14 §2 — the deferred half of `revealStatusNote()`.
+  //
+  // Runs on the render after the drawer opened, which is also the render
+  // after the transition modal unmounted, so the page is scrollable
+  // again. `ticket` and `auditTimeline` are dependencies because they
+  // are what MOVES the card: each one lands more rows in the drawer and
+  // pushes the card's position on the page. The ref makes every one of
+  // those re-runs a no-op except the first that finds something to show.
+  //
+  // `block: "center"` rather than "start": the card ends up in the
+  // middle of the viewport with the new row inside it, instead of
+  // pinned to the top edge where the reader has to work out that the
+  // page moved at all.
+  useEffect(() => {
+    const rowsOnPage =
+      (ticket?.status_history.length ?? 0) + (auditTimeline?.rows.length ?? 0);
+    if (!revealPendingRef.current || !activityOpen || rowsOnPage === 0) return;
+    revealPendingRef.current = false;
+    activityCardRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  }, [activityOpen, ticket, auditTimeline]);
 
   // Sprint 27F-F1 — mirrors ExtraWorkDetailPage.handleOverrideSubmit.
   // Submits {to_status, is_override:true, override_reason} and
@@ -1083,9 +2518,17 @@ export function TicketDetailPage() {
     setOverrideError(null);
     setOverrideBusy(true);
     try {
+      // W10 §4 — `is_override` is the BACKEND's call, not ours.
+      //
+      // It coerces the flag True for a provider-driven customer decision
+      // and for any jump outside the transition table, and it stores the
+      // reason only when the flag is set. Asserting `is_override: true`
+      // from here on a move the backend considers ordinary would stamp a
+      // legitimate step as an override in the audit trail — a fact
+      // written by the wrong owner. Sending the reason and letting the
+      // machine decide keeps the history telling the truth either way.
       const payload: TicketStatusChangePayload = {
         to_status: overrideDecision,
-        is_override: true,
         override_reason: overrideReason.trim(),
         note: statusNote.trim(),
       };
@@ -1093,9 +2536,14 @@ export function TicketDetailPage() {
       // Refetch via loadTicket so messages / attachments stay in sync
       // alongside the new status_history row.
       await loadTicket();
+      // W14 §2 — this path carries the SAME status-note field plus the
+      // override reason, and both land on the same timeline row. A note
+      // written here would otherwise be the one that still vanished.
+      const wroteSomething = Boolean(statusNote.trim() || overrideReason.trim());
       setStatusNote("");
       setOverrideDecision(null);
       setOverrideReason("");
+      if (wroteSomething) revealStatusNote();
     } catch (err) {
       if (axios.isAxiosError(err)) {
         const data = err.response?.data as
@@ -1126,6 +2574,7 @@ export function TicketDetailPage() {
     setCompleteNote("");
     setCompleteError(null);
     setCompleteRoute(null);
+    setCompleteHours({});
     setCompleteModalOpen(true);
     setCompleteRouteLoading(true);
     try {
@@ -1135,6 +2584,20 @@ export function TicketDetailPage() {
       setCompleteError(getApiError(err));
     } finally {
       setCompleteRouteLoading(false);
+    }
+    // P-11 B3 — the default hour type for the hours ask. Non-fatal:
+    // without one the hours fields simply do not render.
+    if (ticket) {
+      try {
+        const types = await listHourTypes({
+          company: ticket.company,
+          is_active: true,
+        });
+        const active = types.filter((hourType) => hourType.is_active);
+        setCompleteHourType(active[0]?.id ?? null);
+      } catch {
+        setCompleteHourType(null);
+      }
     }
   }
 
@@ -1182,6 +2645,68 @@ export function TicketDetailPage() {
         note: completeNote.trim(),
       };
       await api.post<TicketDetail>(`/tickets/${id}/status/`, payload);
+      // P-11 B3 — the per-person hours land as timesheet JOB lines,
+      // after the report stood. A failed hours write never unwinds the
+      // completion: the report is the fact, the hours are said again
+      // on the Hours page if need be.
+      if (ticket && completeHourType !== null) {
+        const today = toDateString(new Date());
+        const written: { name: string; hours: number }[] = [];
+        for (const person of completionCrew) {
+          const raw = (completeHours[person.id] ?? "").trim().replace(",", ".");
+          const hoursValue = Number(raw);
+          if (!Number.isFinite(hoursValue) || hoursValue <= 0) continue;
+          try {
+            await createTimeEntry({
+              company: ticket.company,
+              employee: person.id,
+              date: today,
+              hour_type: completeHourType,
+              hours: hoursValue.toFixed(2),
+              building: ticket.building,
+              source_type: "TICKET",
+              source_id: ticket.id,
+            });
+            written.push({ name: person.name, hours: hoursValue });
+          } catch (hoursErr) {
+            toast.push({
+              variant: "error",
+              title: getApiError(hoursErr),
+            });
+            break;
+          }
+        }
+        // P-12 B4 — say where the hours went, with the door to the
+        // Hours side (the manager's grid, or the worker's own page).
+        if (written.length > 0) {
+          const week = isoWeekOf(new Date());
+          const details = written
+            .map(
+              (w) =>
+                `${w.name} ${String(Number(w.hours.toFixed(2))).replace(
+                  ".",
+                  i18n.language.startsWith("nl") ? "," : ".",
+                )} ${t("common:hours_admin.hour_unit")}`,
+            )
+            .join(", ");
+          const manages = canManageTimesheets(me?.role);
+          hoursDone.announce({
+            title: t("common:ticket_staff_complete.hours_written_title", {
+              details,
+              week: week.isoWeek,
+            }),
+            body: t("common:ticket_staff_complete.hours_written_body"),
+            actionLabel: t(
+              manages
+                ? "common:ticket_staff_complete.hours_written_see_admin"
+                : "common:ticket_staff_complete.hours_written_see_mine",
+            ),
+            actionTo: manages
+              ? `/admin/hours?week=${week.isoYear}-W${String(week.isoWeek).padStart(2, "0")}`
+              : "/my-hours",
+          });
+        }
+      }
       await loadTicket();
       closeCompleteModal();
     } catch (err) {
@@ -1221,7 +2746,7 @@ export function TicketDetailPage() {
   async function submitMessage(event: FormEvent) {
     event.preventDefault();
     if (!id || !message.trim()) return;
-    setError("");
+    clearAt("message");
     setSendingMessage(true);
     try {
       // Send the effective (render-time-derived) tier so a stale
@@ -1245,7 +2770,7 @@ export function TicketDetailPage() {
       setIsPrivate(false);
       await loadTicket();
     } catch (err) {
-      setError(getApiError(err));
+      failAt("message", err);
     } finally {
       setSendingMessage(false);
     }
@@ -1265,7 +2790,7 @@ export function TicketDetailPage() {
 
   async function downloadAttachment(item: TicketAttachment) {
     if (!id) return;
-    setError("");
+    clearAt("download");
     setDownloadingAttachmentId(item.id);
     try {
       const response = await api.get(
@@ -1281,7 +2806,7 @@ export function TicketDetailPage() {
       link.remove();
       URL.revokeObjectURL(blobUrl);
     } catch (err) {
-      setError(getApiError(err));
+      failAt("download", err);
     } finally {
       setDownloadingAttachmentId(null);
     }
@@ -1356,25 +2881,6 @@ export function TicketDetailPage() {
     };
   }, []);
 
-  // M2 P5 — download a staff credential / property document from the
-  // `document_url` the customer-facing assigned-staff payload carries.
-  // Failures surface as a toast (the section is small; an inline page
-  // error banner would be disproportionate).
-  async function downloadStaffDocument(documentUrl: string, filename: string) {
-    setDownloadingStaffDocUrl(documentUrl);
-    try {
-      await downloadDocumentFromUrl(documentUrl, filename);
-    } catch (err) {
-      toast.push({
-        variant: "error",
-        title: tCred("customer.download_failed"),
-        description: getApiError(err),
-      });
-    } finally {
-      setDownloadingStaffDocUrl(null);
-    }
-  }
-
   async function submitAttachment(event: FormEvent) {
     event.preventDefault();
     if (!id || !selectedFile) return;
@@ -1384,7 +2890,7 @@ export function TicketDetailPage() {
       return;
     }
 
-    setError("");
+    clearAt("attachment");
     setUploadingAttachment(true);
 
     try {
@@ -1400,7 +2906,7 @@ export function TicketDetailPage() {
       setAttachmentHidden(false);
       await loadTicket();
     } catch (err) {
-      setError(getApiError(err));
+      failAt("attachment", err);
     } finally {
       setUploadingAttachment(false);
     }
@@ -1409,9 +2915,9 @@ export function TicketDetailPage() {
   if (loading && !ticket) {
     return (
       <div>
-        <Link to="/" className="link-back">
+        <Link {...backToTickets} className="link-back">
           <ChevronLeft size={14} strokeWidth={2.5} />
-          {t("back_to_tickets")}
+          {backToTicketsLabel}
         </Link>
         <div className="loading-bar">
           <div className="loading-bar-fill" />
@@ -1424,92 +2930,702 @@ export function TicketDetailPage() {
   if (!ticket) {
     return (
       <div>
-        <Link to="/" className="link-back">
+        <Link {...backToTickets} className="link-back">
           <ChevronLeft size={14} strokeWidth={2.5} />
-          {t("back_to_tickets")}
+          {backToTicketsLabel}
         </Link>
         <div className="alert-error">{error || t("ticket_not_found")}</div>
       </div>
     );
   }
 
-  // #109 Part I — guarded render-time reset: when the resolved ticket
-  // id differs from the one the correction disclosure was last set for,
-  // collapse it. React re-renders immediately with the updated guard,
-  // so this settles in one extra render and never loops.
-  if (correctionForTicketId !== ticket.id) {
-    setCorrectionForTicketId(ticket.id);
-    if (secondaryOpen) setSecondaryOpen(false);
-  }
+  // W18 — ONE Messages card for the job: the ticket thread plus the
+  // origin Extra Work's thread (read-only, chip-marked), merged by
+  // date. Both endpoints return ascending `created_at`, so the merge
+  // sorts the same way; ids collide across the two tables, hence the
+  // prefixed keys.
+  const jobThread: Array<
+    | { key: string; source: "ticket"; msg: TicketMessage }
+    | { key: string; source: "ew"; msg: EwMessage }
+  > = [
+    ...messages.map((msg) => ({
+      key: `t-${msg.id}`,
+      source: "ticket" as const,
+      msg,
+    })),
+    ...ewMessages.map((msg) => ({
+      key: `ew-${msg.id}`,
+      source: "ew" as const,
+      msg,
+    })),
+  ].sort((a, b) =>
+    a.msg.created_at < b.msg.created_at
+      ? -1
+      : a.msg.created_at > b.msg.created_at
+        ? 1
+        : 0,
+  );
+
+  // W22 §5 — the spawn paths append a raw per-line echo to the ticket
+  // description ("<label> × <qty>", `proposal_tickets._line_label`).
+  // The Agreement card owns the lines now (rule 7), so the header shows
+  // the human half of the description and drops the machine lines. The
+  // customer-visible explanations the spawn also appends do not match
+  // the pattern and stay. Non-EW tickets render their description
+  // untouched.
+  // P-5 S1.5 — the execution header said the title THREE times: the
+  // title, the cart line ("1 × Extra werk regie uren") and the service
+  // line ("Extra werk regie uren"). Once, then the parts: cart lines in
+  // either order and any line that only repeats the title or the
+  // service name are dropped; what the customer actually wrote stays.
+  const repeatedLines = new Set(
+    [ticket.title, ticket.extra_work_origin?.service_name ?? ""]
+      .map((line) => line.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const headerDescriptionRaw = ticket.extra_work_origin
+    ? ticket.description
+        .split("\n")
+        .filter((line) => {
+          const text = line.trim();
+          if (/^.+ × \d+([.,]\d+)?$/.test(text)) return false;
+          if (/^\d+([.,]\d+)? × .+$/.test(text)) return false;
+          return !repeatedLines.has(text.toLowerCase());
+        })
+        .join("\n")
+        .trim()
+    : ticket.description;
+  // P-5 S1.4 — meerwerk surfaces never say "ticket": every sentence
+  // that names the record is looked up with i18next's context, so a
+  // `_meerwerk` variant wins on a meerwerk job and the base key
+  // elsewhere (nl/en lockstep, both variants).
+  const kindContext = ticket.kind === "MEERWERK" ? "meerwerk" : undefined;
+  // P-3 §A.6 — a description that only repeats the title is not a
+  // subtitle; the page said "final test" twice, one under the other.
+  const headerDescription =
+    headerDescriptionRaw.trim().toLowerCase() === ticket.title.trim().toLowerCase()
+      ? ""
+      : headerDescriptionRaw;
+
+  /* W-TABS Task 4 — which tabs exist for THIS viewer on THIS ticket.
+     Money is a property of the ticket (an extra-work origin) AND the
+     role (provider management with extra-work access) — for everyone
+     else the tab is ABSENT, not empty. The other four hold content for
+     every role: their inner blocks keep their own gates. */
+  const moneyTabVisible =
+    Boolean(ticket.extra_work_origin) &&
+    isProviderManagementRole(me?.role) &&
+    canAccessExtraWork(me?.role);
+  const visibleTicketTabs = TICKET_TABS.filter(
+    (key) => key !== "money" || moneyTabVisible,
+  );
+  const ticketTab: TicketTab = visibleTicketTabs.includes(
+    requestedTicketTab,
+  )
+    ? requestedTicketTab
+    : "overview";
+
+  // FE-3 — the crew's names as this viewer may read them: the server has
+  // already applied the visibility policy; anonymous entries carry only
+  // a label key.
+  const crewNames: string[] = ticket.assigned_staff.map((entry) => {
+    if ("anonymous" in entry && entry.anonymous) {
+      return ticket.company_name
+        ? t(entry.label_key, { companyName: ticket.company_name })
+        : t(`${entry.label_key}_unknown`);
+    }
+    const named = entry as AssignedStaffNamedEntry;
+    return (
+      named.full_name || (named.email ? named.email.split("@")[0] : "—")
+    );
+  });
+
+  const composerExpanded =
+    composerFocused || message.trim() !== "" || directedTo.length > 0;
+
+  const submitLabel = (status: TicketStatus): string => {
+    if (isCustomerDecisionOverride(status)) {
+      return status === "APPROVED"
+        ? t("override_modal_submit_approve")
+        : t("override_modal_submit_reject");
+    }
+    return t("override_modal_submit_generic", {
+      status: tStatus(status),
+    });
+  };
+  const renderReasonPrompt = (status: TicketStatus) => (
+    <div
+      className="workflow-override-inline"
+      data-testid="ticket-override-modal"
+    >
+      {/* The sentence that stood here said the move
+          overrides the customer and is recorded in the
+          status history. The submit button says where
+          the ticket goes and that it is an override,
+          and a required Reason field says the rest by
+          existing. It was one fact written twice. */}
+      <form onSubmit={submitOverride}>
+        <div className="field">
+          <label
+            className="field-label"
+            htmlFor="ticket-override-reason"
+          >
+            {t("override_modal_reason_label")}
+          </label>
+          <textarea
+            id="ticket-override-reason"
+            data-testid="ticket-override-reason"
+            className="field-textarea"
+            rows={3}
+            value={overrideReason}
+            onChange={(event) =>
+              setOverrideReason(event.target.value)
+            }
+            required
+          />
+        </div>
+        {overrideError && (
+          <div
+            className="alert-error"
+            role="alert"
+            data-testid="ticket-override-error"
+            style={{ marginTop: 6 }}
+          >
+            {overrideError}
+          </div>
+        )}
+        <div className="override-card-footer card-actions-cluster">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={cancelOverride}
+            disabled={overrideBusy}
+            data-testid="ticket-override-cancel"
+          >
+            {t("override_modal_cancel")}
+          </button>
+          <button
+            type="submit"
+            className="btn btn-primary btn-sm"
+            disabled={overrideBusy || !overrideReason.trim()}
+            data-testid="ticket-override-submit"
+          >
+            {overrideBusy
+              ? t("updating")
+              : submitLabel(status)}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+  let advanceSeen = false;
+  const renderTransitionButton = (
+    status: TicketStatus,
+    variant: "primary" | "secondary" | "correction",
+  ) => {
+    // W9 §2 — a correction carries its OWN tone, so
+    // the amber is a property of what the button does
+    // rather than of which list it sits in.
+    const tone =
+      variant === "correction"
+        ? "correct"
+        : WORKFLOW_TONE[status];
+    let emphasis: "solid" | "outline" = "outline";
+    if (variant === "primary" && tone === "advance") {
+      emphasis = advanceSeen ? "outline" : "solid";
+      advanceSeen = true;
+    }
+    const isArmed = overrideDecision === status;
+    return (
+      <div key={status} className="workflow-override-target">
+        <button
+          type="button"
+          className={
+            variant === "secondary"
+              ? "status-btn status-btn-secondary"
+              : "status-btn"
+          }
+          data-tone={
+            variant === "secondary" ? undefined : tone
+          }
+          data-emphasis={
+            variant === "primary" ? emphasis : undefined
+          }
+          disabled={statusBusy !== null || overrideBusy}
+          data-testid={`workflow-move-${status}`}
+          aria-expanded={isArmed || undefined}
+          onClick={() => void openTransition(status)}
+        >
+          {statusBusy === status ? (
+            t("updating")
+          ) : (
+            <>
+              {/* Sprint 7B (frontend) — CONVERTED_TO_EXTRA_WORK
+                  is filtered out of the render arrays above,
+                  so this only ever labels real status moves.
+                  Conversion lives on the dedicated header
+                  "Convert to Extra Work" button. */}
+              {/* W9 §2 — the WORDING follows the move, not
+                  the list. It reads "Move back to" with a
+                  left arrow wherever it lands; the amber is
+                  what the correction slot adds on top. */}
+              {/* W13 §4 — A BUTTON IS A VERB.
+                  It used to read "Move to <status
+                  name>", so the owner's father met
+                  "Move to Scheduled, not started",
+                  which is neither a state nor an
+                  action. The status name says where
+                  the work IS; the button says what
+                  pressing it DOES, and they are
+                  never the same words.
+                  A correction keeps naming its
+                  destination: undoing is the one case
+                  where "where does this put it back
+                  to" is the question. */}
+              {isCorrection(ticket.status, status)
+                ? t("workflow_move_back_to", {
+                    status: tStatus(status),
+                  })
+                : t(`workflow_action.${status}`)}
+              <span className="status-btn-arrow">
+                {isCorrection(ticket.status, status)
+                  ? "←"
+                  : "→"}
+              </span>
+            </>
+          )}
+        </button>
+        {isArmed && renderReasonPrompt(status)}
+      </div>
+    );
+  };
+  // Sprint 7B (frontend) — NEVER render
+  // CONVERTED_TO_EXTRA_WORK as a raw status-transition
+  // button. That hop would flip the status WITHOUT
+  // creating the ExtraWorkRequest; conversion now runs
+  // through the dedicated convert endpoint + dialog
+  // (the prominent header "Convert to Extra Work"
+  // button). Drop it from both render groups so it can
+  // never POST to /status/.
+  //
+  // W11 §1 — the APPROVED / REJECTED pair is no longer
+  // pulled out of these two lists for a provider on
+  // WAITING_CUSTOMER_APPROVAL. It used to be, so that a
+  // separate renderer could redraw it with the arming
+  // form attached; every transition button now carries
+  // that form, so the pair renders where it belongs —
+  // as the forward action of the step it is on.
+  const primaryForRender = primaryNextStatuses.filter(
+    (s) => s !== "CONVERTED_TO_EXTRA_WORK",
+  );
+  const secondaryForRender = secondaryNextStatuses.filter(
+    (s) => s !== "CONVERTED_TO_EXTRA_WORK",
+  );
+  // W10 §5 — CONTEXTUAL, NOT PERMANENT. The only
+  // correction offered on its own is the one that
+  // undoes the step just taken, and only while the
+  // backend still permits it.
+  //
+  // W11 §1 — and only when that step went FORWARD.
+  // `isCorrection` is what says so: it compares where
+  // the ticket came from against where it stands, so
+  // an undo that has itself just been undone offers no
+  // second undo. There is nothing left to take back.
+  const correctionTarget =
+    previousStatus !== null &&
+    previousStatus !== ticket.status &&
+    // `some`, not `includes`: `secondaryForRender` is
+    // narrowed by its own filter and would refuse the
+    // full union as an argument. A cast would silence
+    // that rather than answer it.
+    secondaryForRender.some((st) => st === previousStatus) &&
+    isCorrection(ticket.status, previousStatus)
+      ? previousStatus
+      : null;
+  const correctionForRender =
+    correctionTarget === null ? [] : [correctionTarget];
+  const otherSecondaryForRender = secondaryForRender.filter(
+    (st) => st !== correctionTarget,
+  );
+
+  /* FE-3 (Addendum D §D.6 rule 3) — ONE PRIMARY ACTION, and where the
+     rest goes.
+
+     The legal set is still `allowed_next_statuses`, partitioned as
+     before (`partitionTransitions`). What FE-3 changes is WHERE each
+     group renders:
+       primary        -> the phase banner, as the one button (two for
+                         the customer's own approve / reject pair);
+       a provider's own decision on the customer's behalf is an override
+       (`is_override` coerced, reason required) and therefore never a
+       primary: it goes behind Geavanceerd with its reason prompt;
+       sideways moves (a hold, an early hand-off) -> "Andere stappen";
+       every backward move -> Geavanceerd, the undo of the last step
+       first. */
+  const overridePair = primaryForRender.filter((status) =>
+    isCustomerDecisionOverride(status),
+  );
+  const primaryButtons = primaryForRender.filter(
+    (status) => !isCustomerDecisionOverride(status),
+  );
+  // P-9 12(b) — the server's answer, read only when it describes THIS
+  // ticket in THIS state (the effect that asks lives with the other
+  // hooks above the early return).
+  const offersStart =
+    startTarget !== null && primaryButtons.some((status) => status === startTarget);
+  const startUnmet =
+    offersStart &&
+    startReqs &&
+    startReqs.ticketId === ticket.id &&
+    startReqs.stamp === startStamp &&
+    startReqs.target === startTarget
+      ? startReqs.unmet.filter((key) => key === "assignee" || key === "schedule")
+      : [];
+  const startBlocked = startUnmet.length > 0;
+  const sidewaysForRender = otherSecondaryForRender.filter(
+    (status) => !isCorrection(ticket.status, status),
+  );
+  const backwardForRender = otherSecondaryForRender.filter((status) =>
+    isCorrection(ticket.status, status),
+  );
+
+  const bannerToneClass = (status: TicketStatus): string => {
+    const tone = WORKFLOW_TONE[status];
+    if (tone === "reject") return "btn btn-danger";
+    if (tone === "hold") return "btn btn-secondary";
+    return "btn btn-primary";
+  };
+  const startBlockedSentence = startBlocked
+    ? t("workflow.start_blocked", {
+        list: startUnmet
+          .map((key) =>
+            key === "assignee"
+              ? t("workflow.start_needs_assignee")
+              : t("workflow.start_needs_schedule"),
+          )
+          .join(" + "),
+      })
+    : "";
+  const renderBannerButton = (status: TicketStatus, solid: boolean) => (
+    <button
+      key={status}
+      type="button"
+      className={solid ? bannerToneClass(status) : "btn btn-secondary"}
+      // P-9 12(b) / rule 14 — a start the server would refuse is not a
+      // live button; the sentence beside it says what to change.
+      disabled={
+        statusBusy !== null || overrideBusy || (status === startTarget && startBlocked)
+      }
+      title={status === startTarget && startBlocked ? startBlockedSentence : undefined}
+      data-testid={`workflow-move-${status}`}
+      onClick={() => void openTransition(status)}
+    >
+      {statusBusy === status ? t("updating") : t(`workflow_action.${status}`)}
+    </button>
+  );
+
+  // Archive is the primary only when no forward move is (W-H §1: on a
+  // finished ticket it is the one thing left to do); otherwise it waits
+  // in "Andere stappen" with the other doors.
+  // P-13 D (W5) — while MONEY waits (`extra_work_billing`), Archive is
+  // never the celebrated green button: the banner says the money fact
+  // with a "Go to invoices" door, and Archive moves behind Advanced
+  // with the C2 confirm.
+  // P-13 D (W5) — a finished job's facts are PAST-TENSE facts:
+  // "Not planned yet" and "No staff assigned yet" are live-job words.
+  const jobFinished = ticket.display_phase === "DONE";
+  // Only on the FINISHED phase: an earned-but-waiting job (customer
+  // approval) keeps its own workflow sentence and buttons.
+  const moneyWaits = Boolean(ticket.extra_work_billing) && jobFinished;
+  const archiveIsPrimary =
+    canArchive &&
+    primaryButtons.length === 0 &&
+    !canShowCompleteWorkButton &&
+    !moneyWaits;
+  // Declared above the banner because the "Plan it" door reads it too
+  // (P-11 A7): the door and the Actions card must agree on who may
+  // open the extra-work plan modal.
+  const canOpenPlan =
+    !!ticket.extra_work_origin &&
+    isProviderManagementRole(me?.role) &&
+    canAccessExtraWork(me?.role) &&
+    !TERMINAL_UI_STATUSES.has(ticket.status);
+  const primaryActionNode: ReactNode = canShowCompleteWorkButton ? (
+    <button
+      type="button"
+      className="btn btn-primary"
+      onClick={openCompleteModal}
+      disabled={completeModalOpen}
+      data-testid="ticket-staff-complete-button"
+    >
+      {t("common:ticket_staff_complete.button_label")}
+    </button>
+  ) : primaryButtons.length > 0 ? (
+    <>
+      {primaryButtons.map((status, index) =>
+        renderBannerButton(status, index === 0 || WORKFLOW_TONE[status] === "reject"),
+      )}
+      {startBlocked && (
+        <span
+          className="muted small"
+          style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+          data-testid="ticket-start-blocked"
+        >
+          {startBlockedSentence}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              // P-11 A7 — the door was dead: it pointed at the
+              // schedule anchor without mounting it (the anchor lives
+              // on the Plan tab), so the click did nothing. The door
+              // now lands somewhere real: the plan modal for a
+              // spawned ticket, else the Plan tab's schedule card.
+              const action = planDoorAction({
+                hasExtraWorkOrigin: !!ticket.extra_work_origin,
+                canOpenEwPlan: canOpenPlan,
+              });
+              if (action.kind === "ew-plan-modal") {
+                void openEwPlan();
+              } else {
+                setTicketTab(action.tab);
+                pointAtMissingPiece("schedule");
+              }
+            }}
+            data-testid="ticket-start-blocked-plan"
+          >
+            {t("workflow.start_blocked_link")}
+          </button>
+        </span>
+      )}
+    </>
+  ) : archiveIsPrimary ? (
+    <button
+      type="button"
+      className="btn btn-primary"
+      onClick={() => setArchiveMode("archive")}
+      data-testid="ticket-archive-button"
+    >
+      <Archive size={14} strokeWidth={2.2} aria-hidden="true" />
+      <span style={{ marginLeft: 6 }}>{t("common:archive.button")}</span>
+    </button>
+  ) : moneyWaits && primaryButtons.length === 0 && !canShowCompleteWorkButton ? (
+    // P-13 D (W5) — the finished, unbilled job's one green door goes
+    // where the money goes.
+    <Link
+      className="btn btn-primary"
+      to={`/invoices?tab=due&customer=${ticket.customer}`}
+      data-testid="ticket-go-to-invoices"
+    >
+      {t("facts.go_to_invoices")}
+    </Link>
+  ) : null;
+
+  const otherStepNodes: ReactNode[] = [
+    ...sidewaysForRender.map((status) =>
+      renderTransitionButton(status, "secondary"),
+    ),
+    ...(canOpenPlan
+      ? [
+          <button
+            key="plan"
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => void openEwPlan()}
+            disabled={ewPlanLoading}
+            data-testid="ticket-ew-plan-open"
+          >
+            {ewPlanLoading ? t("ew_plan_loading") : t("ew_plan_button")}
+          </button>,
+        ]
+      : []),
+    ...(canConvertTicket
+      ? [
+          <button
+            key="convert"
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setConvertOpen(true)}
+            data-testid="ticket-convert-to-ew-button"
+          >
+            <ArrowRightLeft size={14} strokeWidth={2.2} />
+            <span style={{ marginLeft: 6 }}>
+              {t("workflow_convert_to_extra_work")}
+            </span>
+          </button>,
+        ]
+      : []),
+    ...(canArchive && !archiveIsPrimary && !moneyWaits
+      ? [
+          <button
+            key="archive"
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setArchiveMode("archive")}
+            data-testid="ticket-archive-button"
+          >
+            <Archive size={14} strokeWidth={2.2} aria-hidden="true" />
+            <span style={{ marginLeft: 6 }}>{t("common:archive.button")}</span>
+          </button>,
+        ]
+      : []),
+    ...(canUnarchive
+      ? [
+          <button
+            key="unarchive"
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setArchiveMode("unarchive")}
+            data-testid="ticket-unarchive-button"
+          >
+            {t("common:archive.unarchive_button")}
+          </button>,
+        ]
+      : []),
+  ];
+  const advancedHasContent =
+    correctionForRender.length > 0 ||
+    overridePair.length > 0 ||
+    backwardForRender.length > 0 ||
+    canDeleteTicket ||
+    !isCustomerUser(me?.role);
 
   return (
     <div>
       <div className="detail-header">
         <div className="detail-header-top">
-          <Link to="/" className="link-back">
+          <Link {...backToTickets} className="link-back">
             <ChevronLeft size={14} strokeWidth={2.5} />
-            {t("back_to_tickets")}
+            {backToTicketsLabel}
           </Link>
-          {/* Sprint 30 Batch 30.1.1 — the header-level "Delete accidental
-              ticket" button has been demoted to a small text link in the
-              Details card footer (see the consolidated Details card
-              below). The confirmation dialog and the delete behaviour
-              are unchanged; only the entry-point affordance moved.
-
-              Sprint 7B (frontend) — prominent "Convert to Extra Work"
-              header action. Opens the dedicated convert dialog (which
-              POSTs to /tickets/<id>/convert-to-extra-work/ and creates
-              a NEW ExtraWorkRequest); it is NOT the raw status hop to
-              CONVERTED_TO_EXTRA_WORK. Gated on `canConvertTicket`
-              (provider-management role + convertible status), mirroring
-              the backend gate. */}
-          {canConvertTicket && (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => setConvertOpen(true)}
-              data-testid="ticket-convert-to-ew-button"
-            >
-              <ArrowRightLeft size={14} strokeWidth={2.2} />
-              <span style={{ marginLeft: 6 }}>
-                {t("workflow_convert_to_extra_work")}
-              </span>
-            </button>
+          {/* FE-3 (Addendum D §D.6 rule 2/3) — THE HEADER HOLDS NO BUTTONS.
+              Plan / Convert / Archive stood here, top-right, under the
+              toast. The ONE primary action lives in the phase banner
+              below; everything else is in the Acties card's two folds.
+              A STATE IS A SENTENCE ABOUT THE WORK: the archived chip
+              stays, it is a fact, not an action. */}
+          {isArchived && (
+            <span className="cell-tag" data-testid="ticket-archived-badge">
+              {ticket?.archived_by_name
+                ? t("common:archive.by", {
+                    who: ticket.archived_by_name,
+                    when: formatDate(ticket.archived_at ?? null),
+                  })
+                : t("common:archive.badge")}
+            </span>
           )}
         </div>
+        <div className="detail-header-band">
+          <div className="detail-header-band-main">
+        {/* FE-3 — WHAT this is, in the meta row: the number, the KIND
+            pill (§D.2 — "Meerwerk — uitvoering" is a phase of the same
+            meerwerk, never a separate noun; the server says which kind,
+            `tickets/detail_facts.py`), and how urgent it is. The status
+            block that stood beside the title is the phase banner now. */}
         <div className="detail-header-meta">
-          <span className="detail-header-no">{ticket.ticket_no}</span>
+          {/* P-5 S1.4 — on a meerwerk job the TCK number is ticket
+              vocabulary; it lives behind Geavanceerd there. */}
+          {ticket.kind !== "MEERWERK" && (
+            <span className="detail-header-no">{ticket.ticket_no}</span>
+          )}
+          <span
+            className="cell-tag"
+            data-testid="ticket-kind-pill"
+            data-kind={ticket.kind}
+          >
+            {t(`kind.${ticket.kind}`)}
+          </span>
           <span className={`badge badge-${ticket.priority.toLowerCase()}`}>
             {priorityLabelLong(ticket.priority)}
           </span>
-          <span className={`badge badge-${ticket.status.toLowerCase()}`}>
-            {tStatus(ticket.status)}
-          </span>
         </div>
         <h1 className="detail-header-title">{ticket.title}</h1>
-        <p className="detail-header-desc">{ticket.description}</p>
-        {/* Sprint 28 Batch 15.4 — spawned-from-EW anchor. Renders only
-            when the backend includes `extra_work_origin` (non-null
-            for tickets created by an ExtraWorkRequest line). Mirrors
-            the RouteBadge so operators can tell at a glance whether
-            the parent EW skipped or went through the proposal phase. */}
-        {ticket.extra_work_origin && (
+        {headerDescription && (
+          <p className="detail-header-desc">{headerDescription}</p>
+        )}
+        {/* P-5 S7 — an occurrence ticket says its origin: part of which
+            contract's recurring work, which visit of this year. */}
+        {ticket.occurrence_origin && (
           <div
             className="ticket-extra-work-origin"
-            data-testid="ticket-extra-work-origin"
-            data-origin={ticket.extra_work_origin.origin}
+            data-testid="ticket-occurrence-origin"
           >
             <span className="muted small">
-              {t("detail.spawned_from_label")}
+              {ticket.occurrence_origin.contract_id
+                ? t("detail.occurrence_origin_contract", {
+                    job: ticket.occurrence_origin.recurring_job_title,
+                    n: ticket.occurrence_origin.visit_index,
+                    total: ticket.occurrence_origin.visits_this_year,
+                  })
+                : t("detail.occurrence_origin_job", {
+                    job: ticket.occurrence_origin.recurring_job_title,
+                    n: ticket.occurrence_origin.visit_index,
+                    total: ticket.occurrence_origin.visits_this_year,
+                  })}
             </span>{" "}
+            {ticket.occurrence_origin.contract_id && (
+              <Link
+                to={`/admin/contracts/${ticket.occurrence_origin.contract_id}`}
+                data-testid="ticket-occurrence-contract-link"
+              >
+                {ticket.occurrence_origin.contract_type_name
+                  ? `${ticket.occurrence_origin.contract_type_name} · ${ticket.occurrence_origin.contract_no}`
+                  : ticket.occurrence_origin.contract_no}
+              </Link>
+            )}
+            {" · "}
             <Link
-              to={`/extra-work/${ticket.extra_work_origin.extra_work_request_id}`}
+              to={`/planned-work/${ticket.occurrence_origin.recurring_job_id}`}
+              data-testid="ticket-occurrence-job-link"
             >
-              {ticket.extra_work_origin.extra_work_request_title}
-            </Link>{" "}
-            <RouteBadge value={ticket.extra_work_origin.origin} />
+              {t("detail.occurrence_open_job")}
+            </Link>
           </div>
         )}
+        {/* P-13 D (W5) — the Instant/Quote chip left the header: how
+            the work was routed is block 1's provenance sentence in the
+            Money tab ("started by … — no approval needed" /
+            "approved by … on …"), not a header badge. */}
+
+        {/* W6-H — MY PLANNED DAYS.
+            The worker's answer to "which days am I on this job, and for
+            how many hours". It lives here because a worker cannot open
+            the parent Extra Work at all (scope_extra_work_for returns
+            none() for STAFF, the P0 staff-privacy fix), so the ticket is
+            the surface they already use.
+
+            The caller's OWN rows and nobody else's — the server filters
+            by the requesting user, so this is not a crew roster and
+            carries no other person's name and no money. Rendered only
+            when there is something to say. */}
+        {(ticket.extra_work_origin?.my_planned_hours?.length ?? 0) > 0 && (
+          <div
+            className="ticket-my-planned-hours"
+            data-testid="ticket-my-planned-hours"
+          >
+            <span className="muted small">
+              {t("detail.my_planned_days_label")}
+            </span>{" "}
+            {ticket.extra_work_origin?.my_planned_hours?.map((row) => (
+              <span
+                key={row.date ?? "none"}
+                className="ticket-my-planned-day"
+                data-testid="ticket-my-planned-day"
+                data-date={row.date ?? ""}
+              >
+                {/* No day yet is a REAL state, not a blank. It is what
+                    every plan said before days existed. */}
+                {row.date ?? t("detail.my_planned_no_day")}
+                {": "}
+                <strong>
+                  {t("detail.my_planned_hours_value", { hours: row.hours })}
+                </strong>
+              </span>
+            ))}
+          </div>
+        )}
+          </div>{/* end .detail-header-band-main */}
+        </div>{/* end .detail-header-band */}
       </div>
 
       {error && (
@@ -1518,9 +3634,493 @@ export function TicketDetailPage() {
         </div>
       )}
 
-      <div className="detail-grid">
+      {/* W-TABS Task 4 — the pill bar, the EW page's exact classes. */}
+      <div
+        className="composer-toggle ew-detail-tabs"
+        role="tablist"
+        aria-label={t("tabs_aria", { context: kindContext })}
+      >
+        {visibleTicketTabs.map((key) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={ticketTab === key}
+            className={`composer-toggle-btn ${
+              ticketTab === key ? "active" : ""
+            }`}
+            onClick={() => setTicketTab(key)}
+            data-testid={`ticket-tab-${key}`}
+          >
+            {t(`tab_${key}`)}
+          </button>
+        ))}
+      </div>
+
+      <div
+        className={
+          ticketTab === "overview"
+            ? "detail-grid"
+            : "detail-grid tk-tabs-stack"
+        }
+      >
         <div className="detail-main">
-          <div className="card">
+          {ticketTab === "overview" && (
+          <>
+          {/* FE-3 (Addendum D §D.0 / §D.4) — THE PAGE OPENS ON THREE
+              ANSWERS: what phase this is in (the server's
+              `display_phase`, per viewer), what is true of it right now
+              (the customer reads the phase's own next line; a provider
+              reads the workflow sentence, with since-when), and the ONE
+              thing the reader can do (`primaryActionNode`, from
+              `allowed_next_statuses` and the per-record actions). */}
+          <PhaseBanner
+            kind="ticket"
+            phase={ticket.display_phase}
+            testId="ticket-phase-banner"
+            sub={
+              isCustomerUser(me?.role) ? undefined : moneyWaits &&
+                ticket.extra_work_billing ? (
+                // P-13 D (W5) — a finished, unbilled job's banner says
+                // the MONEY fact, never "nothing further happens"
+                // while €330.33 waits.
+                <span data-testid="ticket-header-status-sentence">
+                  {ticket.extra_work_billing.customer_invoice_day != null
+                    ? t("facts.done_money_day", {
+                        amount: formatMoney(
+                          ticket.extra_work_billing.unbilled_total,
+                        ),
+                        customer: ticket.extra_work_billing.customer_name,
+                        day:
+                          ticket.extra_work_billing.customer_invoice_day ===
+                          "LAST_OF_MONTH"
+                            ? t("common:facturatie.day_last")
+                            : t("common:facturatie.day_of_month", {
+                                day: ticket.extra_work_billing
+                                  .customer_invoice_day,
+                              }),
+                      })
+                    : t("facts.done_money_no_day", {
+                        amount: formatMoney(
+                          ticket.extra_work_billing.unbilled_total,
+                        ),
+                        customer: ticket.extra_work_billing.customer_name,
+                      })}
+                </span>
+              ) : (
+                <span data-testid="ticket-header-status-sentence">
+                  {t(`workflow_state.${ticket.status}`)}
+                  {currentStatusSince
+                    ? ` · ${t("workflow_current_status_since", {
+                        when: formatDateTime(currentStatusSince),
+                      })}`
+                    : ""}
+                </span>
+              )
+            }
+            action={primaryActionNode}
+          />
+          {/* P-12 B4 — the hours the report wrote, and where they went. */}
+          {hoursDone.done && (
+            <DoneBanner
+              done={hoursDone.done}
+              onDismiss={hoursDone.dismiss}
+              testId="ticket-hours-done"
+            />
+          )}
+          {/* Why a provider who would normally decide has no button on a
+              WCA ticket — said where the button would be. */}
+          {!isCustomerUser(me?.role) &&
+            ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
+            ticket.actions?.can_override_customer_decision === false && (
+              <p
+                className="muted small"
+                style={{ margin: "-8px 0 14px" }}
+                data-testid="workflow-wca-no-provider-decision"
+              >
+                {t("workflow_wca_no_provider_decision")}
+              </p>
+            )}
+          {/* W5 fix 3 — the billing-cutoff notice, at the customer's
+              decision. Customer-side only, on the step where the
+              decision is theirs. */}
+          {isCustomerUser(me?.role) &&
+            ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
+            (visibleNextStatuses.includes("APPROVED") ||
+              visibleNextStatuses.includes("REJECTED")) && (
+              <BillingCutoffNotice />
+            )}
+
+          {/* FE-3 §D.6 rule 5 — FACTS BEFORE CONVERSATION. The collapsed
+              "Ticketgegevens" accordion is gone; its facts are here, in
+              the four questions a reader asks, always visible. Timestamps
+              that are history (first response, approved at, closed at)
+              live on the activity timeline, which already tells that
+              story. */}
+          <div className="facts" data-testid="ticket-facts">
+            <div className="ew-ctx-block" data-testid="ticket-fact-where">
+              <div className="ew-ctx-label">{t("facts.where")}</div>
+              <div className="ew-ctx-body">
+                <div
+                  className="ew-ctx-strong"
+                  data-testid="ticket-header-location"
+                >
+                  {ticket.room_label || ticket.building_name}
+                </div>
+                {/* A room label alone loses the building it sits in. */}
+                {ticket.room_label && ticket.building_name && (
+                  <div className="ew-ctx-sub">{ticket.building_name}</div>
+                )}
+              </div>
+            </div>
+
+            <div className="ew-ctx-block" data-testid="ticket-fact-who">
+              <div className="ew-ctx-label">{t("facts.who")}</div>
+              <div className="ew-ctx-body">
+                <div
+                  className="ew-ctx-strong"
+                  data-testid="ticket-header-customer"
+                >
+                  {ticket.customer_name}
+                </div>
+                {/* The crew, as the SERVER shows it to this viewer —
+                    `assigned_staff` is already filtered through the
+                    customer's visibility policy (anonymous entries carry
+                    a label key, never a name). Capped at four names. */}
+                <div className="ew-ctx-sub" data-testid="ticket-fact-crew">
+                  {t("facts.crew_label")}:{" "}
+                  {crewNames.length === 0
+                    ? jobFinished
+                      ? t("facts.no_crew_recorded")
+                      : t("assigned_staff_empty")
+                    : crewNames.slice(0, 4).join(", ") +
+                      (crewNames.length > 4
+                        ? " " +
+                          t("facts.more_people", {
+                            count: crewNames.length - 4,
+                          })
+                        : "")}
+                </div>
+                <div className="ew-ctx-sub">
+                  {t("facts.reported_by", {
+                    name: humanName(ticket.created_by_email, t("unassigned")),
+                    when: formatDate(ticket.created_at),
+                  })}
+                </div>
+                {/* Sprint 28 Batch 4 — the customer's contacts, SA / CA
+                    only (the endpoint's own gate). Three by default; the
+                    whole list behind one toggle, scrolling inside itself. */}
+                {canSeeCustomerContacts && customerContacts.length > 0 && (
+                  <div data-testid="ticket-customer-contacts-panel">
+                    {contactsOpen ? (
+                      <BoundedList
+                        size="sm"
+                        count={customerContacts.length}
+                        ariaLabel={t("details_subsection_contacts")}
+                        testIdPrefix="ticket-customer-contacts"
+                      >
+                        <ul className="facts-contacts">
+                          {customerContacts.map((contact) => (
+                            <li
+                              key={contact.id}
+                              data-testid="ticket-customer-contact-row"
+                            >
+                              <b>{contact.full_name}</b>
+                              {/* P-3 §A.10 / P-5 S6.5 — "veli · role: A":
+                                  the label is free text the customer's
+                                  admin typed, and the system cannot say
+                                  what "A" is. It stays editable on the
+                                  Contacts page; this line names the
+                                  person and how to reach them. */}
+                              {contact.phone ? ` · ${contact.phone}` : ""}
+                              {contact.email ? ` · ${contact.email}` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </BoundedList>
+                    ) : (
+                      <ul className="facts-contacts">
+                        {customerContacts.slice(0, 3).map((contact) => (
+                          <li
+                            key={contact.id}
+                            data-testid="ticket-customer-contact-row"
+                          >
+                            <b>{contact.full_name}</b>
+                            {contact.phone ? ` · ${contact.phone}` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {customerContacts.length > 3 && (
+                      <button
+                        type="button"
+                        className="facts-edit"
+                        onClick={() => setContactsOpen((open) => !open)}
+                        aria-expanded={contactsOpen}
+                        data-testid="ticket-customer-contacts-toggle"
+                      >
+                        {contactsOpen
+                          ? t("facts.contacts_hide")
+                          : t("facts.contacts_show_all", {
+                              count: customerContacts.length,
+                            })}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="ew-ctx-block" data-testid="ticket-fact-when">
+              <div className="ew-ctx-label">{t("facts.when")}</div>
+              <div className="ew-ctx-body">
+                {/* P-1 — A DATE IS A PLAN ONLY IF A PERSON MADE IT. The
+                    server says whether the window is real
+                    (`has_real_plan`) and whose; a seeded date nobody set
+                    (the Sprint 9B spawn seed on crmtest's June tickets)
+                    reads "not planned yet", never "planned", never late.
+                    The words: "Ingepland voor <date> — door <name>, op
+                    <date>" / "Aangemaakt op <date> door <name> — nog niet
+                    ingepland · al N dagen". */}
+                <div className="ew-ctx-strong" data-testid="ticket-fact-planned">
+                  {/* P-3 §A.3 — the DAY as the server states it (its own
+                      zone), never the instant read in the browser's.
+                      P-13 D (W5) — a FINISHED job's headline is when it
+                      finished; "Not planned yet" is a live-job fact. */}
+                  {jobFinished
+                    ? t("facts.finished_on", {
+                        date: formatDay(
+                          ticket.settled_at ?? ticket.updated_at,
+                        ),
+                      })
+                    : ticket.has_real_plan && ticket.scheduled_start_day
+                    ? ticket.scheduled_end_day &&
+                      ticket.scheduled_end_day !== ticket.scheduled_start_day
+                      ? t("facts.planned_for_range", {
+                          from: formatDay(`${ticket.scheduled_start_day}T00:00:00`),
+                          to: formatDay(`${ticket.scheduled_end_day}T00:00:00`),
+                        })
+                      : t("facts.planned_for", {
+                          date: formatDay(`${ticket.scheduled_start_day}T00:00:00`),
+                        })
+                    : ticket.has_real_plan && ticket.due_date
+                      ? t("facts.planned_for", { date: formatDay(ticket.due_date) })
+                      : t("schedule.not_scheduled")}
+                </div>
+                {jobFinished && (
+                  <div className="ew-ctx-sub" data-testid="ticket-fact-finished-plan">
+                    {ticket.has_real_plan && ticket.scheduled_start_day
+                      ? t("facts.finished_planned", {
+                          date: formatDay(
+                            `${ticket.scheduled_start_day}T00:00:00`,
+                          ),
+                        })
+                      : t("facts.finished_never_planned")}
+                  </div>
+                )}
+                {ticket.has_real_plan && ticket.scheduled_start_time && (
+                  <div className="ew-ctx-sub" data-testid="ticket-fact-clock">
+                    {ticket.scheduled_end_time
+                      ? `${ticket.scheduled_start_time}–${ticket.scheduled_end_time}`
+                      : ticket.scheduled_start_time}
+                  </div>
+                )}
+                {ticket.has_real_plan && ticket.time_window_label && (
+                  <div className="ew-ctx-sub">{ticket.time_window_label}</div>
+                )}
+                {/* P-3 §A.5 — a real plan past the deadline says so; the
+                    dialog warned before the save, nothing is blocked. */}
+                {ticket.planned_after_deadline && (
+                  <div
+                    className="facts-line ew-hours-tone-over"
+                    data-testid="ticket-fact-after-deadline"
+                  >
+                    <CalendarClock size={12} strokeWidth={2.4} aria-hidden="true" />
+                    {t("facts.planned_after_deadline")}
+                  </div>
+                )}
+                {ticket.has_real_plan && ticket.planned_at && (
+                  <div className="ew-ctx-sub" data-testid="ticket-fact-planned-by">
+                    {ticket.planned_by_name
+                      ? t("facts.planned_by_on", {
+                          name: ticket.planned_by_name,
+                          date: formatDate(ticket.planned_at),
+                        })
+                      : t("facts.planned_on_date", { date: formatDate(ticket.planned_at) })}
+                  </div>
+                )}
+                {/* The plain fact, on EVERY ticket: who opened it and when.
+                    On an unplanned job it carries the SAME age the
+                    Werkplanning's row prints (`unplanned_age_days`). */}
+                <div className="ew-ctx-sub" data-testid="ticket-fact-created">
+                  {t("facts.created_by_on", {
+                    date: formatDate(ticket.created_at),
+                    name: ticket.created_by_name || ticket.created_by_email,
+                  })}
+                  {!jobFinished &&
+                  !ticket.has_real_plan &&
+                  ticket.unplanned_age_days !== null &&
+                  ticket.unplanned_age_days > 0
+                    ? ` — ${t("facts.not_planned_yet_age", { count: ticket.unplanned_age_days })}`
+                    : ""}
+                </div>
+                {/* P-15 §0.4 — the customer's wish is a FACT, never a
+                    plan: stated here, and the strip files the job under
+                    "Not planned yet". */}
+                {ticket.wished_day && (
+                  <div className="ew-ctx-sub" data-testid="ticket-fact-wished">
+                    {t("facts.wished_for", {
+                      date: formatDay(`${ticket.wished_day}T00:00:00`),
+                    })}
+                  </div>
+                )}
+                {/* FE-4 (§D.12 item 4) — work that is over reads in the
+                    past tense, with the after-deadline fact as quiet
+                    history: no chip, no "te laat". */}
+                {ticket.settled_at && (
+                  <div className="ew-ctx-sub" data-testid="ticket-fact-settled">
+                    {t("facts.settled_on", { date: formatDate(ticket.settled_at) })}
+                    {ticket.settled_days_after_due !== null && (
+                      <span className="muted">
+                        {" "}
+                        {t(
+                          ticket.due_kind === "DEADLINE"
+                            ? "facts.settled_after_deadline"
+                            : "facts.settled_after_plan",
+                          { count: ticket.settled_days_after_due },
+                        )}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {/* P-15 §0.3 — the on-behalf sign-off, said out loud:
+                    the manager's check counts as the approval, and when
+                    this customer structurally cannot approve online the
+                    sentence says why. Never a provider override in
+                    silence. */}
+                {ticket.approved_on_behalf && (
+                  <div
+                    className="ew-ctx-sub"
+                    data-testid="ticket-fact-approved-on-behalf"
+                  >
+                    {t("facts.approved_on_behalf", {
+                      name:
+                        ticket.approved_by_name ?? t("facts.the_manager"),
+                    })}
+                    {ticket.customer_can_decide_online === false
+                      ? ` ${t("facts.customer_cannot_approve_online")}`
+                      : ""}
+                  </div>
+                )}
+                {/* §D.11 G3 — ONE chip: days left, today, or days over;
+                    the server decides the number AND whether the date is
+                    a real deadline or only the planned day, so a planned
+                    day is never captioned "deadline". */}
+                {ticket.days_until_due !== null && (
+                  <div className="facts-line">
+                    <DueChipCore
+                      days={ticket.days_until_due}
+                      hasDeadline={ticket.due_kind === "DEADLINE"}
+                    />
+                  </div>
+                )}
+                {ticket.due_kind === "DEADLINE" && ticket.due_date && (
+                  <div className="facts-line" data-testid="ticket-fact-deadline">
+                    <CalendarClock size={12} strokeWidth={2.4} aria-hidden="true" />
+                    {t("facts.deadline_label")}: {formatDay(ticket.due_date)}
+                  </div>
+                )}
+                {ticket.customer_wanted_date && (
+                  <div className="ew-ctx-sub" data-testid="ticket-fact-wanted">
+                    {t("facts.wanted_label")}: {formatDay(ticket.customer_wanted_date)}
+                  </div>
+                )}
+                {/* The SLA clock, only while there is still one to meet —
+                    and never beside a real deadline: a meerwerk in
+                    execution is owed by the extra work's deadline, and a
+                    second "must be done by" from the melding SLA rule
+                    would be two promises for one job. */}
+                {ticket.kind !== "MEERWERK" &&
+                  // FE-4 (§D.12 item 3) — ONE alarm: with a due countdown
+                  // on screen the SLA clock would be a second headline.
+                  ticket.days_until_due === null &&
+                  // ...and never on work that is over (§D.12 item 4).
+                  !ticket.settled_at &&
+                  ticket.sla_display_state !== "HISTORICAL" &&
+                  ticket.sla_display_state !== "COMPLETED" &&
+                  ticket.sla_due_at && (
+                    <div className="facts-line" data-testid="ticket-deadline-basis">
+                      <SLABadge
+                        state={ticket.sla_display_state}
+                        remainingSeconds={ticket.sla_remaining_business_seconds}
+                        size="sm"
+                      />
+                      <span>
+                        {t("common:sla.due_on", {
+                          when: formatDateTime(ticket.sla_due_at),
+                        })}
+                      </span>
+                    </div>
+                  )}
+              </div>
+            </div>
+
+            <div className="ew-ctx-block" data-testid="ticket-fact-what">
+              <div className="ew-ctx-label">{t("facts.what")}</div>
+              <div className="ew-ctx-body">
+                {/* W13 — ONE category row, editable in place for provider
+                    operators (the dedicated action endpoint), read-only
+                    for everyone else. Offers the WHOLE active catalog,
+                    "Ongegrond" included: this is the screen where that
+                    verdict is reached. */}
+                {/* P-13 D (W5) — a FINISHED job's department is a past
+                    fact: read-only text, no live select. */}
+                {isProviderManagementRole(me?.role) && !jobFinished ? (
+                  <>
+                    <select
+                      className="field-select"
+                      value={ticket.category ?? ""}
+                      disabled={categoryBusy}
+                      data-testid="ticket-detail-category"
+                      aria-label={t("details_category")}
+                      onChange={(event) => {
+                        const raw = event.target.value;
+                        void saveCategory(raw === "" ? null : Number(raw));
+                      }}
+                    >
+                      <option value="">
+                        {t("common:ticket_categories.none")}
+                      </option>
+                      {categories
+                        .filter(
+                          (row) => row.is_active || row.id === ticket.category,
+                        )
+                        .map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.label}
+                          </option>
+                        ))}
+                    </select>
+                    {actionErrorNode("category", "ticket-category-error")}
+                  </>
+                ) : (
+                  <div className="ew-ctx-strong" data-testid="ticket-fact-category">
+                    {ticket.category_name || t("common:ticket_categories.none")}
+                  </div>
+                )}
+                <div className="ew-ctx-sub">
+                  {t("facts.priority_label")}: {priorityLabelLong(ticket.priority)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* FE-3 §D.6 rule 5 — MESSAGES AFTER FACTS, on the overview.
+              The composer offers only the tiers this viewer may use
+              (`ticket.actions.can_post_*`); the four-pill row is a
+              compact select; the recipient picker and the private
+              toggle unfold only while somebody is writing. */}
+          <div className="card" data-testid="ticket-messages-card">
             <div className="card-head-icon">
               <span className="card-head-icon-glyph">
                 <MessageSquare size={14} strokeWidth={2.2} />
@@ -1529,7 +4129,41 @@ export function TicketDetailPage() {
                 {t("card_messages_title")}
               </span>
             </div>
-            <form className="notes-composer-body" onSubmit={submitMessage}>
+            {composerTiers.length > 0 && (
+            <form
+              className="notes-composer-body"
+              onSubmit={submitMessage}
+              onFocus={() => setComposerFocused(true)}
+              onBlur={(event) => {
+                // Focus moving to a chip or the toggle stays inside the
+                // form; only leaving the form folds the options.
+                const next = event.relatedTarget as Node | null;
+                if (!next || !event.currentTarget.contains(next)) {
+                  setComposerFocused(false);
+                }
+              }}
+              data-testid="ticket-composer"
+              data-expanded={composerExpanded ? "true" : "false"}
+            >
+              {composerTiers.length > 1 && (
+                <label className="field" style={{ marginBottom: 8 }}>
+                  <span className="field-label">{t("composer.tier_label")}</span>
+                  <select
+                    className="field-select composer-tier-select"
+                    value={effectiveMessageType}
+                    onChange={(event) =>
+                      setMessageType(event.target.value as TicketMessageType)
+                    }
+                    data-testid="composer-tier-select"
+                  >
+                    {composerTiers.map((tier) => (
+                      <option key={tier} value={tier}>
+                        {t(NOTE_TIER_COMPOSER_LABEL_KEY[tier])}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <textarea
                 className="notes-textarea"
                 placeholder={t(NOTE_TIER_PLACEHOLDER_KEY[effectiveMessageType])}
@@ -1537,7 +4171,17 @@ export function TicketDetailPage() {
                 onChange={(event) => setMessage(event.target.value)}
                 required
               />
-              {recipients.length > 0 && (
+              {/* "Who sees this", keyed to the active tier, always on
+                  screen so nobody posts without the audience stated. */}
+              <p
+                className="muted small composer-tier-help"
+                data-testid="composer-tier-help"
+                style={{ margin: "6px 0 8px" }}
+              >
+                {t(NOTE_TIER_WHO_SEES_KEY[effectiveMessageType])}
+              </p>
+              {composerExpanded ? (
+                recipients.length > 0 && (
                 <div className="composer-directed" data-testid="composer-directed">
                   <div className="composer-directed-label">
                     {t("directed.label")}
@@ -1583,35 +4227,21 @@ export function TicketDetailPage() {
                           ? t("directed.private_disabled_hint")
                           : effectivePrivate
                             ? t("directed.private_on_hint")
-                            : t("directed.private_off_hint")}
+                            : t("directed.private_off_hint", { context: kindContext })}
                       </p>
                     </>
                   )}
                 </div>
+              )
+              ) : (
+                recipients.length > 0 && (
+                  <p className="composer-fold-hint" style={{ margin: "0 0 8px" }}>
+                    {t("composer.fold_hint")}
+                  </p>
+                )
               )}
               <div className="notes-actions">
-                <div className="notes-tools">
-                  {composerTiers.length > 1 && (
-                    <div className="composer-toggle" role="tablist">
-                      {composerTiers.map((tier) => (
-                        <button
-                          key={tier}
-                          type="button"
-                          role="tab"
-                          aria-selected={effectiveMessageType === tier}
-                          className={`composer-toggle-btn ${
-                            effectiveMessageType === tier
-                              ? `active ${NOTE_TIER_TONE_CLASS[tier]}`
-                              : ""
-                          }`}
-                          onClick={() => setMessageType(tier)}
-                        >
-                          {t(NOTE_TIER_COMPOSER_LABEL_KEY[tier])}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <div className="notes-tools" />
                 <button
                   type="submit"
                   className="btn btn-primary btn-sm"
@@ -1620,21 +4250,11 @@ export function TicketDetailPage() {
                   {sendingMessage ? t("sending") : t("post_message")}
                 </button>
               </div>
-              {/* "Who sees this" helper, keyed to the active tier so
-                  the author knows the visibility scope before posting.
-                  Renders for every tier (even when only one is
-                  available) so the author cannot post a note without
-                  the visibility statement on screen. */}
-              <p
-                className="muted small composer-tier-help"
-                data-testid="composer-tier-help"
-                style={{ margin: "6px 22px 0", padding: "0 0 14px" }}
-              >
-                {t(NOTE_TIER_WHO_SEES_KEY[effectiveMessageType])}
-              </p>
+              {actionErrorNode("message", "ticket-message-error")}
             </form>
+            )}
 
-            {messages.length === 0 ? (
+            {jobThread.length === 0 ? (
               <p
                 style={{
                   padding: "0 22px 22px",
@@ -1645,9 +4265,16 @@ export function TicketDetailPage() {
                 {t("no_messages")}
               </p>
             ) : (
-              messages.map((item) => (
+              <BoundedList
+                size="lg"
+                count={jobThread.length}
+                ariaLabel={t("card_messages_title")}
+                testIdPrefix="ticket-thread"
+              >
+                <div>
+                  {jobThread.map(({ key, source, msg: item }) => (
                 <div
-                  key={item.id}
+                  key={key}
                   className={`note-bubble ${NOTE_TIER_BUBBLE_CLASS[item.message_type] ?? ""}`}
                 >
                   <div className="note-bubble-avatar">
@@ -1666,6 +4293,14 @@ export function TicketDetailPage() {
                       >
                         {t(NOTE_TIER_BADGE_KEY[item.message_type] ?? "tag_public")}
                       </span>
+                      {source === "ew" && (
+                        <span
+                          className="note-bubble-tag"
+                          data-testid="note-ew-chip"
+                        >
+                          {t("ew_thread_chip")}
+                        </span>
+                      )}
                       {item.visibility_mode === "RESTRICTED" && (
                         <span
                           className="note-bubble-private"
@@ -1690,7 +4325,9 @@ export function TicketDetailPage() {
                     <div className="note-bubble-text">{item.message}</div>
                   </div>
                 </div>
-              ))
+              ))}
+                </div>
+              </BoundedList>
             )}
           </div>
 
@@ -1711,6 +4348,85 @@ export function TicketDetailPage() {
               </span>
             </div>
 
+            {/* W4-M §4a — THE PER-WORK PHOTO SETTING.
+
+                The field and its endpoint shipped in Sprint 191 §2.5 with
+                no UI anywhere; this is the mount point. It belongs on the
+                attachments card because that is where the photos are —
+                a manager deciding what the customer sees is looking at
+                this list when the question comes up.
+
+                Two things the copy has to carry and does:
+                  - the SCOPE is this job, not this worker and not every
+                    job. It is in the label, not in a tooltip;
+                  - it changes what happens NEXT. A manager who believes
+                    the switch releases yesterday's photos is wrong in a
+                    way the customer finds out about, so the caption says
+                    so under both states.
+
+                PA / SA only, matching the endpoint's own gate. On a
+                terminal ticket the endpoint 400s, so the switch is
+                disabled and says why rather than offering a click that
+                cannot land. */}
+            {isProviderAdmin(me?.role) && (
+              <div
+                className="photo-policy"
+                data-testid="ticket-photo-policy"
+                data-enabled={
+                  ticket.staff_uploads_customer_visible ? "true" : "false"
+                }
+              >
+                <div className="photo-policy-row">
+                  <Toggle
+                    id="ticket-photo-policy-toggle"
+                    checked={ticket.staff_uploads_customer_visible}
+                    onChange={(event) =>
+                      void setPhotoVisibilityPolicy(event.target.checked)
+                    }
+                    disabled={
+                      photoPolicyBusy ||
+                      PHOTO_POLICY_TERMINAL_STATUSES.has(ticket.status)
+                    }
+                    data-testid="ticket-photo-policy-toggle"
+                  />
+                  <label
+                    className="photo-policy-label"
+                    htmlFor="ticket-photo-policy-toggle"
+                  >
+                    {t("photo_policy_label")}
+                  </label>
+                </div>
+                {/* W-T3 §3 — two explanatory paragraphs deleted. One
+                    restated the switch's own label back at the reader
+                    ("On: a photo ... is visible to the customer"); the
+                    other explained that the setting is forward-only.
+                    That second fact is worth saying, but at the moment
+                    it matters rather than permanently above the
+                    control: the success toast already carries it
+                    (`photo_policy_toast_scope`, "Applies to uploads
+                    from now on, on this job only"). Flipping the switch
+                    gains no confirm dialog here, so per the treatment
+                    the prose is deleted rather than moved into one.
+                    The terminal-status line below survives — it is a
+                    one-line STATE, not an explanation. */}
+                {actionErrorNode(
+                  "photo_policy",
+                  "ticket-photo-policy-error",
+                )}
+                {PHOTO_POLICY_TERMINAL_STATUSES.has(ticket.status) && (
+                  <p
+                    className="photo-policy-help"
+                    data-testid="ticket-photo-policy-terminal"
+                  >
+                    {t("photo_policy_help_terminal")}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* W-T3 §1 — a failed download names itself above the
+                grid it came from, not at the top of the page. */}
+            {actionErrorNode("download", "ticket-download-error")}
             <div className="att-thumb-grid">
               {attachments.map((item) => (
                 <div className="att-thumb" key={item.id}>
@@ -1792,6 +4508,7 @@ export function TicketDetailPage() {
                 className="att-thumb-staged"
                 onSubmit={submitAttachment}
               >
+                {actionErrorNode("attachment", "ticket-attachment-error")}
                 <span className="att-thumb-staged-text">
                   {t("selected")} <b>{selectedFile.name}</b> ·{" "}
                   {formatBytes(selectedFile.size)}
@@ -1828,7 +4545,11 @@ export function TicketDetailPage() {
             )}
           </div>
 
-          <div className="card">
+          <div
+            className="card"
+            ref={activityCardRef}
+            data-testid="ticket-activity-card"
+          >
             {/* RF-4 (Ramazan 2026-06-23) — the audit timeline is valuable but
                 should not dominate the page at first glance. It now lives in a
                 drawer collapsed by default: the header IS the toggle; the
@@ -1955,7 +4676,7 @@ export function TicketDetailPage() {
                           </>
                         ) : (
                           <>
-                            {t("timeline_created_as")}
+                            {t("timeline_created_as", { context: kindContext })}
                             <span className="pill progress">
                               {tStatus(entry.new_status)}
                             </span>
@@ -2029,6 +4750,8 @@ export function TicketDetailPage() {
               </div>
             )}
           </div>
+          </>
+          )}
         </div>
 
         {/* #109 Part I — key the right column by ticket.id so every
@@ -2037,6 +4760,300 @@ export function TicketDetailPage() {
             leak between tickets: each ticket lands on its per-mount
             defaults (Assignment/Details collapsed, Workflow open). */}
         <div className="detail-side" key={`detail-side-${ticket.id}`}>
+          {/* Sprint 191 §2 — the right column is five cards:
+              Workflow -> Managers -> Assignment -> Scheduling
+              -> Ticket details.
+
+              W13-FIX 6a: Managers moved ABOVE Assignment on the owner's
+              instruction ("Managers goes above assignment"). Who is
+              responsible is read before who is dispatched.
+
+              The Location & Customer CARD that stood here is deleted.
+              It was built in Sprint 189 and reordered in Sprint 190; the
+              owner wanted that information in the page header both
+              times, and it is there now as plain text. Keeping a card
+              too would put the same two facts on screen three times.
+              This supersedes the orders in
+              `docs/planning/ew-gap-closing-plan.md` §2.1 items 4 and 5,
+              both updated in the same commit. */}
+          {/* W-VIEWER §8 — A WORKER'S OWN PARTS, WHERE THEY LAND.
+              W26.4 put `MyPartsPanel` inside the PEOPLE tab, which is
+              the management surface: a staff member opening their ticket
+              had to leave the overview, find People, and read past
+              everybody else's assignment to reach the checklist that was
+              theirs and the buttons that finish it. The ruling is
+              explicit — "the staff member's first relevant ticket view
+              should surface their work directly".
+              So it is here, on the tab they arrive at, above the
+              workflow card, and only for the person who actually holds
+              parts. Managers, PA and SA keep the broader People -> Parts
+              path untouched; `MyPartsPanel` is not rendered for them
+              here, because for them the job's parts are a management
+              read and not a to-do list. */}
+          {ticketTab === "overview" &&
+            me?.role === "STAFF" &&
+            myPartCount > 0 && (
+              <CollapsibleCard
+                title={t("staff_slots:my_parts.title")}
+                meta={t("staff_slots:my_parts.outstanding", {
+                  count: (ticket.sub_tasks ?? []).filter(
+                    (part) =>
+                      part.staff_assignments.some(
+                        (slot) =>
+                          slot.user_id === me?.id &&
+                          slot.slot_status !== "COMPLETED",
+                      ),
+                  ).length,
+                  total: myPartCount,
+                })}
+                defaultOpen
+                testId="side-card-my-parts"
+              >
+                <div style={{ padding: "0 18px 16px" }}>
+                  <MyPartsPanel
+                    ticketId={ticket.id}
+                    subTasks={ticket.sub_tasks}
+                    myUserId={me?.id ?? -1}
+                    autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
+                    onChanged={() => void loadTicket()}
+                  />
+                </div>
+              </CollapsibleCard>
+            )}
+
+          {/* FE-3 (Addendum D §D.6 rule 3) — THE ACTIES CARD: everything
+              that is NOT the one primary action, behind two folds.
+              "Andere stappen" holds the other legal forward / sideways
+              moves and the doors (plan, convert, archive); "Geavanceerd"
+              holds every correction and override with its EXISTING
+              warning + audit surface — the undo of the last step, the
+              provider's decision on the customer's behalf (reason
+              required, `is_override` coerced server-side), the remaining
+              backward moves (the transition modal asks for the reason
+              the server demands), the raw workflow value, and delete.
+              Every button still comes from `allowed_next_statuses` /
+              `actions.can_*`; nothing here widens what anybody may do.
+              Absent entirely when both folds would be empty. */}
+          {ticketTab === "overview" &&
+            (otherStepNodes.length > 0 || advancedHasContent) && (
+          <div className="card" data-testid="side-card-workflow">
+            <div className="card-head-icon">
+              <span className="card-head-icon-glyph">
+                <Clock size={14} strokeWidth={2.2} />
+              </span>
+              <span className="card-head-icon-title">
+                {t("actions.card_title")}
+              </span>
+            </div>
+            <div
+              className="workflow-body"
+              data-status={ticket.status}
+              style={{ padding: "0 18px 16px" }}
+            >
+              {/* W10 §3 — future-dated work says so. */}
+              {isUpcoming && (
+                <p className="workflow-upcoming" data-testid="workflow-upcoming">
+                  <Clock size={14} strokeWidth={2.4} aria-hidden="true" />
+                  {t("workflow_upcoming", {
+                    when: ticket.scheduled_start_time
+                      ? `${formatDay(`${ticket.scheduled_start_day}T00:00:00`)} ${ticket.scheduled_start_time}`
+                      : formatDay(`${ticket.scheduled_start_day}T00:00:00`),
+                  })}
+                </p>
+              )}
+              {otherStepNodes.length > 0 && (
+                <div
+                  className="action-fold"
+                  style={{ marginTop: 0, paddingTop: 0, borderTop: 0 }}
+                >
+                  <button
+                    type="button"
+                    className="workflow-corrections-toggle"
+                    aria-expanded={otherStepsOpen}
+                    onClick={() =>
+                      setOtherStepsOpenFor(otherStepsOpen ? null : (id ?? null))
+                    }
+                    data-testid="ticket-other-steps-toggle"
+                  >
+                    {otherStepsOpen ? (
+                      <ChevronDown size={13} strokeWidth={2.6} aria-hidden="true" />
+                    ) : (
+                      <ChevronRight size={13} strokeWidth={2.6} aria-hidden="true" />
+                    )}
+                    {otherStepsOpen
+                      ? t("actions.other_steps_hide")
+                      : t("actions.other_steps", { count: otherStepNodes.length })}
+                  </button>
+                  {otherStepsOpen && (
+                    <div className="action-fold-list" data-testid="ticket-other-steps-list">
+                      {otherStepNodes}
+                    </div>
+                  )}
+                </div>
+              )}
+              {advancedHasContent && (
+                <div className="action-fold">
+                  <button
+                    type="button"
+                    className="workflow-corrections-toggle"
+                    aria-expanded={correctionsOpen}
+                    onClick={() => {
+                      // Closing the door takes the half-typed reason with
+                      // it: an armed prompt behind a collapsed fold would
+                      // still be the target a submit sends.
+                      if (correctionsOpen) cancelOverride();
+                      setCorrectionsOpenFor(
+                        correctionsOpen ? null : (id ?? null),
+                      );
+                    }}
+                    data-testid="workflow-corrections-toggle"
+                  >
+                    {correctionsOpen ? (
+                      <ChevronDown size={13} strokeWidth={2.6} aria-hidden="true" />
+                    ) : (
+                      <ChevronRight size={13} strokeWidth={2.6} aria-hidden="true" />
+                    )}
+                    {correctionsOpen
+                      ? t("actions.advanced_hide")
+                      : t("actions.advanced")}
+                  </button>
+                  {correctionsOpen && (
+                    <div data-testid="ticket-advanced">
+                      {/* P-13 D (W5) — while money waits, Archive lives
+                          HERE, with the C2 money confirm on its dialog:
+                          the banner's green door goes to the invoices,
+                          not to the archive. */}
+                      {canArchive && moneyWaits && (
+                        <div style={{ marginBottom: 10 }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setArchiveMode("archive")}
+                            data-testid="ticket-archive-button"
+                          >
+                            <Archive size={14} strokeWidth={2.2} aria-hidden="true" />
+                            <span style={{ marginLeft: 6 }}>
+                              {t("common:archive.button")}
+                            </span>
+                          </button>
+                        </div>
+                      )}
+                      {/* W9 §2 / W10 §5 — the undo of the step just
+                          taken, amber, separate. */}
+                      {correctionForRender.length > 0 && (
+                        <div
+                          className="workflow-correction-group"
+                          data-testid="workflow-correction-group"
+                        >
+                          <div className="workflow-correction-head">
+                            <Undo2 size={13} strokeWidth={2.4} aria-hidden="true" />
+                            {t("workflow_correction_heading")}
+                          </div>
+                          {correctionForRender.map((status) =>
+                            renderTransitionButton(status, "correction"),
+                          )}
+                        </div>
+                      )}
+                      {/* Sprint 27F-F1 / W11 §1 — the provider deciding
+                          for the customer, with the reason prompt under
+                          whichever button armed it. Unchanged surface. */}
+                      {overridePair.length > 0 && (
+                        <>
+                          <div className="action-fold-heading">
+                            {t("actions.override_heading")}
+                          </div>
+                          <div className="status-actions">
+                            {overridePair.map((status) =>
+                              renderTransitionButton(status, "primary"),
+                            )}
+                          </div>
+                        </>
+                      )}
+                      {backwardForRender.length > 0 && (
+                        <>
+                          <div className="action-fold-heading">
+                            {t("actions.other_backward_heading")}
+                          </div>
+                          <div
+                            className="workflow-secondary-list"
+                            data-testid="workflow-secondary-list"
+                          >
+                            {backwardForRender.map((status) =>
+                              renderTransitionButton(status, "secondary"),
+                            )}
+                          </div>
+                        </>
+                      )}
+                      <dl className="action-fold-raw" data-testid="ticket-raw-values">
+                        {/* P-5 S1.4 — on a meerwerk job the TCK number
+                            is ticket vocabulary; it lives here. */}
+                        {ticket.kind === "MEERWERK" && (
+                          <>
+                            <dt>{t("actions.ticket_no_label")}</dt>
+                            <dd data-testid="ticket-raw-ticket-no">
+                              <code>{ticket.ticket_no}</code>
+                            </dd>
+                          </>
+                        )}
+                        <dt>{t("actions.raw_status")}</dt>
+                        <dd data-testid="ticket-header-status-text">
+                          {t(`common:${ticketStatusLabelKey(ticket.status)}`)}
+                          {" · "}
+                          <code>{ticket.status}</code>
+                        </dd>
+                        <dt>{t("actions.raw_kind")}</dt>
+                        <dd>
+                          <code>{ticket.kind}</code>
+                        </dd>
+                      </dl>
+                      {/* Sprint 12 / 30.1.1 — delete, for the users the
+                          backend accepts it from. Same dialog. */}
+                      {canDeleteTicket && (
+                        <button
+                          type="button"
+                          onClick={openDeleteDialog}
+                          disabled={deletingTicket}
+                          className="link-back"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            marginTop: 10,
+                            cursor: "pointer",
+                            color: "var(--text-faint)",
+                            fontSize: 12,
+                          }}
+                          data-testid="ticket-delete-link"
+                        >
+                          {t("delete_ticket_footer_link")}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          )}
+          {ticketTab === "people" && (
+          <>
+          {/* #7 Part B — Responsible managers (M:N), distinct from the
+              primary "Assigned" field in the Assignment card BELOW.
+              Self-gates to provider-management roles and hides on a LIST
+              403. onChanged reloads the ticket so the activity timeline
+              picks up the audit row. */}
+          <ResponsibleManagersSection
+            key={ticket.id}
+            ticketId={ticket.id}
+            canManage={isStaff}
+            assignableManagers={assignableManagers}
+            onChanged={() => {
+              void loadTicket();
+              // W-FIX1 C2 — see the staff section above.
+              setEwPlanDetail(null);
+            }}
+          />
+
           {/* Sprint 30 Batch 30.1.1 — consolidated Assignment card.
               ONE outer card with TWO clearly-labeled subsections:
                 - Building manager (ticket owner / BM dispatch — writes
@@ -2056,104 +5073,24 @@ export function TicketDetailPage() {
             meta={t("side_summary_assignment", {
               count: ticket.assigned_staff?.length ?? 0,
             })}
-            defaultOpen={false}
+            // W-PLAN2 Task 2 — open by default; only Details and the
+            // Activity drawer stay collapsed.
+            defaultOpen
             testId="side-card-assignment"
           >
 
-            {/* --- Subsection 1: Building manager (owner) --- */}
-            <div className="assign-body">
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "var(--text-faint)",
-                  marginBottom: 2,
-                }}
-              >
-                {t("assignment_section_bm_heading")}
-              </div>
-              <p
-                className="muted small"
-                style={{ margin: "0 0 8px" }}
-                data-testid="assignment-section-bm-helper"
-              >
-                {t("assignment_section_bm_helper")}
-              </p>
-              <div className="assignee-row">
-                <div className="assignee-avatar">
-                  {getInitials(ticket.assigned_to_email || "unassigned@")}
-                </div>
-                <div className="assignee-info">
-                  <span className="assignee-name">
-                    {ticket.assigned_to_email
-                      ? humanName(ticket.assigned_to_email, t("unassigned"))
-                      : t("unassigned")}
-                  </span>
-                  <span className="assignee-role">
-                    {ticket.assigned_to_email
-                      ? t("operations_lead")
-                      : t("awaiting_assignment")}
-                  </span>
-                </div>
-              </div>
+            {/* W13 — the second manager control is GONE.
 
-              {isStaff ? (
-                <form
-                  onSubmit={submitAssignment}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 10,
-                  }}
-                >
-                  <select
-                    className="assign-select"
-                    value={selectedAssigneeId}
-                    onChange={(event) =>
-                      setSelectedAssigneeId(event.target.value)
-                    }
-                    disabled={assigningTicket}
-                  >
-                    <option value="">{t("unassigned")}</option>
-                    {ticket.assigned_to !== null &&
-                      !assignableManagers.some(
-                        (m) => m.id === ticket.assigned_to,
-                      ) && (
-                        <option value={String(ticket.assigned_to)}>
-                          {ticket.assigned_to_email ??
-                            t("assignment_user_n", {
-                              id: ticket.assigned_to,
-                            })}
-                          {t("assignment_current")}
-                        </option>
-                      )}
-                    {assignableManagers.map((manager) => (
-                      <option key={manager.id} value={manager.id}>
-                        {manager.full_name?.trim() || manager.email}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="submit"
-                    className="btn btn-secondary"
-                    style={{ width: "100%" }}
-                    disabled={
-                      assigningTicket ||
-                      selectedAssigneeId ===
-                        (ticket.assigned_to !== null
-                          ? String(ticket.assigned_to)
-                          : "")
-                    }
-                  >
-                    <UserPlus size={14} strokeWidth={2} />
-                    {assigningTicket ? t("updating") : t("update_assignment")}
-                  </button>
-                </form>
-              ) : null}
-            </div>
-
+                This subsection was a dropdown writing `ticket.assigned_to`
+                (the "head manager"), sitting directly above a separate
+                "Responsible managers" card writing the M:N. The owner:
+                "Why is there a head manager AND a responsible manager?
+                There is no permission difference. It is cosmetic."
+                Verified before removing -- neither field appears in
+                `accounts/scoping.py`, eligibility for both is identical,
+                and `TicketFilter.my_managed` is already their union. One
+                Managers section now, and it is the one that can hold more
+                than one person. */}
             {/* --- Subsection 2: Field staff (dispatch) --- */}
             {/* Sprint 23B — Assigned-staff list. Backend gates the
                 contact-visibility per Customer.show_assigned_staff_*
@@ -2164,33 +5101,51 @@ export function TicketDetailPage() {
                 testid on the subsection wrapper (was the outer card in
                 the pre-30.1.1 layout). Existing Playwright specs assert
                 visibility via this testid. */}
+            {/* W14 — for a PROVIDER MANAGER this heading and the list
+                under it are gone. They render the same people as the
+                assignment table below, one card apart, under a second
+                name -- two of the four headings the owner counted for
+                the single idea "put people on this job". The card's own
+                title is the name now, and the table below is the list.
+
+                Customer-side and STAFF viewers keep it: it is the ONLY
+                staffing surface they have (they never get the manager
+                section), it is the one that carries the anonymised
+                "{{company}} staff" entry and the resolver-gated
+                credential summaries, and it is read-only for them. */}
             <div
               data-testid="assigned-staff-card"
-              style={{
-                marginTop: 14,
-                paddingTop: 14,
-                borderTop: "1px solid var(--border)",
-              }}
+              style={
+                isStaff
+                  ? undefined
+                  : {
+                      marginTop: 14,
+                      paddingTop: 14,
+                      borderTop: "1px solid var(--border)",
+                    }
+              }
             >
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "var(--text-faint)",
-                  padding: "0 18px",
-                  marginBottom: 6,
-                }}
-              >
-                {ticket.company_name
-                  ? t("assignment_section_field_staff_heading", {
-                      companyName: ticket.company_name,
-                    })
-                  : t("assignment_section_field_staff_heading_unknown")}
-              </div>
+              {!isStaff && (
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: "var(--text-faint)",
+                    padding: "0 18px",
+                    marginBottom: 6,
+                  }}
+                >
+                  {ticket.company_name
+                    ? t("assignment_section_field_staff_heading", {
+                        companyName: ticket.company_name,
+                      })
+                    : t("assignment_section_field_staff_heading_unknown")}
+                </div>
+              )}
               <div className="assign-body">
-              {ticket.assigned_staff.length === 0 ? (
+              {isStaff ? null : ticket.assigned_staff.length === 0 ? (
                 <p
                   className="muted small"
                   style={{ padding: "4px 0 12px" }}
@@ -2234,6 +5189,29 @@ export function TicketDetailPage() {
                                   })
                                 : t(`${entry.label_key}_unknown`)}
                             </span>
+                            {/* W-N1 §4 — a redacted team member still
+                                says what they are QUALIFIED for. The
+                                types only, joined with the same middot
+                                the named row uses for its own meta line:
+                                a certificate is a fact about the work,
+                                not about the person, so it survives the
+                                redaction that removes their name. The
+                                server decides which ones appear — this
+                                renders whatever came back and asks no
+                                questions of its own. */}
+                            {(entry.credentials ?? []).length > 0 && (
+                              <span
+                                className="muted small"
+                                style={{ fontSize: 11 }}
+                                data-testid="assigned-staff-anon-credentials"
+                              >
+                                {(entry.credentials ?? [])
+                                  .map((credential) =>
+                                    tCred(`type.${credential.type}`),
+                                  )
+                                  .join(" · ")}
+                              </span>
+                            )}
                           </div>
                         </li>
                       );
@@ -2317,28 +5295,42 @@ export function TicketDetailPage() {
                                       })}
                                     </span>
                                   )}
+                                  {/* W-UX1-B — LOOK, DO NOT KEEP. The
+                                      document opens in the app's own
+                                      preview with `withDownload={false}`,
+                                      the same shape the invoice preview
+                                      uses; there is no download anywhere
+                                      on this block any more, for the
+                                      customer view or the provider one.
+
+                                      The URL's AUTHORIZATION is
+                                      untouched and deliberately so:
+                                      `credential_document_visible_to_user`
+                                      (accounts/visibility.py:160) stays
+                                      the only gate, it is strictly
+                                      narrower than field visibility, and
+                                      a credential whose fields are
+                                      visible can still have no
+                                      `document_url` at all. Showing a
+                                      document in a viewer instead of a
+                                      file changes what the browser does
+                                      with the bytes, not who may fetch
+                                      them. */}
                                   {credential.document_url && (
                                     <button
                                       type="button"
                                       className="btn btn-ghost btn-sm"
                                       style={{ padding: "1px 6px", fontSize: 11 }}
                                       onClick={() =>
-                                        downloadStaffDocument(
+                                        openDocumentPreview(
                                           credential.document_url ?? "",
                                           `${credential.type.toLowerCase()}.pdf`,
                                         )
                                       }
-                                      disabled={
-                                        downloadingStaffDocUrl ===
-                                        credential.document_url
-                                      }
-                                      data-testid="assigned-staff-credential-download"
+                                      data-testid="assigned-staff-credential-preview"
                                     >
-                                      <Download size={12} strokeWidth={2} />
-                                      {downloadingStaffDocUrl ===
-                                      credential.document_url
-                                        ? tCred("field.downloading")
-                                        : tCred("customer.download_document")}
+                                      <Eye size={12} strokeWidth={2} />
+                                      {tCred("customer.view_document")}
                                     </button>
                                   )}
                                 </div>
@@ -2372,28 +5364,29 @@ export function TicketDetailPage() {
                                     {property.name}:
                                   </span>
                                   <span>{property.value}</span>
+                                  {/* W-UX1-B — the properties block is the
+                                      credential block's sibling: same
+                                      row, same handler, same key. Left
+                                      as a download it would sit beside a
+                                      credential that only previews, and
+                                      the shared i18n key could not be
+                                      retired. Same dialog, same
+                                      `withDownload={false}`. */}
                                   {property.document_url && (
                                     <button
                                       type="button"
                                       className="btn btn-ghost btn-sm"
                                       style={{ padding: "1px 6px", fontSize: 11 }}
                                       onClick={() =>
-                                        downloadStaffDocument(
+                                        openDocumentPreview(
                                           property.document_url ?? "",
                                           `${property.name}.pdf`,
                                         )
                                       }
-                                      disabled={
-                                        downloadingStaffDocUrl ===
-                                        property.document_url
-                                      }
-                                      data-testid="assigned-staff-property-download"
+                                      data-testid="assigned-staff-property-preview"
                                     >
-                                      <Download size={12} strokeWidth={2} />
-                                      {downloadingStaffDocUrl ===
-                                      property.document_url
-                                        ? tCred("field.downloading")
-                                        : tCred("customer.download_document")}
+                                      <Eye size={12} strokeWidth={2} />
+                                      {tCred("customer.view_document")}
                                     </button>
                                   )}
                                 </div>
@@ -2407,29 +5400,208 @@ export function TicketDetailPage() {
                 </ul>
               )}
 
+              {/* W14 — ONE named thing, ONE table, ONE button. The
+                  read-only staff list ABOVE is hidden for this viewer
+                  (see there): it and this table are the same people, and
+                  the owner counted the duplicate as one of the four
+                  headings he was reading for a single idea. */}
               {isStaff && (
-                <StaffSlotEditor
-                  // Key by ticket id so the editor REMOUNTS on an A->B ticket
-                  // change and its useState(autoCompleteOnSubtasks)-seeded
-                  // autoFlag re-seeds from the new ticket (fixes a stale
-                  // checkbox after navigation). A same-ticket reload keeps the
-                  // key, so the local toggle state is correctly preserved.
+                <StaffAssignmentSection
+                  // Key by ticket id so the section REMOUNTS on an A->B
+                  // ticket change and its useState(autoCompleteOnSubtasks)-
+                  // seeded autoFlag re-seeds from the new ticket. A
+                  // same-ticket reload keeps the key, so local state is
+                  // correctly preserved.
                   key={ticket.id}
                   ticketId={ticket.id}
                   onChanged={() => {
                     void loadTicket();
+                    // W-FIX1 C2 (audit F31) — the plan comparison reads
+                    // the crew with the plan; a crew change re-reads it.
+                    setEwPlanDetail(null);
                   }}
                   autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
                   canSetAutoCompleteFlag={isProviderAdmin(me?.role)}
                   ticketStatus={ticket.status}
+                  customerWantedDate={ticket.customer_wanted_date}
+                  credentialsByUserId={credentialsByUserId}
+                  reloadNonce={assignmentReloadNonce}
+                  onPreviewDocument={(url, filename) =>
+                    openDocumentPreview(url, filename)
+                  }
                 />
               )}
+
+              {/* W4-M §4b — PER-TICKET PHOTO PERMISSION, per assigned
+                  person.
+
+                  There are TWO controls in this product that decide
+                  whether a named person's photos reach the customer, and
+                  the owner asked in as many words that a manager never
+                  has to guess which one they just flipped:
+
+                    * chat P's screen, on the person's own admin page —
+                      THIS PERSON, ON EVERY TICKET;
+                    * this one — THIS PERSON, ON THIS TICKET ONLY.
+
+                  So the scope is in the heading, in the helper line, in
+                  every option label of every row, and in the sentence
+                  that points at the other control. It is not in a
+                  tooltip, because a tooltip is not read by the person
+                  who already thinks they know what the switch does.
+
+                  Three states, not two: "not set" lets the standing
+                  permission answer, and it is a different thing from an
+                  explicit "no" that overrules the standing permission
+                  here. A toggle cannot say that. */}
+              {uploadGrants !== null && uploadGrants.people.length > 0 && (
+                <div
+                  className="upload-grants"
+                  data-testid="ticket-upload-grants"
+                >
+                  <div
+                    className="upload-grants-heading"
+                    data-testid="ticket-upload-grants-heading"
+                  >
+                    {t("upload_grant_section_heading")}
+                  </div>
+                  {/* W-T3 §3 — three sentences of explanation
+                      deleted; the heading and each row's state say it. */}
+                  <BoundedList
+                    size="sm"
+                    count={uploadGrants.people.length}
+                    ariaLabel={t("upload_grant_section_heading")}
+                    testIdPrefix="ticket-upload-grants"
+                  >
+                    <ul className="upload-grants-list">
+                      {uploadGrants.people.map((person) => {
+                        const displayName =
+                          person.user_full_name?.trim() ||
+                          person.user_email.split("@")[0];
+                        const visible =
+                          person.effective_visibility === "CUSTOMER";
+                        return (
+                          <li
+                            key={person.user_id}
+                            className="upload-grants-row"
+                            /* W-FIX5 — ONE COMPACT ROW: name, then a
+                               short select, side by side. The class in
+                               index.css stacks them in a column and
+                               stretches the select to 100%, which is
+                               what made a long label truncate; that file
+                               is not this wave's, so the row is turned
+                               horizontal here. Inline beats the class on
+                               specificity and touches nothing else that
+                               uses it. */
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                              gap: 10,
+                            }}
+                            data-testid="ticket-upload-grant-row"
+                            data-user-id={person.user_id}
+                            data-effective={person.effective_visibility}
+                          >
+                            <span className="upload-grants-name">
+                              {displayName}
+                            </span>
+                            {/* W-T3 §1 — this row's own failure. The
+                                list can be long, so a refusal reported
+                                at the top of the page belonged to no
+                                visible person. */}
+                            {actionErrorNode(
+                              `grant:${person.user_id}`,
+                              "ticket-upload-grant-error",
+                            )}
+                            <select
+                              className="field-input upload-grants-select"
+                              /* Auto width, capped. With the labels
+                                 shortened it no longer needs the full
+                                 row to show its longest option. */
+                              style={{ width: "auto", maxWidth: 260 }}
+                              aria-label={t("upload_grant_select_aria", {
+                                name: displayName,
+                              })}
+                              value={grantChoiceOf(
+                                person.uploads_customer_visible,
+                              )}
+                              disabled={
+                                uploadGrantBusyUserId === person.user_id
+                              }
+                              onChange={(event) =>
+                                void setUploadGrant(
+                                  person.user_id,
+                                  event.target.value as UploadGrantChoice,
+                                )
+                              }
+                              data-testid="ticket-upload-grant-select"
+                            >
+                              <option value="INHERIT">
+                                {t("upload_grant_choice_inherit")}
+                              </option>
+                              <option value="GRANT">
+                                {t("upload_grant_choice_grant")}
+                              </option>
+                              <option value="REFUSE">
+                                {t("upload_grant_choice_refuse")}
+                              </option>
+                            </select>
+                            {/* W-FIX5 — AT MOST ONE LINE, and only when
+                                there is something to say. The row used
+                                to carry two sentences on every person:
+                                what happens next, and which rule decided
+                                it. The default is internal, so "Next
+                                photo: internal. Nobody has decided, so
+                                it stays internal." was two sentences
+                                announcing that nothing had happened.
+                                The line now appears only when the
+                                outcome DIFFERS from that default. */}
+                            {visible && (
+                              <span
+                                className="upload-grants-effect"
+                                data-testid="ticket-upload-grant-effect"
+                              >
+                                {t("upload_grant_state_customer")}
+                              </span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </BoundedList>
+                </div>
+              )}
+
 
               {/* Sprint 5 — read-only sub-tasks for NON-manager viewers.
                   STAFF (provider-side) see full detail; customer-side
                   viewers get a PII-safe summary (no staff identity/notes).
                   Only renders once a manager has created sub-tasks, so a
-                  ticket with none is unchanged for these roles. */}
+                  ticket with none is unchanged for these roles.
+
+                  NOTE the flag's name: `isStaff` is
+                  `isProviderManagementRole` (SA/CA/BM). This branch
+                  therefore excludes MANAGERS -- who get
+                  `StaffAssignmentSection` instead -- and not STAFF. A
+                  CUSTOMER_USER reaches it but never renders, because
+                  `sub_tasks` is emptied for that role server-side
+                  (serializers.py:840).
+
+                  W26.4 — a STAFF viewer who is ON one or more parts gets
+                  `MyPartsPanel` in its place: their OWN parts, each with
+                  the action that finishes it. `MyPartsPanel` returns
+                  null when none of the parts are theirs, and the
+                  read-only view below is what they fall back to, so a
+                  staff member on the job but on no part still sees how
+                  the job is split. */}
+              {/* W-VIEWER §8 — the actionable panel MOVED to the
+                  overview tab (see above); what stays here is the
+                  read-only split, which is what this tab is for: how the
+                  whole job divides, including the halves that are
+                  somebody else's. A worker who reaches People still sees
+                  the shape of the job; they no longer have to come here
+                  to find their own work. */}
               {!isStaff && ticket.sub_tasks.length > 0 && (
                 <SubTaskReadOnly
                   subTasks={ticket.sub_tasks}
@@ -2600,20 +5772,11 @@ export function TicketDetailPage() {
             </div>
           </CollapsibleCard>
 
-          {/* #7 Part B — Responsible managers (M:N), distinct from the
-              primary "Assigned" field above. Self-gates to provider-
-              management roles and hides on a LIST 403. onChanged reloads
-              the ticket so the activity timeline picks up the audit row. */}
-          <ResponsibleManagersSection
-            key={ticket.id}
-            ticketId={ticket.id}
-            canManage={isStaff}
-            assignableManagers={assignableManagers}
-            onChanged={() => {
-              void loadTicket();
-            }}
-          />
 
+          </>
+          )}
+          {ticketTab === "plan" && (
+          <>
           {/* Sprint 1 (frontend) — operational "Scheduled date" control.
               Surfaces the existing POST/DELETE /tickets/<id>/schedule/
               action (Sprint 9B backend) as a set / change / clear control,
@@ -2622,717 +5785,141 @@ export function TicketDetailPage() {
               scheduled date read-only inside the same card (no control, no
               403 call). A successful set/clear refetches the ticket so the
               date and the audit timeline refresh. */}
-          <TicketScheduleCard
-            ticket={ticket}
-            canManage={isProviderManagementRole(me?.role)}
-            onChanged={() => {
-              void loadTicket();
-            }}
-          />
-
-          {/* Sprint 30 Batch 30.1.1 — consolidated Details card. Merges
-              the prior Ticket details, Customer Contacts, and SLA cards
-              into ONE card with subtle subsection separators. Contacts
-              are hidden entirely when the list is empty (no "No
-              contacts on file." line). The Delete affordance lives at
-              the card footer as a small text link; the confirmation
-              dialog is unchanged. */}
-          <CollapsibleCard
-            title={t("card_details_title")}
-            defaultOpen={false}
-            testId="side-card-details"
-          >
-            <div style={{ padding: "14px 18px 16px" }}>
-              <div className="detail-kv-list">
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">{t("details_location")}</span>
-                  <span className="detail-kv-val">
-                    <MapPin size={14} strokeWidth={2} />
-                    {ticket.room_label || ticket.building_name}
-                  </span>
-                </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">{t("details_customer")}</span>
-                  <span className="detail-kv-val">
-                    <Users size={14} strokeWidth={2} />
-                    {ticket.customer_name}
-                  </span>
-                </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">{t("details_category")}</span>
-                  <span className="detail-kv-val">{ticket.type}</span>
-                </div>
-                {/* Sprint 185 E §1 — the kind of WORK, beside the kind of
-                    MESSAGE above it. The label above says "category" and
-                    holds `ticket.type`, which is the confusion this item
-                    exists to end; that key is in the `ticket_detail`
-                    bundle and is not this batch's to rename, so the new
-                    row states what it is in its own words instead.
-
-                    Editable in place for provider operators — the
-                    dedicated action endpoint, since the ticket viewset
-                    has no PATCH — and read-only for everyone else. */}
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">
-                    {t("common:work_categories.field_label")}
-                  </span>
-                  <span className="detail-kv-val">
-                    {isProviderManagementRole(me?.role) ? (
-                      <select
-                        className="field-select"
-                        value={ticket.category ?? ""}
-                        disabled={categoryBusy}
-                        data-testid="ticket-detail-category"
-                        onChange={(event) => {
-                          const raw = event.target.value;
-                          void saveCategory(raw === "" ? null : Number(raw));
-                        }}
-                      >
-                        <option value="">
-                          {t("common:work_categories.none")}
-                        </option>
-                        {/* An ARCHIVED category stays offerable when the
-                            melding already carries it: otherwise opening
-                            an old melding and touching anything would
-                            silently retag it. */}
-                        {workCategories
-                          .filter(
-                            (row) =>
-                              row.is_active || row.id === ticket.category,
-                          )
-                          .map((row) => (
-                            <option key={row.id} value={row.id}>
-                              {row.name}
-                            </option>
-                          ))}
-                      </select>
-                    ) : (
-                      ticket.category_name || "—"
-                    )}
-                  </span>
-                </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">{t("details_created_by")}</span>
-                  <span className="detail-kv-val">
-                    {ticket.created_by_email}
-                  </span>
-                </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">{t("details_created")}</span>
-                  <span className="detail-kv-val">
-                    <Clock size={14} strokeWidth={2} />
-                    {formatDate(ticket.created_at)}
-                  </span>
-                </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">{t("details_first_response")}</span>
-                  <span className="detail-kv-val">
-                    {formatDate(ticket.first_response_at)}
-                  </span>
-                </div>
-                {ticket.sent_for_approval_at && (
-                  <div className="detail-kv-row">
-                    <span className="detail-kv-label">{t("details_sent_for_approval")}</span>
-                    <span className="detail-kv-val">
-                      {formatDate(ticket.sent_for_approval_at)}
-                    </span>
-                  </div>
-                )}
-                {ticket.approved_at && (
-                  <div className="detail-kv-row">
-                    <span className="detail-kv-label">{t("details_approved")}</span>
-                    <span className="detail-kv-val">
-                      {formatDate(ticket.approved_at)}
-                    </span>
-                  </div>
-                )}
-                {ticket.closed_at && (
-                  <div className="detail-kv-row">
-                    <span className="detail-kv-label">{t("details_closed")}</span>
-                    <span className="detail-kv-val">
-                      {formatDate(ticket.closed_at)}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Sprint 30 Batch 30.1.1 — Customer Contacts subsection
-                inline in the consolidated Details card. SUPER_ADMIN /
-                COMPANY_ADMIN only. The entire subsection (heading +
-                body) is HIDDEN when the list is empty — no
-                "No contacts on file." placeholder line. The previous
-                outer-card `data-testid="ticket-customer-contacts-panel"`
-                is preserved on the subsection wrapper so existing
-                Playwright specs keep working. */}
-            {canSeeCustomerContacts && customerContacts.length > 0 && (
-              <div
-                data-testid="ticket-customer-contacts-panel"
-                style={{
-                  borderTop: "1px solid var(--border)",
-                  padding: "14px 18px 16px",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                    color: "var(--text-faint)",
-                    marginBottom: 10,
-                  }}
-                >
-                  {t("details_subsection_contacts")}
-                </div>
-                <ul
-                  style={{
-                    listStyle: "none",
-                    margin: 0,
-                    padding: 0,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 10,
-                  }}
-                >
-                  {customerContacts.map((contact) => (
-                    <li
-                      key={contact.id}
-                      data-testid="ticket-customer-contact-row"
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 2,
-                      }}
-                    >
-                      <span style={{ fontWeight: 600 }}>
-                        {contact.full_name}
-                      </span>
-                      {contact.role_label && (
-                        <span className="muted small">
-                          {contact.role_label}
-                        </span>
-                      )}
-                      {(contact.email || contact.phone) && (
-                        <span
-                          className="muted small"
-                          style={{ display: "flex", gap: 12, flexWrap: "wrap" }}
-                        >
-                          {contact.email && <span>{contact.email}</span>}
-                          {contact.phone && <span>{contact.phone}</span>}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Sprint 30 Batch 30.1.1 — SLA subsection inline. The rich
-                rendering (badge + paused/breached/completed meta) is
-                preserved verbatim; only the wrapping card collapsed to
-                a subsection inside Details. */}
-            <div
-              style={{
-                borderTop: "1px solid var(--border)",
-                padding: "14px 18px 16px",
+          <div ref={scheduleAnchor}>
+            <TicketScheduleCard
+              ticket={ticket}
+              canManage={isProviderManagementRole(me?.role)}
+              onChanged={() => {
+                void loadTicket();
               }}
-            >
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "var(--text-faint)",
-                  marginBottom: 10,
-                }}
-              >
-                {t("details_subsection_sla")}
-              </div>
-              <div className="sla-detail-row">
-                <SLABadge
-                  state={ticket.sla_display_state}
-                  remainingSeconds={ticket.sla_remaining_business_seconds}
-                  size="md"
-                />
-                <span style={{ color: "var(--text-2)", fontSize: 13 }}>
-                  {slaLabel(ticket.sla_display_state)}
-                  {ticket.sla_display_state !== "PAUSED" &&
-                    ticket.sla_display_state !== "COMPLETED" &&
-                    ticket.sla_display_state !== "HISTORICAL" &&
-                    ticket.sla_remaining_business_seconds !== null && (
-                      <>
-                        {" — "}
-                        {formatSLATime(
-                          ticket.sla_remaining_business_seconds,
-                        )}
-                      </>
-                    )}
-                </span>
-              </div>
-              <div className="sla-detail-meta">
-                {ticket.sla_due_at &&
-                  ticket.sla_display_state !== "HISTORICAL" &&
-                  ticket.sla_display_state !== "COMPLETED" && (
-                    <>
-                      <span className="sla-detail-meta-label">{t("sla_due_label")}</span>
-                      <span className="sla-detail-meta-value">
-                        {formatDate(ticket.sla_due_at)}
-                      </span>
-                    </>
-                  )}
-                {ticket.sla_paused_at && (
-                  <>
-                    <span className="sla-detail-meta-label">{t("sla_paused_since_label")}</span>
-                    <span className="sla-detail-meta-value">
-                      {formatDate(ticket.sla_paused_at)}
-                    </span>
-                  </>
-                )}
-                {ticket.sla_first_breached_at && (
-                  <>
-                    <span className="sla-detail-meta-label">{t("sla_first_breached_label")}</span>
-                    <span className="sla-detail-meta-value">
-                      {formatDate(ticket.sla_first_breached_at)}
-                    </span>
-                  </>
-                )}
-                {ticket.sla_completed_at && (
-                  <>
-                    <span className="sla-detail-meta-label">{t("sla_completed_label")}</span>
-                    <span className="sla-detail-meta-value">
-                      {formatDate(ticket.sla_completed_at)}
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
+            />
+          </div>
 
-            {/* Sprint 30 Batch 30.1.1 — Delete-link footer. Demoted
-                from the page header to a small text link in the card
-                footer. The confirmation dialog and the underlying
-                deletion endpoint are unchanged; only the entry-point
-                affordance moved. Visible only to users the backend
-                will actually accept (`canDeleteTicket` mirrors the
-                `_user_can_soft_delete_ticket` rule). */}
-            {canDeleteTicket && (
-              <div
-                style={{
-                  borderTop: "1px solid var(--border)",
-                  padding: "10px 18px 12px",
-                  textAlign: "right",
+          {/* W17 §2 — the Extra Work card group, on a ticket born from
+              one. PROVIDER-ONLY and the gate sits on the MOUNT, not the
+              render: the component's first act is
+              `GET /api/extra-work/<id>/`, which is a hard 404 for STAFF
+              (`scope_extra_work_for` -> `.none()`), and customers keep
+              their existing surfaces (worked hours only on hourly-priced
+              work — not widened here). `canAccessExtraWork` is the same
+              predicate the nav and ExtraWorkRoute use, so the card and
+              the sidebar cannot disagree; the role check on top of it is
+              what keeps CUSTOMER_USER (who passes that predicate) out of
+              provider money. The origin pill in the header stays the
+              door to the full Extra Work page. */}
+          {/* W-PLAN Task 2 / W-PLANCARD Task 1 — the Plan action for
+              One-off work, and NOTHING ELSE in this slot.
+
+              ONE OWNER PER FACT. This card used to carry a second copy
+              of the plan — a bullet per person ("Ahmet · no day yet ·
+              4.00h") — next to the Planned-vs-worked table that already
+              owns those numbers per person. Two renderings of one store
+              on one screen is the defect; the list is gone and the
+              table below is the plan's only reading here. Day-level
+              detail stays where it lives: the plan modal.
+
+              W-HOURS5 Task 4 — the in-tab "Plan the work" that sat
+              above the table is gone: both doors ("Plan the work",
+              "Enter hours worked") live in the comparison card's own
+              header now, same handler, same gate and same modal as the
+              page header's button, which stays. `ewPlanDetail` is still
+              read for the table's planned side and to seed the modal. */}
+          {/* hours2 Part 1b — PLANNED VS WORKED, on the job.
+
+              The comparison the Extra Work page used to carry ("Hours
+              on this extra work", with its cost block) lives HERE now,
+              stripped to hours: per person, planned (the SAME store the
+              Plan dialog writes — `ExtraWorkPlannedHours`, read back as
+              `ewPlanDetail.planned_hours`) beside worked (the
+              `TimeEntry` rows tagged `TICKET` / this ticket). Money
+              stays in Reports.
+
+              W-PLANTRUTH §2 (owner ruling) — PLAN AND HOURS BELONG TO
+              CHARGEABLE WORK ONLY. This used to mount for provider
+              management on EVERY ticket, on the reasoning that hours
+              could be booked to any open ticket from the admin week
+              grid. That reasoning is withdrawn: the grid's own pickers
+              now offer chargeable tickets only (server-side, in
+              `reports/hour_sources.py` and `reports/week_assignments.py`),
+              so on a plain ticket — a recurring occurrence, a direct
+              report — there is no plan to show, no hours to book, and
+              nothing to compare. It is ABSENT, not disabled: a control
+              that cannot do anything is worse than no control.
+              Scheduling stays, above; it is a different fact and it
+              belongs to every ticket. */}
+          {ticket.extra_work_origin && isProviderManagementRole(me?.role) && (
+            <PlannedVsWorkedPanel
+              ticketId={ticket.id}
+              companyId={ticket.company}
+              planned={
+                ticket.extra_work_origin && canAccessExtraWork(me?.role)
+                  ? ewPlanDetail
+                    ? (ewPlanDetail.planned_hours ?? [])
+                    : null
+                  : []
+              }
+              selfOnly={!canManageTimesheets(me?.role)}
+              /* W-FIX1 E1 (audit F7) — neither door on a finished job. */
+              canBook={
+                canManageTimesheets(me?.role) &&
+                !TERMINAL_UI_STATUSES.has(ticket.status)
+              }
+              /* P-11 B3 — the office's door is THE GRID: the Hours
+                 page, opened on the job's week with the crew
+                 preselected. The worker's door is Report done, which
+                 now asks the hours itself. (The in-page Book-hours
+                 dialog lost its opener on purpose: one record, two
+                 doors, not three.) */
+              onBook={() => {
+                const day = ticket.scheduled_start_at
+                  ? new Date(ticket.scheduled_start_at)
+                  : new Date();
+                const jobWeek = isoWeekOf(day);
+                const weekParam = `${jobWeek.isoYear}-W${String(jobWeek.isoWeek).padStart(2, "0")}`;
+                const enter = completionCrew.map((person) => person.id).join(",");
+                navigate(
+                  `/admin/hours?week=${weekParam}${enter ? `&enter=${enter}` : ""}`,
+                );
+              }}
+              /* W-HOURS5 Task 4 — the Plan door, in the same header,
+                 same weight. Same predicate as the page header's. */
+              canPlan={
+                !!ticket.extra_work_origin &&
+                canAccessExtraWork(me?.role) &&
+                !TERMINAL_UI_STATUSES.has(ticket.status)
+              }
+              planError={ewPlanReadError}
+              onPlan={() => void openEwPlan()}
+              planLoading={ewPlanLoading}
+              /* W-HOURS5 Task 2 — who is on the job NOW, so a removed
+                 person's surviving past plan reads as history. Known
+                 only once the plan (and its crew) has been read. */
+              crewIds={
+                ticket.extra_work_origin && ewPlanDetail
+                  ? ewPlanAssignments.map((a) => a.user_id)
+                  : null
+              }
+              refreshNonce={hoursNonce}
+            />
+          )}
+          </>
+          )}
+          {ticketTab === "money" &&
+            ticket.extra_work_origin &&
+            isProviderManagementRole(me?.role) &&
+            canAccessExtraWork(me?.role) && (
+              <TicketExtraWorkCards
+                key={ticket.extra_work_origin.extra_work_request_id}
+                extraWorkId={ticket.extra_work_origin.extra_work_request_id}
+                currentTicketId={ticket.id}
+                onChanged={() => {
+                  void loadTicket();
                 }}
-              >
-                <button
-                  type="button"
-                  onClick={openDeleteDialog}
-                  disabled={deletingTicket}
-                  className="link-back"
-                  style={{
-                    background: "none",
-                    border: "none",
-                    padding: 0,
-                    cursor: "pointer",
-                    color: "var(--text-faint)",
-                    fontSize: 12,
-                  }}
-                >
-                  {t("delete_ticket_footer_link")}
-                </button>
-              </div>
+              />
             )}
-          </CollapsibleCard>
 
-          <CollapsibleCard
-            title={
-              canShowCompleteWorkButton
-                ? t("card_workflow_title_staff_complete")
-                : t("card_workflow_title")
-            }
-            meta={t(`common:${ticketStatusLabelKey(ticket.status)}`)}
-            defaultOpen
-            testId="side-card-workflow"
-          >
-            <div className="workflow-body">
-              {/* Sprint 28 Batch 11 — STAFF "Complete work" entry
-                  point. Renders only for the assigned STAFF actor on
-                  an IN_PROGRESS ticket; opens a modal that resolves
-                  the destination (manager review vs customer
-                  approval) and submits the corresponding status
-                  transition.
-
-                  UX hotfix: when this CTA renders, the generic
-                  next-status UI (Status note + "Move to X" buttons)
-                  is suppressed entirely so STAFF only sees ONE
-                  clear action — "Complete work". The destination is
-                  resolved server-side via the BSV
-                  `staff_completion_routes_to_customer` flag; the
-                  backend `allowed_next_statuses` also narrows STAFF
-                  + IN_PROGRESS to the single resolved target so the
-                  API contract matches. */}
-              {canShowCompleteWorkButton ? (
-                <>
-                  <p
-                    className="muted small"
-                    data-testid="ticket-staff-complete-card-subtitle"
-                    style={{ marginTop: 0, marginBottom: 8 }}
-                  >
-                    {t("card_workflow_subtitle_staff_complete")}
-                  </p>
-                  <div className="status-actions" style={{ marginBottom: 0 }}>
-                    <button
-                      type="button"
-                      className="status-btn"
-                      onClick={openCompleteModal}
-                      disabled={completeModalOpen}
-                      data-testid="ticket-staff-complete-button"
-                    >
-                      {t("common:ticket_staff_complete.button_label")}
-                      <span className="status-btn-arrow">→</span>
-                    </button>
-                  </div>
-                </>
-              ) : visibleNextStatuses.length === 0 ? (
-                // Disabled-action clarity: when the backend gives the
-                // viewer zero transitions on a WCA ticket AND the
-                // override action is explicitly false, surface the
-                // *reason* rather than the generic terminal helper.
-                // Driven by the per-record action, not a role string —
-                // the only people who land here are providers without
-                // override authority (CUSTOMER_USER on their own WCA
-                // ticket gets APPROVED/REJECTED in allowed_next; STAFF
-                // sees Complete Work or a non-WCA status).
-                ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
-                ticket.actions?.can_override_customer_decision === false ? (
-                  <p
-                    className="muted small"
-                    data-testid="workflow-wca-no-provider-decision"
-                  >
-                    {t("workflow_wca_no_provider_decision")}
-                  </p>
-                ) : (
-                  <p className="muted small">
-                    {t("workflow_no_transitions")}
-                  </p>
-                )
-              ) : (
-                <>
-                  <div className="field">
-                    <label className="field-label" htmlFor="status-note">
-                      {me?.role === "CUSTOMER_USER" &&
-                      ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
-                      visibleNextStatuses.includes("REJECTED")
-                        ? t("workflow_rejection_reason_label")
-                        : staffCompletionEvidenceRequired
-                          ? t("workflow_status_note_label_staff_required")
-                          : t("workflow_status_note_label")}
-                    </label>
-                    <input
-                      id="status-note"
-                      className="field-input"
-                      data-testid="workflow-status-note-input"
-                      value={statusNote}
-                      onChange={(event) => setStatusNote(event.target.value)}
-                      placeholder={
-                        me?.role === "CUSTOMER_USER" &&
-                        ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
-                        visibleNextStatuses.includes("REJECTED")
-                          ? t("workflow_rejection_reason_placeholder")
-                          : t("workflow_status_note_placeholder")
-                      }
-                    />
-                  </div>
-
-                  {/* Sprint 25C — OSIUS staff-completion evidence hint.
-                      Backend rejects the IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL
-                      hop unless the ticket carries a note OR at least one
-                      visible attachment. The page already has a full
-                      attachments card lower down (upload + list); this hint
-                      nudges the operator toward proof-of-work without
-                      blocking the flow when a note alone is enough. */}
-                  {isStaff &&
-                    ticket.status === "IN_PROGRESS" &&
-                    visibleNextStatuses.includes("WAITING_CUSTOMER_APPROVAL") && (
-                      <p
-                        className="muted small"
-                        data-testid="workflow-completion-evidence-hint"
-                        style={{ marginTop: 4, marginBottom: 4 }}
-                      >
-                        {t("workflow_completion_evidence_hint")}
-                      </p>
-                    )}
-
-                  {me?.role === "CUSTOMER_USER" &&
-                    ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
-                    visibleNextStatuses.includes("REJECTED") && (
-                      <div className="alert-warning">
-                        {t("workflow_customer_reject_warning")}
-                      </div>
-                    )}
-
-                  {/* Sprint 30 Batch 30.1.1.5 — progressive disclosure.
-                      Primary transitions render directly under
-                      `.status-actions` so existing selectors keep
-                      working. Secondary transitions live behind a
-                      "More actions" toggle (or render inline-open
-                      when the current status has zero primaries, e.g.
-                      CLOSED). The per-button JSX is identical for
-                      both groups — the `renderTransitionButton`
-                      helper parameterises only the className.
-
-                      Sprint 30 Batch 30.1.3 — on WCA, the override
-                      arming flow is folded INTO the primary buttons:
-                      a provider's click on Approve/Reject expands an
-                      inline reason + Confirm/Cancel pair directly
-                      under the buttons (no separate override card).
-                      For a CUSTOMER_USER on the same step the
-                      buttons stay direct (no `is_override` flag, no
-                      reason prompt). */}
-                  {(() => {
-                    // STAFF on a completion-evidence-required step
-                    // needs a note OR an image attachment before we
-                    // enable any transition button. Frontend mirror
-                    // of the backend `completion_evidence_required`
-                    // 400 check.
-                    const evidenceMissing =
-                      staffCompletionEvidenceRequired &&
-                      !statusNote.trim() &&
-                      !hasImageAttachment;
-                    const renderTransitionButton = (
-                      status: TicketStatus,
-                      variant: "primary" | "secondary",
-                    ) => (
-                      <button
-                        key={status}
-                        type="button"
-                        className={
-                          variant === "primary"
-                            ? "status-btn"
-                            : "status-btn status-btn-secondary"
-                        }
-                        disabled={statusBusy !== null || evidenceMissing}
-                        data-testid={
-                          variant === "primary"
-                            ? `workflow-move-${status}`
-                            : undefined
-                        }
-                        onClick={() => changeStatus(status)}
-                      >
-                        {statusBusy === status ? (
-                          t("updating")
-                        ) : (
-                          <>
-                            {/* Sprint 7B (frontend) — CONVERTED_TO_EXTRA_WORK
-                                is filtered out of the render arrays above,
-                                so this only ever labels real status moves.
-                                Conversion lives on the dedicated header
-                                "Convert to Extra Work" button. */}
-                            {t("workflow_move_to", {
-                              status: tStatus(status),
-                            })}
-                            <span className="status-btn-arrow">→</span>
-                          </>
-                        )}
-                      </button>
-                    );
-                    // Sprint 30 Batch 30.1.3 — drop the plain
-                    // APPROVED/REJECTED button targets when the
-                    // actor is a provider on WCA. They re-render in
-                    // the override-arming block below so the click
-                    // never POSTs without an `override_reason` (the
-                    // backend returns 400 `override_reason_required`
-                    // on the empty-reason path).
-                    // Sprint 7B (frontend) — NEVER render
-                    // CONVERTED_TO_EXTRA_WORK as a raw status-transition
-                    // button. That hop would flip the status WITHOUT
-                    // creating the ExtraWorkRequest; conversion now runs
-                    // through the dedicated convert endpoint + dialog
-                    // (the prominent header "Convert to Extra Work"
-                    // button). Drop it from both render groups so it can
-                    // never POST to /status/.
-                    const primaryForRender = (
-                      providerActsAsOverride
-                        ? primaryNextStatuses.filter(
-                            (s) => s !== "APPROVED" && s !== "REJECTED",
-                          )
-                        : primaryNextStatuses
-                    ).filter((s) => s !== "CONVERTED_TO_EXTRA_WORK");
-                    const secondaryForRender = (
-                      providerActsAsOverride
-                        ? secondaryNextStatuses.filter(
-                            (s) => s !== "APPROVED" && s !== "REJECTED",
-                          )
-                        : secondaryNextStatuses
-                    ).filter((s) => s !== "CONVERTED_TO_EXTRA_WORK");
-                    // Override-arming targets — only the WCA decision
-                    // targets the actor is actually allowed to drive.
-                    const overrideTargets: TicketStatus[] =
-                      providerActsAsOverride
-                        ? (PRIMARY_TRANSITIONS["WAITING_CUSTOMER_APPROVAL"]
-                            .filter((s) => visibleNextStatuses.includes(s))) as TicketStatus[]
-                        : [];
-                    const renderOverrideButton = (status: TicketStatus) => {
-                      const isArmed = overrideDecision === status;
-                      return (
-                        <div
-                          key={status}
-                          className="workflow-override-target"
-                          data-testid={`workflow-override-${status}`}
-                        >
-                          <button
-                            type="button"
-                            className="status-btn"
-                            disabled={statusBusy !== null || overrideBusy}
-                            onClick={() => changeStatus(status)}
-                            data-testid={`workflow-move-${status}`}
-                            aria-expanded={isArmed}
-                          >
-                            <>
-                              {t("workflow_move_to", { status: tStatus(status) })}
-                              <span className="status-btn-arrow">→</span>
-                            </>
-                          </button>
-                          {isArmed && (
-                            <div
-                              className="workflow-override-inline"
-                              data-testid="ticket-override-modal"
-                            >
-                              <form onSubmit={submitOverride}>
-                                <p
-                                  className="muted small"
-                                  style={{ margin: "0 0 6px" }}
-                                >
-                                  {t("override_inline_helper")}
-                                </p>
-                                <div className="field">
-                                  <label
-                                    className="field-label"
-                                    htmlFor="ticket-override-reason"
-                                  >
-                                    {t("override_modal_reason_label")}
-                                  </label>
-                                  <textarea
-                                    id="ticket-override-reason"
-                                    data-testid="ticket-override-reason"
-                                    className="field-textarea"
-                                    rows={3}
-                                    value={overrideReason}
-                                    onChange={(event) =>
-                                      setOverrideReason(event.target.value)
-                                    }
-                                    required
-                                  />
-                                </div>
-                                {overrideError && (
-                                  <div
-                                    className="alert-error"
-                                    role="alert"
-                                    data-testid="ticket-override-error"
-                                    style={{ marginTop: 6 }}
-                                  >
-                                    {overrideError}
-                                  </div>
-                                )}
-                                <div className="override-card-footer card-actions-cluster">
-                                  <button
-                                    type="button"
-                                    className="btn btn-ghost btn-sm"
-                                    onClick={cancelOverride}
-                                    disabled={overrideBusy}
-                                    data-testid="ticket-override-cancel"
-                                  >
-                                    {t("override_modal_cancel")}
-                                  </button>
-                                  <button
-                                    type="submit"
-                                    className="btn btn-primary btn-sm"
-                                    disabled={
-                                      overrideBusy ||
-                                      !overrideReason.trim()
-                                    }
-                                    data-testid="ticket-override-submit"
-                                  >
-                                    {overrideBusy
-                                      ? t("updating")
-                                      : overrideModalSubmitLabel(status)}
-                                  </button>
-                                </div>
-                              </form>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    };
-                    return (
-                      <>
-                        {(overrideTargets.length > 0 ||
-                          primaryForRender.length > 0) && (
-                          <div className="status-actions">
-                            {overrideTargets.map((status) =>
-                              renderOverrideButton(status),
-                            )}
-                            {primaryForRender.map((status) =>
-                              renderTransitionButton(status, "primary"),
-                            )}
-                          </div>
-                        )}
-                        {evidenceMissing && (
-                          <p
-                            className="muted small"
-                            data-testid="workflow-completion-evidence-required"
-                            style={{ marginTop: 4 }}
-                          >
-                            {t("workflow_completion_evidence_required")}
-                          </p>
-                        )}
-                        {secondaryForRender.length > 0 &&
-                          !shouldDefaultOpenSecondary && (
-                            <button
-                              type="button"
-                              className="workflow-more-actions-toggle"
-                              data-testid="workflow-more-actions-toggle"
-                              aria-expanded={isSecondaryOpen}
-                              onClick={() =>
-                                setSecondaryOpen((prev) => !prev)
-                              }
-                            >
-                              {isSecondaryOpen
-                                ? t("workflow_correction_actions_hide")
-                                : t("workflow_correction_actions_show")}
-                            </button>
-                          )}
-                        {secondaryForRender.length > 0 && isSecondaryOpen && (
-                          <div
-                            className="workflow-secondary-list"
-                            data-testid="workflow-secondary-list"
-                          >
-                            {/* Set-subtraction header: every status here
-                                is in allowed_next_statuses but NOT in
-                                PRIMARY_TRANSITIONS for the current
-                                state. They are admin corrections, not
-                                the normal next step. The frontend does
-                                not filter what the backend permits —
-                                the partition only changes layout. */}
-                            <p
-                              className="muted small"
-                              style={{ margin: "0 0 6px" }}
-                            >
-                              {t("workflow_correction_actions_help")}
-                            </p>
-                            {secondaryForRender.map((status) =>
-                              renderTransitionButton(status, "secondary"),
-                            )}
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </>
-              )}
-            </div>
-          </CollapsibleCard>
-
+          {ticketTab === "overview" && (
+          <>
           {/* Sprint 30 Batch 30.1.3 — the standalone provider override
               card has been folded INTO the workflow card. The
               previously-locked 27F testids (`ticket-override-modal`,
@@ -3412,6 +5999,61 @@ export function TicketDetailPage() {
                     {t("common:ticket_staff_complete.note_or_photo_hint")}
                   </p>
                 </div>
+                {/* P-11 B3 — the hours, asked where the work is
+                    reported: one number per person on the job, the day
+                    is the report day. They land on the timesheet (the
+                    Hours page) and, on extra work, pre-fill the hours
+                    to bill. */}
+                {completeHourType !== null && completionCrew.length > 0 && (
+                  <div
+                    className="field"
+                    data-testid="ticket-staff-complete-hours"
+                  >
+                    <span className="field-label">
+                      {t("common:ticket_staff_complete.hours_title")}
+                    </span>
+                    <p className="muted small" style={{ margin: "0 0 6px" }}>
+                      {t("common:ticket_staff_complete.hours_hint")}
+                    </p>
+                    {completionCrew.map((person) => (
+                      <label
+                        key={person.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 6,
+                        }}
+                      >
+                        <span style={{ minWidth: 160 }}>{person.name}</span>
+                        <input
+                          className="field-input"
+                          style={{ maxWidth: 90, textAlign: "right" }}
+                          type="text"
+                          inputMode="decimal"
+                          value={completeHours[person.id] ?? ""}
+                          onChange={(event) => {
+                            const raw = event.target.value;
+                            if (!/^\d{0,2}([.,]\d{0,2})?$/.test(raw)) return;
+                            setCompleteHours((current) => ({
+                              ...current,
+                              [person.id]: raw,
+                            }));
+                          }}
+                          placeholder="0"
+                          aria-label={t(
+                            "common:ticket_staff_complete.hours_for",
+                            { person: person.name },
+                          )}
+                          data-testid={`ticket-staff-complete-hours-${person.id}`}
+                        />
+                        <span className="muted small">
+                          {t("hours_admin.hour_unit")}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
                 <p className="muted small" style={{ marginTop: 4 }}>
                   {hasImageAttachment
                     ? t("common:ticket_staff_complete.attachment_hint_satisfied")
@@ -3506,9 +6148,11 @@ export function TicketDetailPage() {
                   lineHeight: 1.55,
                 }}
               >
-                {t("card_critical_body")}
+                {t("card_critical_body", { context: kindContext })}
               </p>
             </div>
+          )}
+          </>
           )}
         </div>
       </div>
@@ -3516,6 +6160,120 @@ export function TicketDetailPage() {
       {/* Sprint 7B (frontend) — Convert-to-Extra-Work dialog. Posts to
           the dedicated convert endpoint and, on success, navigates to
           the freshly-created ExtraWorkRequest detail page. */}
+      {/* W-H §1 — RULE 4: EVERY ACTION ANSWERS. The toast says what
+          changed in words ("Archived. It has left the working list."),
+          the header chip changes, and the button becomes its opposite.
+          A person who presses it is never left wondering what it did. */}
+      {archiveMode && ticket && (
+        <TicketArchiveDialog
+          ticketId={ticket.id}
+          mode={archiveMode}
+          // P-13 C2 — an unbilled finished job's archive confirm says
+          // the money fact: the ticket hides, the money stays.
+          moneyNotice={
+            ticket.extra_work_billing
+              ? t("common:archive.money_notice", {
+                  amount: formatMoney(
+                    ticket.extra_work_billing.unbilled_total,
+                  ),
+                })
+              : undefined
+          }
+          onCancel={() => setArchiveMode(null)}
+          onDone={(updated, mode) => {
+            setTicket(updated);
+            setArchiveMode(null);
+            toast.push({
+              variant: "success",
+              title: t(
+                mode === "archive"
+                  ? "common:archive.done"
+                  : "common:archive.unarchive_done",
+              ),
+            });
+          }}
+        />
+      )}
+      {/* W13-FIX §1 — the transition modal. Mounted only while a move is
+          armed; nothing has been posted at this point. `changeStatus`
+          runs from its onConfirm and closes it on success, and a
+          refusal keeps it open with the reason inside so the answers
+          already typed survive. */}
+      {transitionTarget !== null && (
+        <TicketTransitionModal
+          // Keyed by the step, so switching moves gives a fresh form
+          // instead of carrying one step's answers into another.
+          key={transitionTarget}
+          actionLabel={
+            isCorrection(ticket.status, transitionTarget)
+              ? t("workflow_move_back_to", {
+                  status: tStatus(transitionTarget),
+                })
+              : t(`workflow_action.${transitionTarget}`)
+          }
+          fromStatusLabel={tStatus(ticket.status)}
+          toStatusLabel={tStatus(transitionTarget)}
+          requirements={transitionReqs}
+          loading={transitionLoading}
+          staff={transitionStaff}
+          staffError={transitionStaffError}
+          // R2 — what the step ALREADY has, so the modal shows it as the
+          // default rather than asking for it again. `assigned_staff` is
+          // the ticket's own roster, which is also where an extra-work
+          // spawn's CARRIED-OVER workers land
+          // (`extra_work/assignment_carryover.py::carry_workers_to_ticket`
+          // writes `TicketStaffAssignment` rows) — so carried people
+          // arrive prefilled without the modal knowing they were carried.
+          currentAssignees={currentAssignees}
+          currentStartDay={currentStartDay}
+          currentStartTime={currentStartTime}
+          startSource={currentStartSource}
+          kindContext={kindContext}
+          busy={statusBusy !== null}
+          error={transitionError}
+          // W-LATE §3c — only the moves that mean "the work is done"
+          // get the open-parts line; a move INTO work has nothing to
+          // warn about. Never a gate: the server does not check parts
+          // and neither does the modal's confirm button.
+          openParts={
+            COMPLETION_TARGETS.has(transitionTarget) ? openParts : undefined
+          }
+          onGoToActualHours={() => {
+            // P-5 S0/S2.4 — the missing-piece pointer: close, switch to
+            // the Money tab, land on the hours.
+            setTransitionTarget(null);
+            setTransitionReqs(null);
+            setTransitionError("");
+            setTicketTab("money");
+            pointAtMissingPiece("actual-hours");
+          }}
+          // W-FIX2 — the proof photo, through the ticket's own attachment
+          // endpoint. The gate reads non-hidden `TicketAttachment` rows
+          // (`_ticket_has_visible_attachment`), so an ordinary upload
+          // satisfies it and the transition endpoint needed no change.
+          // `is_hidden` false explicitly: a hidden file is not evidence.
+          onUploadProof={async (file: File) => {
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("is_hidden", "false");
+            await api.post(`/tickets/${id}/attachments/`, formData, {
+              headers: { "Content-Type": "multipart/form-data" },
+            });
+            // The requirements are re-read so the server, not the modal,
+            // decides the gate is satisfied.
+            await loadTicket();
+          }}
+          onCancel={() => {
+            setTransitionTarget(null);
+            setTransitionReqs(null);
+            setTransitionError("");
+          }}
+          onConfirm={(answers) => {
+            void changeStatus(transitionTarget, answers);
+          }}
+        />
+      )}
+
       {convertOpen && (
         <ConvertToExtraWorkDialog
           ticketId={ticket.id}
@@ -3663,6 +6421,87 @@ export function TicketDetailPage() {
           ) : null}
         </div>
       </dialog>
+
+      {/* W-UX1-B — the credential / property document viewer. Mounted
+          unconditionally and driven through its ref: a native <dialog>
+          behind a condition is an invisible dialog and a dead-looking
+          button. `withDownload={false}` is the whole point — it drops
+          the button AND asks the browser's PDF viewer to hide its own
+          toolbar. */}
+      <PdfPreviewDialog ref={credentialPreviewRef} withDownload={false} />
+      {/* hours2 Part 2 — the "Enter hours worked" door. The crew (the
+          ticket's named staff assignments) is handed over here; the
+          dialog reads the responsible managers itself and offers
+          EVERYONE assigned (W-HOURS4 Task 3). The building and the job
+          are this ticket's, and every row is an ordinary `TimeEntry`
+          written through `POST /timesheets/entries/`. A non-native
+          overlay, conditionally mounted — the render-it-unconditionally
+          rule is about native <dialog>. */}
+      {bookHoursOpen && (
+        <BookHoursDialog
+          ticketId={ticket.id}
+          ticketNo={ticket.ticket_no}
+          companyId={ticket.company}
+          buildingId={ticket.building}
+          extraWorkId={ewOriginId}
+          crew={ticket.assigned_staff.flatMap((entry) =>
+            entry.anonymous
+              ? []
+              : [
+                  {
+                    id: entry.id,
+                    name: entry.full_name || entry.email || `#${entry.id}`,
+                    email: entry.email,
+                  },
+                ],
+          )}
+          onClose={() => setBookHoursOpen(false)}
+          onBooked={(count) => {
+            setBookHoursOpen(false);
+            setHoursNonce((current) => current + 1);
+            toast.push({
+              variant: "success",
+              title: t("book_hours.booked", { count }),
+            });
+          }}
+        />
+      )}
+      {/* W-PLAN Task 2 — the SAME plan dialog the Extra Work page
+          mounts, keyed by the stored plan so a save re-seeds it. A
+          non-native overlay, conditionally mounted — the
+          render-it-unconditionally rule is about native <dialog>. */}
+      {ewPlanOpen && ewPlanDetail && (
+        <PlanWorkDialog
+          key={`ticket-plan-${ewPlanDetail.id}-${
+            ewPlanDetail.planned_hours_total ?? ""
+          }`}
+          ew={ewPlanDetail}
+          assignments={ewPlanAssignments}
+          assignmentsLoading={ewPlanLoading}
+          /* W-HOURS5 Task 2 — the crew is edited HERE, through the
+             ticket's own endpoints; see `addEwPlanPeople` & co. */
+          candidates={ewPlanCandidates}
+          candidatesLoading={ewPlanCandidatesLoading}
+          assignBusy={ewCrewBusy}
+          assignError={ewCrewError}
+          onAssign={(userIds) => void addEwPlanPeople(userIds)}
+          onRemovePerson={(userId) => void removeEwPlanPerson(userId)}
+          removeBusy={ewCrewBusy}
+          managerCandidates={ewPlanManagerCandidates}
+          managerBusy={ewCrewBusy}
+          onAssignManagers={(userIds) => void addEwPlanManagers(userIds)}
+          onRemoveManager={(userId) => void removeEwPlanManager(userId)}
+          busy={ewPlanBusy}
+          error={ewPlanError}
+          rawError={ewPlanRawError}
+          onCancel={() => {
+            setEwPlanOpen(false);
+            setEwPlanDetail(null);
+          }}
+          onSubmit={(payload) => void submitEwPlan(payload)}
+          postSpawn
+        />
+      )}
     </div>
   );
 }

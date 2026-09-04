@@ -62,8 +62,9 @@ test.describe("Sprint 28 Batch 15.1 — foundation primitives", () => {
 
     // Sidebar brand.
     await expect(page.locator(".brand-name")).toHaveText("CleanOps");
-    // Topbar context name.
-    await expect(page.locator(".topbar-context-name")).toHaveText("CleanOps");
+    // P-2 §2 — the top bar no longer repeats the brand above a page
+    // that states its own name; the sidebar is the one place it lives.
+    await expect(page.locator(".topbar-context-name")).toHaveCount(0);
     // Sidebar footer.
     await expect(page.locator(".footer-sys-name")).toContainText("CleanOps");
 
@@ -138,9 +139,14 @@ test.describe("Sprint 28 Batch 15.1 — foundation primitives", () => {
 
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${customerId}/settings`);
+    // FE-6 — the customer page's tab row marks Settings as the open
+    // tab (the scoped sidebar entry it replaced is gone).
     await expect(
-      page.locator("[data-testid='sidebar-customer-settings']"),
+      page.locator("[data-testid='customer-tab-settings']"),
     ).toBeVisible({ timeout: 10_000 });
+    await expect(
+      page.locator("[data-testid='customer-tab-settings']"),
+    ).toHaveAttribute("aria-selected", "true");
 
     const body = page.locator("body");
     // The two known leak strings must not appear in the helper text
