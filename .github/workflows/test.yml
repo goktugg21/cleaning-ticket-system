@@ -18,21 +18,55 @@ permissions:
   contents: read
 
 jobs:
-  backend-test:
-    name: Backend (Django, Postgres, Redis)
+  # ---------------------------------------------------------------------
+  # P-19 Part C — the shard PLAN, checked before anything runs.
+  #
+  # `--parallel` alone was not enough: the merge commit's run was killed
+  # at 50m22s by `timeout-minutes: 50` while the full suite needs ~5.9 h
+  # serially (P-16: 6077 tests in 21268 s). The suite is now fanned across
+  # the shards in `backend/ci_shards.json`, each shard still using
+  # `--parallel` inside itself.
+  #
+  # Sharding introduces a failure mode a single `manage.py test` never
+  # had: an app missing from the plan is silently never tested and CI
+  # still goes green. `ci_shard_check.py` derives the apps that own tests
+  # and fails HERE, before any shard starts, if the plan does not cover
+  # each of them exactly once. The matrix reads the same JSON, so there
+  # is one source and no second hand-maintained copy.
+  # ---------------------------------------------------------------------
+  backend-plan:
+    name: Backend shard plan
     runs-on: ubuntu-latest
-    # The full Django regression has grown to ~2000+ hermetic tests
-    # and no longer fits a SERIAL run under the old 40-minute ceiling
-    # on GitHub-hosted ubuntu-latest runners (the ceiling was sized
-    # for the ~385-test Sprint 25A suite and the suite has grown many
-    # sprints since, deterministically timing the job out mid-stream).
-    # The "Run test suite" step now passes `--parallel`, fanning the
-    # hermetic suite across the runner's CPUs (~3-4x faster). The
-    # tests are hermetic (APITestCase with per-test data, real
-    # Postgres) so parallel DB-cloning is safe. timeout-minutes is
-    # kept at 50 as a safety margin so a still-running valid suite is
-    # never killed mid-stream. Full regression stays the required PR gate.
-    timeout-minutes: 50
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Check the plan covers every app with tests
+        id: plan
+        working-directory: backend
+        run: |
+          python ci_shard_check.py
+          echo "matrix=$(python -c 'import json,sys; sys.stdout.write(json.dumps(json.load(open("ci_shards.json"))))')" >> "$GITHUB_OUTPUT"
+
+  backend-shard:
+    name: Backend shard (${{ matrix.shard.name }})
+    needs: backend-plan
+    runs-on: ubuntu-latest
+    # Each shard is a fraction of the suite and still uses `--parallel`
+    # inside itself, so 40 minutes is a wide margin rather than a ceiling
+    # anything is expected to approach. If a shard ever nears it, split
+    # that shard in ci_shards.json rather than raising this.
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.backend-plan.outputs.matrix) }}
 
     services:
       db:
@@ -108,13 +142,44 @@ jobs:
         working-directory: backend
         run: python manage.py makemigrations --check --dry-run
 
-      - name: Run test suite
+      - name: Run test suite (shard ${{ matrix.shard.name }})
         working-directory: backend
-        # `--parallel` fans the hermetic suite across the runner's CPUs
-        # (Django clones the test DB per worker). Keeps the full
-        # regression as the required gate while finishing well under
-        # the job timeout. See the timeout-minutes note above.
-        run: python manage.py test --noinput --verbosity=1 --parallel
+        # `--parallel` fans this shard's apps across the runner's CPUs
+        # (Django clones the test DB per worker). The tests are hermetic
+        # (APITestCase with per-test data, real Postgres) so parallel
+        # DB-cloning is safe.
+        run: |
+          echo "::notice::shard ${{ matrix.shard.name }} -> ${{ matrix.shard.apps }}"
+          python manage.py test ${{ matrix.shard.apps }} \
+            --noinput --verbosity=1 --parallel
+
+  # ---------------------------------------------------------------------
+  # The AGGREGATE. Its name is unchanged on purpose: "Backend (Django,
+  # Postgres, Redis)" is the required status check the repo already
+  # expects, and renaming it would leave that check permanently pending.
+  # It is green only when the plan held and every shard passed.
+  # ---------------------------------------------------------------------
+  backend-test:
+    name: Backend (Django, Postgres, Redis)
+    needs: [backend-plan, backend-shard]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Aggregate shard results
+        run: |
+          plan="${{ needs.backend-plan.result }}"
+          shards="${{ needs.backend-shard.result }}"
+          echo "plan=$plan  shards=$shards"
+          if [ "$plan" != "success" ]; then
+            echo "::error::the shard plan did not pass ($plan) - no shard ran"
+            exit 1
+          fi
+          if [ "$shards" != "success" ]; then
+            echo "::error::at least one backend shard did not pass ($shards)"
+            exit 1
+          fi
+          echo "every backend shard passed"
 
   frontend-build:
     name: Frontend (lint, tsc, vite build)

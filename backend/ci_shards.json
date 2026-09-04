@@ -1,0 +1,9 @@
+[
+  {"name": "extra_work",   "apps": "extra_work"},
+  {"name": "tickets",      "apps": "tickets"},
+  {"name": "customers-accounts", "apps": "customers accounts"},
+  {"name": "reports-invoicing",  "apps": "reports invoicing"},
+  {"name": "timesheets-contracts", "apps": "timesheets contracts"},
+  {"name": "sla-notifications-planned", "apps": "sla notifications planned_work"},
+  {"name": "buildings-audit-companies-documents", "apps": "buildings audit companies documents"}
+]
