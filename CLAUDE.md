@@ -44,6 +44,15 @@ The **owner does not write code.** The workflow is:
   web-Claude has verified the branch from `origin` and the owner has
   said so. The one-branch end state is housekeeping — it does not
   change how sprints run.
+- **A sprint branch is verified from `origin` BEFORE it merges — with no
+  exception, including the sprint that changes the branch policy**
+  (P-20 D1). P-19 merged itself on its own prompt's instruction and the
+  retroactive audit found a real defect: `backend/config` owns 12
+  security tests (`ALLOWED_HOSTS`, the production settings validator)
+  and was in no CI shard, so CI reported green while never running them.
+  A pre-merge audit would have caught it before it reached `main`. The
+  local gates are not the audit; the audit is web-Claude reading the
+  pushed branch from `origin`.
 - The owner performs all GitHub UI actions. CC pushes branches — **pushed
   before the report is written. A report about commits that are not on
   `origin` is a report about nothing — web-Claude verifies from `origin`

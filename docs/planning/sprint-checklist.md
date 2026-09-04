@@ -24,6 +24,50 @@ needs no separate PR. **Sprints now branch from `main`** (CLAUDE.md §1,
 No branch was deleted at merge time — the train's branches stay for at
 least a week from 2026-09-04 (P-17 C5).
 
+### P-20 — "The gap the guard could not see" (2026-09-04, DONE)
+
+Zero migrations, zero app `.py`. The audit P-19 skipped found a real
+defect, which is the argument for D1.
+
+- **Part A — `config` was in no shard, and the guard was built so it
+  never could be.** `apps_with_tests()` required `apps.py`; `config` is
+  the Django PROJECT package and has none. It owns **two** test modules
+  (web-Claude said one) — `test_allowed_hosts.py` and
+  `test_settings_validator.py`, **12 tests**, covering `ALLOWED_HOSTS`
+  and the production settings validator (placeholder secret key,
+  wildcard hosts, weak DB password, missing CORS/CSRF). The guard now
+  asks the question that matters — *does this directory own a test
+  file?* — not *is it an app*. A directory that must not be sharded goes
+  in an explicit `"exempt"` list with a written reason, and every run
+  prints the exemptions (or "none"). `config` joined the lightest shard.
+  **Measured: CI now runs 6077 tests in 424 modules; local discovery
+  collects 6077 in 424. Before this fix CI ran 6065 in 422** — exactly
+  the two config modules short.
+- **Part B — a soft budget.** Each shard prints its wall time and fails
+  at **24 minutes** with "shard {name} is outgrowing its slot - split it
+  in ci_shards.json". Chosen over reading previous runs through the API:
+  no token, no `actions: read` scope, no first-run edge case, and the
+  failure names the file to edit. `timeout-minutes: 40` stays as the
+  hard backstop.
+- **Also:** `test.yml` now runs on `push: feat/**`, because D1 requires
+  the branch to be verified before it merges and the backend gate could
+  otherwise only run AFTER the merge.
+- **Part C — the dev box, archived then cleared.** Bundle
+  `/home/adm-local/archive/pre-redesign-local-branches.bundle`
+  (15,731,422 bytes, sha256 `95f44fe8…17f0`, second copy in
+  `/home/adm-local/backups/`) holds 120 branches + 4 tags and
+  **verifies as a complete history**; a scratch clone restored it with
+  **0 fsck errors** and all **202 one-copy commits present**. Three
+  worktrees (`w1a`/`w1b`/`w1c`) were on detached HEADs reachable from no
+  branch and no tag — pinned as `archive/*` first so the bundle caught
+  their 11 commits. Only then: 99 worktrees removed (74 needed a root
+  container — `frontend/dist` artifacts owned by root from container
+  builds) and 118 local branches deleted. **~11 GB freed** (/home 96% →
+  76%). Nothing pushed to GitHub; origin is still one branch.
+- **Part D — the rule.** CLAUDE.md now says a sprint branch is verified
+  from `origin` before it merges, with no exception, and cites this
+  sprint's defect as the reason.
+
 ### P-19 — "One branch" (2026-09-04, DONE)
 
 The owner's one-time cleanup of the finished train: everything in

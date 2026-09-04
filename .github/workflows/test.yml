@@ -4,7 +4,11 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    # P-20 D1 — a sprint branch is verified from origin BEFORE it merges,
+    # so the gate has to be reachable on the branch. Without `feat/**` the
+    # backend suite could only ever run AFTER the merge, which is the very
+    # ordering D1 forbids.
+    branches: [main, "feat/**"]
   workflow_dispatch:
 
 # Cancel in-flight runs for the same ref on PRs (a force-push or new
@@ -52,7 +56,7 @@ jobs:
         working-directory: backend
         run: |
           python ci_shard_check.py
-          echo "matrix=$(python -c 'import json,sys; sys.stdout.write(json.dumps(json.load(open("ci_shards.json"))))')" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(python -c 'import json,sys; sys.stdout.write(json.dumps(json.load(open("ci_shards.json"))["shards"]))')" >> "$GITHUB_OUTPUT"
 
   backend-shard:
     name: Backend shard (${{ matrix.shard.name }})
@@ -148,10 +152,29 @@ jobs:
         # (Django clones the test DB per worker). The tests are hermetic
         # (APITestCase with per-test data, real Postgres) so parallel
         # DB-cloning is safe.
+        #
+        # P-20 Part B — the SOFT BUDGET. `timeout-minutes: 40` is the hard
+        # ceiling, and a shard that hits it dies with no explanation of
+        # why. This fails at 24 minutes instead, naming the shard and the
+        # file to edit, so the wall is seen coming rather than hit. The
+        # slowest shard was 17.6 m when this was written, so 24 leaves
+        # roughly a third of headroom before anyone is asked to act.
         run: |
           echo "::notice::shard ${{ matrix.shard.name }} -> ${{ matrix.shard.apps }}"
-          python manage.py test ${{ matrix.shard.apps }} \
-            --noinput --verbosity=1 --parallel
+          start=$SECONDS
+          set +e
+          timeout --signal=TERM --kill-after=60s 24m \
+            python manage.py test ${{ matrix.shard.apps }} \
+              --noinput --verbosity=1 --parallel
+          rc=$?
+          set -e
+          elapsed=$(( SECONDS - start ))
+          echo "shard ${{ matrix.shard.name }} wall time: $(( elapsed / 60 ))m $(( elapsed % 60 ))s"
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+            echo "::error::shard ${{ matrix.shard.name }} is outgrowing its slot - split it in ci_shards.json"
+            exit 1
+          fi
+          exit "$rc"
 
   # ---------------------------------------------------------------------
   # The AGGREGATE. Its name is unchanged on purpose: "Backend (Django,
