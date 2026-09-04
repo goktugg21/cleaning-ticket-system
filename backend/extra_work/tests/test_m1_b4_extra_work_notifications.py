@@ -453,14 +453,24 @@ class ExtraWorkDecisionNotificationTests(B4FixtureMixin, TestCase):
         self.assertEqual(notif.extra_work_id, ew.id)
         self.assertIsNone(notif.ticket_id)
         self.assertEqual(notif.actor_id, self.cust_a.id)
-        self.assertIn("approved", notif.summary)
-        self.assertNotIn("rejected", notif.summary)
+        # P-16 repin - the bell summary renders in the RECIPIENT's
+        # language now (the copy catalogue); the fixture admins read
+        # Dutch, so the row says goedgekeurd, and the key on the row is
+        # the machine-stable fact.
+        self.assertEqual(notif.template_key, "extra_work_approved")
+        self.assertIn("goedgekeurd", notif.summary)
+        self.assertNotIn("afgewezen", notif.summary)
 
     def test_customer_reject_notifies_provider_management_with_rejected_summary(self):
         ew, proposal = self._sent()
         resp = self._api(self.cust_a).post(
             self._transition_url(ew.id, proposal.id),
-            {"to_status": ProposalStatus.CUSTOMER_REJECTED},
+            {
+                "to_status": ProposalStatus.CUSTOMER_REJECTED,
+                # P-16 repin - P-8R: a customer rejection carries its
+                # reason as `note`.
+                "note": "not needed",
+            },
             format="json",
         )
         self.assertEqual(resp.status_code, 200, resp.data)
@@ -473,7 +483,9 @@ class ExtraWorkDecisionNotificationTests(B4FixtureMixin, TestCase):
             event_type=NotificationType.EXTRA_WORK_DECISION,
             recipient=self.bm_a,
         )
-        self.assertIn("rejected", notif.summary)
+        # P-16 repin - per-recipient language (see the approve test).
+        self.assertEqual(notif.template_key, "extra_work_rejected")
+        self.assertIn("afgewezen", notif.summary)
         self.assertNotIn("approved", notif.summary)
 
     def test_provider_override_decision_excludes_the_overriding_actor(self):

@@ -47,6 +47,19 @@ class WaitingDrawerActsTests(_P3Fixture, APITestCase):
             start=planned,
             slot_status=StaffAssignmentSlotStatus.COMPLETED,
         )
+        # P-16 repin — the P-9 settled-day rule reads the FINISH stamp
+        # (manager_review_at / sent_for_approval_at), and a real
+        # waiting ticket always carries one (the machine writes it
+        # in-transaction). This ORM fixture never stamped it, so the
+        # settle fell to the approval moment — TODAY — and the
+        # lands-on-its-day assertion failed on any weekday >= 2 (red
+        # since P-9, pre-existing at the P-14 base per its own report).
+        from django.utils import timezone as tz
+
+        ticket.sent_for_approval_at = tz.now().replace(
+            year=planned.year, month=planned.month, day=planned.day
+        )
+        ticket.save(update_fields=["sent_for_approval_at"])
         return ticket
 
     def test_the_waiting_row_says_whether_this_reader_may_answer(self):

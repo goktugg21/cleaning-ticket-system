@@ -77,10 +77,66 @@ test's disposition:
   door deliberately keeps per-line dates — only the normal create
   retired them.)
 
-**Repaired (code fixed): 0 · repinned: 34 · deleted: 0** — every red
-was a stale pin of a rule an owner-ruled sprint had since changed, not
-code drift. That is itself the finding: the suite's reds were noise
-hiding signal, which is why the standing full-suite rule exists now.
+**Round 1: repaired 0 · repinned 34 · deleted 0** — every red was a
+stale pin of a rule an owner-ruled sprint had since changed, not code
+drift.
+
+## A2. Round two — what the FULL run then surfaced (62)
+
+The full current-tree run found MORE than the baseline's 51: the
+baseline leftovers outside round 1's families, plus breaks P-15's own
+rules caused silently in modules its touched-module gate never ran —
+the exact disease the standing rule now prevents. The ledger:
+
+- **repinned ~40** — P-15's `intent_required` (a provider's non-agreed
+  cart gets no silent default) hit every provider-actor create fixture
+  that predates it: `w5b_groups` (~25, via the shared batch payload —
+  whose 400 cascaded into KeyErrors on `members`/`group`),
+  `w_fix1_priced_batch_redaction` (6, same base), `fe2_display_phase`,
+  `sprint180_tracks_and_tickets` (2), `sprint182_money_rules` (3),
+  `w_ew1_dates` (provider-deadline), `sprint154_default_labels` (3 —
+  which also still sent the retired per-line date). Each fixture now
+  chooses `AUTO_START_AFTER_PRICING`, the provider-legal intent.
+- **repinned 4** — P-8R's `rejection_note_required` on the proposal
+  door: `sprint187_quoted_totals`, `sprint28_proposal` (2),
+  `sprint6b_auto_start_after_pricing`, plus `m1_b4`'s reject leg — the
+  rejection now carries its reason as `note`.
+- **repaired 1 (P-16's own)** — the new view-level
+  `cancel_note_required` preempted the machine's more specific
+  `override_reason_required` on late-stage cancels
+  (`sprint29_batch29_8`): the view gate now fires only for the EARLY
+  cancels (REQUESTED / UNDER_REVIEW / PRICING_PROPOSED), the machine's
+  named refusals keep the late pairs. A generic sentence must never
+  preempt the one that names the actual missing thing.
+- **repinned 2 (P-16's own)** — `m1_b4`'s decision summaries pinned the
+  old hardcoded English; the bell renders per RECIPIENT now, so the
+  nl-default fixtures assert the Dutch words plus the machine-stable
+  `template_key`.
+- **repinned 3** — `b6_bm_revocable_permissions`: the W-PLAN gate
+  postdates the pins; the fixtures complete the plan so the wall under
+  test (the BM's revocable key) is the one that answers.
+- **repinned 1** — `audit.test_audit` company hard-delete: W13's
+  PROTECTed per-company TicketCategory seeds go first (the Sprint 142
+  order, again).
+- **repinned 1** — `sprint23a` anonymous roster: the M2 credentials
+  work made the anonymous answer one row per member
+  (`assigned_team_member_anonymous`, no identity fields), the shape
+  `test_m2_ticket_payload_credentials` already pins.
+- **repinned 1** — `p8r_me_account_facts` last_login: the wire renders
+  LOCAL time; the naive-UTC date comparison was a midnight-window
+  flake (it failed only because the run crossed 00:00 local).
+- **repinned 1** — `sprint173` module-independence: the boundary is
+  MODULE-LOAD independence; `_source_in_scope`'s call-time import is
+  its own documented seam, so the scanner checks unindented lines only.
+- **repinned 1** — `p4_waiting_drawer` settled-day (pre-existing at
+  the P-14 base, by P-14's own report): the fixture now stamps
+  `sent_for_approval_at` on the planned day, as the machine does
+  in-transaction for every real waiting ticket.
+
+The 4 skips are environmental/documented: the two frontend-bundle
+byte-identity tests skip inside the container (the backend image has
+no `frontend/`; they run where the repo is whole) and extra_work's two
+pre-existing decorated skips (on record since P-15's carryover runs).
 
 ## B. The e2e reds (19 + the P-15 leftover)
 
@@ -182,5 +238,7 @@ a disposition of its own:
 
 ## Final lines
 
-- Backend, full suite, Postgres, one run: (pending)
-- E2e, full suite, FE-7 harness, one run: (pending)
+- Backend, full suite, Postgres, one run: (pending — in flight)
+- E2e, full suite, FE-7 harness, one run (2026-09-04):
+  **`401 passed (1.1h)` — 0 failed, 0 skipped.** (402 became 401 by
+  the one deletion; the demo-card three and K2 RAN.)

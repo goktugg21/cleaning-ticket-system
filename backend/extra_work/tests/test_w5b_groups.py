@@ -75,6 +75,11 @@ class GroupTestBase(TenantFixtureMixin, APITestCase):
             "description": "Wekelijkse ronde",
             "urgency": "NORMAL",
             "billed_to": "CUSTOMER",
+            # P-16 repin — P-15's intent rule: a PROVIDER creating a
+            # non-agreed cart gets no silent default (intent_required);
+            # AUTO_START_AFTER_PRICING is the provider-legal choice.
+            # The group mechanics under test are unchanged.
+            "request_intent": "AUTO_START_AFTER_PRICING",
             "line_items": [
                 {
                     # W-EW1 §2 — no per-line date. The batch writer sets

@@ -331,6 +331,9 @@ class DisplayPhaseSerializerTests(TestCase):
                 "building": self.building.id,
                 "customer": self.customer.id,
                 "title": "Phase cannot be set",
+                # P-16 repin - P-15 intent rule: a provider
+                # non-agreed cart must choose (intent_required).
+                "request_intent": "AUTO_START_AFTER_PRICING",
                 "description": "x",
                 "display_phase": "DONE",
                 "line_items": [

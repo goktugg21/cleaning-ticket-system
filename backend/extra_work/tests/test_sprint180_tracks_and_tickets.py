@@ -322,6 +322,8 @@ class BilledToTests(_TrackFixture):
                 "building": self.building.id,
                 "customer": self.customer.id,
                 "title": "Billed to the customer",
+                # P-16 repin - P-15 intent rule (provider cart).
+                "request_intent": "AUTO_START_AFTER_PRICING",
                 "description": "d",
                 "billed_to": "CUSTOMER",
                 "line_items": [
@@ -347,6 +349,8 @@ class BilledToTests(_TrackFixture):
                 "building": self.building.id,
                 "customer": self.customer.id,
                 "title": "Legacy client, no billed_to",
+                # P-16 repin - P-15 intent rule (provider cart).
+                "request_intent": "AUTO_START_AFTER_PRICING",
                 "description": "d",
                 "line_items": [
                     {

@@ -37,8 +37,12 @@ class MeAccountFactsTests(TenantFixtureMixin, APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIsInstance(response.data["last_login"], str)
+        # P-16 repin — the wire renders the LOCAL time (Amsterdam);
+        # comparing against the naive UTC date made this a
+        # midnight-window flake (it failed only in a suite run that
+        # crossed 00:00 local, exactly how the full-suite run found it).
         self.assertTrue(response.data["last_login"].startswith(
-            signed_in_at.strftime("%Y-%m-%d")
+            timezone.localtime(signed_in_at).strftime("%Y-%m-%d")
         ))
 
     def test_me_carries_the_scope_id_sets_for_a_provider_role(self):

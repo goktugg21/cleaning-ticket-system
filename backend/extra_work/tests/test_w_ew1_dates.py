@@ -98,7 +98,13 @@ class ACustomerMayStateADeadlineTests(_Base):
         owed = timezone.localdate() + timedelta(days=4)
         response = self.api(self.admin_a).post(
             "/api/extra-work/",
-            self._payload(deadline=owed.isoformat()),
+            # P-16 repin — P-15's intent rule: the PROVIDER's non-agreed
+            # cart must choose (intent_required); the deadline rule
+            # under test is unchanged.
+            self._payload(
+                deadline=owed.isoformat(),
+                request_intent="AUTO_START_AFTER_PRICING",
+            ),
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)

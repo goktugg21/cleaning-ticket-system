@@ -463,8 +463,21 @@ class ExtraWorkRequestViewSet(
         # own `override_reason` (the late-stage cancels' existing
         # mandatory gate). At the VIEW, not in `apply_transition` — the
         # primitive walks states for seeders and tests (W13-FIX).
+        #
+        # ONLY for the EARLY cancels (the machine's own docstring:
+        # REQUESTED / UNDER_REVIEW / PRICING_PROPOSED → CANCELLED carry
+        # no machine-level reason gate). The late-stage pairs keep the
+        # machine's more SPECIFIC refusal (`override_reason_required` /
+        # `cancel_unbilled_requires_reason`) — a generic sentence must
+        # never preempt the one that names the actual missing thing.
         if (
             to_status == ExtraWorkStatus.CANCELLED
+            and extra_work.status
+            in (
+                ExtraWorkStatus.REQUESTED,
+                ExtraWorkStatus.UNDER_REVIEW,
+                ExtraWorkStatus.PRICING_PROPOSED,
+            )
             and not note.strip()
             and not str(data.get("override_reason") or "").strip()
         ):

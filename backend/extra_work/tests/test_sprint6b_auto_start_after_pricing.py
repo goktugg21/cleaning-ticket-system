@@ -493,7 +493,10 @@ class RequestQuoteUnchangedTests(AutoStartFixtureMixin, TestCase):
             f"/api/extra-work/{ew.id}/proposals/{proposal_id}/transition/",
             {
                 "to_status": ProposalStatus.CUSTOMER_REJECTED,
-                "customer_reject_reason": "not needed",
+                # P-16 repin — P-8R: the PROPOSAL door reads the reason
+                # from `note`; `customer_reject_reason` belongs to the
+                # EW-transition door.
+                "note": "not needed",
             },
             format="json",
         )

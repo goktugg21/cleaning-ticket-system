@@ -1251,7 +1251,8 @@ class ExtraWorkCrossCompanyTests(TwoProviderFixtureMixin, TestCase):
                 {
                     "service": self.svc_b.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
+                    # P-16 repin - the per-line requested_date was
+                    # retired (P-8 §4); preferred_date is request-level.
                     "customer_note": "",
                 }
             ],
@@ -1282,7 +1283,8 @@ class ExtraWorkCrossCompanyTests(TwoProviderFixtureMixin, TestCase):
                 {
                     "service": self.svc_a_other.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
+                    # P-16 repin - the per-line requested_date was
+                    # retired (P-8 §4); preferred_date is request-level.
                     "customer_note": "",
                 }
             ],
