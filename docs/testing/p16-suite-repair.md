@@ -238,7 +238,19 @@ a disposition of its own:
 
 ## Final lines
 
-- Backend, full suite, Postgres, one run: (pending — in flight)
+- Backend, full suite, Postgres, one run (2026-09-04):
+  **`Ran 6077 tests in 21267.918s — OK (skipped=4)`** — the first
+  green full run since the 2026-08-06 testing-gate ruling. The four
+  skips are environmental/documented (the two frontend-bundle
+  byte-identity tests inside the container; extra_work's two
+  pre-existing decorated skips).
 - E2e, full suite, FE-7 harness, one run (2026-09-04):
   **`401 passed (1.1h)` — 0 failed, 0 skipped.** (402 became 401 by
   the one deletion; the demo-card three and K2 RAN.)
+
+## The whole ledger, summed
+
+96 dispositions across both suites: **repinned 93 · repaired 2 (both
+real app defects: the services-catalog one-page truncation, and
+P-16's own cancel gate preempting the machine's specific refusal) ·
+deleted 1** (the spec that hunted the W21-retired origin block).

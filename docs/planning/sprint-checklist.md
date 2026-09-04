@@ -37,13 +37,19 @@ earlier decisions, not blockers): the Turkish locale, the go-live data
 import ([go-live-import.md](go-live-import.md), plan only), the
 contracts model (his father's meeting decides; the P-15 guard stands).
 
-- **Part A** — the 51 pre-existing backend reds: each repaired,
-  repinned or deleted (`docs/testing/p16-suite-repair.md`); full suite
-  on Postgres ends `OK`. **Standing rule (from this sprint on): the
-  full backend suite runs at the close of every sprint; a red is a
-  sprint item, not a note.**
-- **Part B** — the e2e suite green in the FE-7 harness
-  (`docs/testing/e2e-harness.md`); same three outcomes per red.
+- **Part A — DONE** — the standing reds dispositioned in TWO rounds
+  (`docs/testing/p16-suite-repair.md`): round 1 the 34 in the suspect
+  families, round 2 the 62 the full current-tree run surfaced (P-15's
+  own rules had silently broken modules its touched-module gate never
+  ran — the disease this rule cures). Final line:
+  **`Ran 6077 tests in 21267.918s — OK (skipped=4)`** — the first
+  green full run since 2026-08-06. **Standing rule (from this sprint
+  on): the full backend suite runs at the close of every sprint; a red
+  is a sprint item, not a note.**
+- **Part B — DONE** — the e2e suite in the FE-7 harness
+  (`docs/testing/e2e-harness.md`): **`401 passed (1.1h)`, 0 failed,
+  0 skipped** — every former skip now runs or is deleted with its
+  reason.
 - **Part C** — the eleven deferred S4s fixed/closed (statuses inline
   in `p14-findings.md`; pins: `test_p16_part_c`,
   `test_p16_future_flag`, `test_p16_generate_through`).
