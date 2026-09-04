@@ -64,8 +64,13 @@ function resolves(lang, ns, key) {
   return PLURAL_SUFFIXES.some((sfx) => hasExact(res, key + sfx));
 }
 
-// Key, plus an optional `{ ns: "..." }` override in the same call.
-const TCALL = /\bt[A-Za-z]*\(\s*["'`]([a-zA-Z][a-zA-Z0-9_.]*)["'`]([^;\n]{0,160})/g;
+// Callee name, key, plus an optional `{ ns: "..." }` override in the same
+// call. P-18 B2: the callee is captured because a file may hold SEVERAL
+// `t` aliases with different bindings (`const { t: tCred } =
+// useTranslation("staff_credentials")`), and attributing every call to the
+// file's FIRST binding reported 28 keys as fallback-dependent that resolve
+// in their own primary namespace. See docs/testing/i18n-audit.md.
+const TCALL = /\b(t[A-Za-z]*)\(\s*["'`]([a-zA-Z][a-zA-Z0-9_.]*)["'`]([^;\n]{0,160})/g;
 const NS_OVERRIDE = /\bns:\s*["'`]([a-z_]+)["'`]/;
 
 /** Blank out comments and import lines so prose examples are not scanned. */
@@ -74,7 +79,30 @@ function stripNonCode(src) {
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
     .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + " ".repeat(Math.max(0, m.length - p1.length)));
 }
-const BIND = /useTranslation\(\s*(\[[^\]]*\]|["'`][a-z_]+["'`])?\s*\)/g;
+// The destructure AND the namespace argument, so each `t` alias keeps its
+// own binding: `const { t } = useTranslation("common")` binds `t`, while
+// `const { t: tCred } = useTranslation("staff_credentials")` binds `tCred`.
+const BIND =
+  /\{([^}]*)\}\s*=\s*useTranslation\(\s*(\[[^\]]*\]|["'`][a-z_]+["'`])?\s*\)/g;
+const ALIAS = /\bt\s*:\s*([A-Za-z_$][\w$]*)|\bt\b(?!\s*:)/;
+
+/** alias -> the namespace lists it was bound to (usually exactly one). */
+function aliasBindings(src) {
+  const map = new Map();
+  for (const m of src.matchAll(BIND)) {
+    const a = ALIAS.exec(m[1] || "");
+    if (!a) continue;
+    const alias = a[1] || "t";
+    const ns = m[2]
+      ? [...m[2].matchAll(/["'`]([a-z_]+)["'`]/g)].map((x) => x[1])
+      : ["common"];
+    if (!ns.length) continue;
+    if (!map.has(alias)) map.set(alias, []);
+    const seen = map.get(alias);
+    if (!seen.some((prev) => prev.join("|") === ns.join("|"))) seen.push(ns);
+  }
+  return map;
+}
 
 let checked = 0;
 const missing = [];
@@ -85,28 +113,38 @@ for (const file of walk(SRC)) {
   const src = stripNonCode(raw);
   const rel = relative(SRC, file);
 
-  const binds = [...src.matchAll(BIND)].map((m) =>
-    m[1] ? [...m[1].matchAll(/["'`]([a-z_]+)["'`]/g)].map((x) => x[1]) : ["common"],
-  );
+  const aliases = aliasBindings(src);
+  const allBinds = [...aliases.values()].flat();
   // A helper module that takes `t` as a PARAMETER (describeTicketChange.ts
   // is the one that put `change.moved_to` on the owner's screen) has no
   // binding of its own. We cannot know its caller's namespaces, so check
   // such keys against every namespace and only report a key that exists
   // nowhere at all.
-  const injected = !binds.length;
-  const namespaces = injected ? Object.keys(bundles[LANGS[0]]) : [...new Set(binds.flat())];
-  if (!namespaces.length) continue;
+  const injected = !allBinds.length;
+  const fileNamespaces = injected
+    ? Object.keys(bundles[LANGS[0]])
+    : [...new Set(allBinds.flat())];
+  if (!fileNamespaces.length) continue;
   if (injected && !TCALL.test(src)) continue;
   TCALL.lastIndex = 0;
-  const primary = injected ? null : binds[0][0];
 
   for (const m of src.matchAll(TCALL)) {
-    const key = m[1];
+    const callee = m[1];
+    const key = m[2];
     if (!key.includes(".") || /^[A-Z]/.test(key)) continue;
-    const override = NS_OVERRIDE.exec(m[2] || "");
-    const scope = override ? [override[1]] : namespaces;
-    const first = override ? override[1] : primary;
-    if (injected && !override) { /* union-checked: cannot attribute a first ns */ }
+    const override = NS_OVERRIDE.exec(m[3] || "");
+    // P-18 B2 — attribute the call to ITS OWN alias. An alias bound in more
+    // than one place in the file (different components, different
+    // namespaces) is checked against the union and never reported as a
+    // fallback, because we cannot say which binding is in scope here.
+    const bound = aliases.get(callee) || null;
+    const ambiguous = !bound || bound.length !== 1;
+    const scope = override
+      ? [override[1]]
+      : bound
+        ? [...new Set(bound.flat())]
+        : fileNamespaces;
+    const first = override ? override[1] : ambiguous ? null : bound[0][0];
     checked += 1;
     const line = src.slice(0, m.index).split("\n").length;
 

@@ -5,18 +5,22 @@
 ## Wat u ziet als u inlogt
 
 Het **Dashboard**: een begroeting die zegt hoeveel dingen u vandaag
-nodig hebben, daaronder de aandachtslijst (wacht op prijs, wacht op
-klantbeslissing, vastgelopen, nog niet gepland, factuurmaand loopt
-risico) en het openstaande werk. Elke regel is een deur: klikken
-brengt u bij precies die lijst.
+nodig hebben, daaronder "Aandacht nodig" en het openstaande werk. Die
+lijst noemt de soorten werk die op u wachten — klaar gemeld wacht op
+uw controle, klant heeft niet geantwoord, factuurmaand loopt risico,
+vastgelopen, wacht op prijs, hier zit nog niemand op, nog niet
+gepland, wacht op klantbeslissing — maar alleen de soorten waar iets
+in zit. U ziet de vijf dringendste; "Toon alle" toont de rest. Elke
+regel is een deur: klikken brengt u bij precies die lijst.
 
 ## De vijf dingen die u het vaakst doet
 
 1. **Tickets** — meldingen van klanten bekijken, mensen toewijzen, de
    status verder brengen. De teller zegt zelf welke periode hij telt.
-2. **Werkplanning** — de week van het team. Sleep niets: elke kaart
-   opent zijn eigen ticket, en de strook "Nog niet gepland" toont wat
-   nog geen dag heeft.
+2. **Werkplanning** — zo heet het in het menu; de pagina zelf heet
+   "Werkplanning van het team". De week van het team: sleep niets,
+   elke kaart opent zijn eigen ticket, en de strook "Nog niet gepland"
+   toont wat nog geen dag heeft.
 3. **Meerwerk** — nieuwe aanvragen prijzen ("Prijzen en versturen"
    opent de offertebouwer; er gaat pas iets naar de klant als ú
    verstuurt).
@@ -35,8 +39,9 @@ precies wat de knop gaat factureren.
 
 ## Als iets vastzit
 
-De aandachtslijst op het Dashboard en de strook "Vastgelopen" op de
-Werkplanning noemen het werk dat stilstaat en wie aan zet is. Elke
+De lijst "Aandacht nodig" op het Dashboard en de strook
+"Vastgelopen — actie nodig" op de Werkplanning noemen het werk dat
+stilstaat en wie aan zet is. Elke
 waarschuwingsmail heeft dezelfde regel ook in de bel rechtsboven.
 
 ---
@@ -45,17 +50,21 @@ waarschuwingsmail heeft dezelfde regel ook in de bel rechtsboven.
 
 ## What you see at login
 
-The **Dashboard**: a greeting with how many things need you today, the
-attention list below it (awaiting price, awaiting customer decision,
-stuck, not planned yet, billing month at risk) and the open work. Every
-row is a door to exactly that list.
+The **Dashboard**: a greeting with how many things need you today,
+"Needs attention" below it and the open work. That list names the kinds
+of work waiting on you — reported done needs your check, customer has
+not answered, billing month at risk, stuck, awaiting price, nobody is
+on these yet, not planned yet, awaiting customer decision — but only
+the kinds with something in them. You see the five most urgent; "Show
+all" reveals the rest. Every row is a door to exactly that list.
 
 ## The five things you will do most
 
 1. **Tickets** — read customer reports, assign people, move the status
    forward. The counter says which period it counts.
-2. **My schedule** — the team's week. Every card opens its own
-   ticket; the "Not planned yet" strip shows what has no day yet.
+2. **My schedule** — that is the menu name; the page itself is titled
+   "Team schedule". The team's week: every card opens its own ticket,
+   and the "Not planned yet" strip shows what has no day yet.
 3. **Extra work** — price new requests ("Price and send" opens the
    quote builder; nothing reaches the customer until YOU send).
 4. **Hours** — the company's week sheet: enter hours, close the week.
@@ -71,6 +80,7 @@ in the "Make a draft" dialog shows exactly what the button will bill.
 
 ## When something is stuck
 
-The Dashboard's attention list and My schedule's "Stuck" strip name the
-work that stopped and whose move it is. Every warning mail also lands
-as the same line in the bell, top right.
+The Dashboard's "Needs attention" list and the schedule's "Stuck —
+action needed" strip name the work that stopped and whose move it is.
+Every warning mail also lands as the same line in the bell, top
+right.
