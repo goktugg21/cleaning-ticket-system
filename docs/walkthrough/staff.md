@@ -43,27 +43,27 @@ te bellen.
 
 ## What you see at login
 
-**Werkplanning** — your own week: per day the jobs you are on, with
+**My schedule** — your own week: per day the jobs you are on, with
 address and time. Today sits on top. You only see your own work.
 
 ## The five things you will do most
 
-1. **Read your day** — open Werkplanning; every job card opens its
+1. **Read your day** — open My schedule; every job card opens its
    ticket with the description and the building.
 2. **Finish work** — on the ticket, report the job done (or "could not
    finish", with the reason). Your manager checks it afterwards.
-3. **Mijn uren** — enter your hours per day. Agreed standing hours are
+3. **My hours** — enter your hours per day. Agreed standing hours are
    already there; you only adjust what differed. A future day gets an
    amber mark — allowed, but check the date.
-4. **Berichten** — ask job questions on the ticket itself; the answer
-   arrives in Berichten and the bell.
-5. **Notificaties** — the bell, top right: assignments, reminders and
+4. **Messages** — ask job questions on the ticket itself; the answer
+   arrives in Messages and the bell.
+5. **Notifications** — the bell, top right: assignments, reminders and
    changes, in your own language.
 
 ## Where the money is
 
-Not with you — your hours are your part: what you enter in **Mijn
-uren** counts in the week sheet and the reports. Pricing and invoices
+Not with you — your hours are your part: what you enter in **My
+hours** counts in the week sheet and the reports. Pricing and invoices
 are the office's.
 
 ## When something is stuck

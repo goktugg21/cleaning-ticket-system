@@ -13,16 +13,68 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p16-nothing-left` — stacked on
-`feat/p15-close-the-list` (origin tip `ff1f227`, verified by
-web-Claude), the head of the Addendum D redesign train
+**Branch:** `main`. The Addendum D redesign train
 (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11 → P-12 → P-13 → P-14 → P-15 → P-16), each sprint stacked on the previous one and deployed to crmtest;
-nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
-holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
-first time CI runs on any of it. The owner opens and merges both (or
-merges the train tip alone — it contains the ew-gap-closing history;
-see [merge-recipe.md](merge-recipe.md)).
+→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11 → P-12 → P-13 → P-14 → P-15 → P-16 → P-17)
+**was merged into `main` on 2026-09-04 (P-17 Part C) and tagged
+`v2026.09-redesign`** — the restore point. The merge carried the
+`feat/ew-gap-closing` chain (Sprints 153–189) with it, so that branch
+needs no separate PR. **Sprints now branch from `main`** (CLAUDE.md §1,
+[merge-recipe.md](merge-recipe.md)); the stacked-branch train is over.
+No branch was deleted at merge time — the train's branches stay for at
+least a week from 2026-09-04 (P-17 C5).
+
+### P-17 — "The walkthrough reads right, then merge" (2026-09-04, DONE)
+
+Docs-only; zero migrations, zero `.py` changed, no app code. Web-Claude
+reported three defects in `docs/walkthrough/`; the owner's instruction
+was to verify each one independently before fixing it.
+
+- **Part 0 — verified.** **W1 CONFIRMED** (one subject–verb error,
+  `company-admin.md:8`, `het aantal dingen dat u vandaag nodig hebben`);
+  the sweep of all four NL halves found **no second** agreement error,
+  but did surface two other NL defects fixed in passing (`Meerwerk's`,
+  an English possessive in the Dutch half; `stil staan` for the single
+  verb `stilstaan`). **W2 CONFIRMED and UNDERCOUNTED** — not "12+" but
+  **25** Dutch surface names inside the `# English` halves (6 / 8 / 6 /
+  5). **W3's withdrawal VERIFIED CORRECT** — all four pages carry their
+  own image, every reference resolves, every image on disk is
+  referenced; the two sets are identical. No work.
+- **Part A — DONE.** W1 fixed against the product's own idiom
+  (`{{count}} dingen hebben u nodig vandaag`); all 25 EN page names
+  replaced with the real EN nav labels read from
+  `frontend/src/i18n/en/` (My schedule, Extra work, Hours, My hours,
+  Invoices, Messages, Notifications, My reports, New report), NL halves
+  left Dutch. **Five factual drifts** found by reading each page as its
+  stranger and fixed: the Dashboard attention list named two categories
+  that do not exist (`controle`, `niet toegewezen`) and missed three
+  that do — the real five are wacht op prijs / wacht op klantbeslissing
+  / vastgelopen / nog niet gepland / factuurmaand loopt risico; the
+  strip is `Nog niet gepland`, not `Niet gepland`; the quote button is
+  `Prijzen en versturen`, not `Prijs en verstuur`; the draft button is
+  `Concept maken`, not `Maak concept`; and the customer's **Mijn
+  meldingen** renders `display_phase` (`Ingepland`, `Klaar — wacht op
+  uw controle`), never the provider's `ticket_status.*` vocabulary the
+  page quoted (`Wacht op beheerder`, `Wacht op u` — the latter is the
+  Start page's section title, not a status at all).
+- **Verified accurate, left alone:** H-12 (a building manager may not
+  issue or send an invoice, keeps drafts/preview/PDF/lists, gets the
+  `invoice_admin_only` refusal); only an APPROVED standing pattern
+  pre-fills the sheet (P-15 §0.2, `timesheets/fill.py`) and a staff
+  member's own week fills too (W12); bell and email are twins from one
+  emitter with one recipient list (`emit_sla_warning_inapp`) and render
+  per RECIPIENT language (P-16 Part D); the customer billing-date rule
+  (`is_earned`'s cutoff arm: WAITING_CUSTOMER_APPROVAL +
+  `sent_for_approval_at`, so approval need not be in) and its credit
+  note on a later rejection.
+- **Part B — gates green.** tsc 0 · eslint **39 (38 errors, 1 warning
+  = `useSavedBanner.ts:28` exhaustive-deps)** · vitest 144/144 ·
+  build OK · nl/en lockstep identical in all 13 bundles ·
+  `makemigrations --check` → No changes. **No backend suite re-run:
+  zero `.py` files changed.**
+- **Part C — the merge.** Dry run re-run against the then-current
+  `origin/main`: zero conflicts. Merged `--no-ff`, tagged
+  `v2026.09-redesign`, crmtest redeployed from `main`.
 
 ### P-16 — "Nothing left, then merge" (2026-09-03, in flight)
 
@@ -4439,6 +4491,13 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **the redesign train** (tag `v2026.09-redesign`, 2026-09-04) — not a
+  PR: merged `--no-ff` into `main` directly on the owner's word (P-17
+  Part C), per [merge-recipe.md](merge-recipe.md). Brings the whole
+  Addendum D train (WP-1 → FE-1 … FE-7 → P-1 … P-17) **and** the
+  `feat/ew-gap-closing` chain (Sprints 153–189) it was stacked on.
+  Migrations auto-applied on the first backend recreate; all additive.
+  The tag is the restore point. crmtest now builds from `main`.
 - **#130** (`a7c37f6`) — Sprint 152 plus rounds 152.1–152.3: employee
   hours (urenregistratie) as a new, INDEPENDENT `timesheets` app at
   `/api/timesheets/`, with the architectural rule held throughout — **no

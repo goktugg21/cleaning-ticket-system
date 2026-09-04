@@ -13,7 +13,7 @@ van gebouwen die niet van u zijn.
 1. **Tickets** — meldingen van uw gebouwen: mensen toewijzen, de
    status verder brengen, de klant antwoorden via Berichten.
 2. **Werkplanning** — de week van het team op uw gebouwen; de strook
-   "Niet gepland" toont wat een dag nodig heeft.
+   "Nog niet gepland" toont wat een dag nodig heeft.
 3. **Meerwerk** — aanvragen prijzen en de offerte klaarzetten.
    Versturen van meerwerk-offertes mag u; het uitgeven en versturen
    van FACTUREN is voor de bedrijfsbeheerder (het systeem zegt dat er
@@ -25,15 +25,15 @@ van gebouwen die niet van u zijn.
 
 ## Waar het geld staat
 
-Onder **Facturen** (lezen) en Meerwerk's tabblad "Te factureren". Wat
-u prijst en de klant goedkeurt, verschijnt daar vanzelf zodra het werk
-is afgerond en gecontroleerd.
+Onder **Facturen** (lezen) en het tabblad "Te factureren" onder
+Meerwerk. Wat u prijst en de klant goedkeurt, verschijnt daar vanzelf
+zodra het werk is afgerond en gecontroleerd.
 
 ## Als iets vastzit
 
-De strook "Vastgelopen" op de Werkplanning noemt het werk dat stil
-staat. Werk dat te lang op uw controle wacht, krijgt u per mail én in
-de bel — dezelfde regel, twee kanalen.
+De strook "Vastgelopen" op de Werkplanning noemt het werk dat
+stilstaat. Werk dat te lang op uw controle wacht, krijgt u per mail
+én in de bel — dezelfde regel, twee kanalen.
 
 ---
 
@@ -48,26 +48,26 @@ building's work.
 ## The five things you will do most
 
 1. **Tickets** — your buildings' reports: assign people, move the
-   status, answer the customer through Berichten.
-2. **Werkplanning** — the team's week on your buildings; the "Not
-   planned" strip shows what needs a day.
-3. **Meerwerk** — price requests and prepare the quote. Sending
-   meerwerk quotes is yours; issuing and sending INVOICES belongs to
+   status, answer the customer through Messages.
+2. **My schedule** — the team's week on your buildings; the "Not
+   planned yet" strip shows what needs a day.
+3. **Extra work** — price requests and prepare the quote. Sending
+   extra-work quotes is yours; issuing and sending INVOICES belongs to
    the company admin (the system says so if you try).
-4. **Uren** — enter hours for your people; closing the week happens
+4. **Hours** — enter hours for your people; closing the week happens
    with the office.
-5. **Facturen (read + draft)** — you see what is ready for your
+5. **Invoices (read + draft)** — you see what is ready for your
    customers and create drafts; the send button is deliberately not
    yours.
 
 ## Where the money is
 
-Under **Facturen** (read) and Meerwerk's "To invoice" tab. What you
+Under **Invoices** (read) and Extra work's "To invoice" tab. What you
 price and the customer approves appears there once the work is
 finished and checked.
 
 ## When something is stuck
 
-The board's "Stuck" strip names the work that stopped. Work waiting
+My schedule's "Stuck" strip names the work that stopped. Work waiting
 too long on your check reaches you by mail AND the bell — one line,
 two channels.
