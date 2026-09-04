@@ -24,6 +24,43 @@ needs no separate PR. **Sprints now branch from `main`** (CLAUDE.md §1,
 No branch was deleted at merge time — the train's branches stay for at
 least a week from 2026-09-04 (P-17 C5).
 
+### P-19 — "One branch" (2026-09-04, DONE)
+
+The owner's one-time cleanup of the finished train: everything in
+`main`, no other branches on GitHub, and the CI gate made capable of
+passing. Zero app `.py` changes, zero migrations.
+
+- **Part A — P-18 merged.** Dry run clean (tree `e75b3f2`, no conflict
+  messages), merged `--no-ff` as `aa75140`. Proof: `origin/main`'s tree
+  == the P-18 tip's tree == `e75b3f2`, so nothing entered or left in the
+  merge. crmtest redeployed from `main` and proved four ways.
+- **Part B — 27 remote branches deleted.** Containment proved FIRST:
+  `git rev-list --count origin/main..origin/<b>` = **0 for all 27**.
+  After deletion `origin` holds **`main` alone**; commits on `main`
+  unchanged at **622**, objects reachable unchanged at **12383**, the
+  tag `v2026.09-redesign` still resolves, and every old branch tip is
+  still an ancestor of `main`. Nothing was rewritten — no force-push, no
+  rebase.
+  **Locally the picture is different and the owner should read it:** of
+  143 local branches, 26 merged ones were deleted; **113 are NOT merged
+  and hold 400 commits `main` does not have.** 202 of those are
+  preserved on origin by the tag `sprints-153-188-history` (= the old
+  `feat/sprint-188` tip); **198 exist only on this machine**, across
+  ~35 pre-#130-era branches. They were kept — B4 said delete the MERGED
+  ones, and deleting these would destroy the only copy. ~100 live
+  worktrees also hold branches; two merged branches
+  (`feat/p4-joy`, `worktree-agent-a4ad5e864304dd51a`) could not be
+  deleted because a worktree has them checked out.
+- **Part C — the CI gate can now pass.** The backend job was killed at
+  50m22s by `timeout-minutes: 50`. It is now **7 shards** from
+  `backend/ci_shards.json`, each with `--parallel` inside it, behind a
+  plan job that runs `backend/ci_shard_check.py` — which derives the
+  apps owning tests and fails before any shard starts if the plan does
+  not cover each exactly once (an unsharded app would otherwise be
+  silently untested with CI green). The aggregate job keeps the name
+  **`Backend (Django, Postgres, Redis)`** so the existing required check
+  is not left pending. Branch-protection settings untouched.
+
 ### P-18 — "The first sprint from main" (2026-09-04, DONE)
 
 **The first sprint branched from `main`** under the new rule:
@@ -4301,7 +4338,8 @@ this file always reflects where we actually are.
 - **Never stage** `docs/transkript*` or their `:Zone.Identifier`. Stage commits by **explicit path**.
 - nl + en i18n in lockstep (Dutch primary); every referenced i18n key must resolve (no raw keys on screen).
 - ESLint baseline = **39** (38 errors, 1 warning = `useSavedBanner.ts:28` `react-hooks/exhaustive-deps`), as CLAUDE.md records and as measured again at P-17 and P-18: add **no** new violations; **never** a synchronous setState in an effect body; for prop-derived state, **key the component by id** (no resync useEffect). (History: 49 → 48 when Sprint 115 removed an unused hook, `useEffectivePermissions.ts`, that carried one violation. This line then said 48 until Sprint 155, which was stale from Sprint 152 onwards — Sprints 152–154 each removed a violation without correcting it, and CLAUDE.md said 45 while this said 48. Sprint 154 §B deleted the effect that took it to **44**; Sprint 155 corrected both files to agree. When the count changes, change it in BOTH places in the same commit.)
-- **Close rule — the full backend suite runs at the close of every sprint** (P-16); a red is a sprint item, not a note. **And beside it (P-18 B3): any document that quotes a label is verified against the RUNNING SCREEN, not the bundle.** P-17 corrected the walkthrough's labels against `frontend/src/i18n/` and still shipped a wrong sentence — the Dashboard attention list is assembled from TWO namespaces, so the bundle could not show what the page contains. A grep proves a string exists; only the screen proves it is the one the reader sees.
+- **Close rule — the full backend suite runs at the close of every sprint** (P-16); a red is a sprint item, not a note. **And beside it (P-18 B3): any document that quotes a label is verified against the RUNNING SCREEN, not the bundle.** **And (P-19 Part C): read the CI result for the pushed commit** — `test.yml` runs on every push to `main`, its backend half is now sharded so it can actually finish, and the aggregate check `Backend (Django, Postgres, Redis)` is the one to read. P-17 corrected the walkthrough's labels against `frontend/src/i18n/` and still shipped a wrong sentence — the Dashboard attention list is assembled from TWO namespaces, so the bundle could not show what the page contains. A grep proves a string exists; only the screen proves it is the one the reader sees.
+- **Branch policy (P-19).** **At rest, GitHub holds `main` and the tags — nothing else.** A sprint still gets its own branch: CC branches from `main`, works there, and **pushes that branch to origin — that push is what lets web-Claude verify from `origin` instead of from a report, and it is not optional.** When the sprint is merged, its branch is deleted from origin. During a sprint GitHub holds `main` plus exactly one live sprint branch; between sprints, `main` alone. **Work is NEVER done directly on `main`** — CC commits nothing to `main` but the merge commit, and nothing is merged before web-Claude has verified from `origin` and the owner has said so. Tags are the restore points (`v2026.09-redesign`, `sprints-153-188-history`).
 - **PR cadence (corrected 2026-07-27 — the old "PR per sprint" line was stale):** several sprints now land on ONE shared branch and the owner opens ONE PR after the last of them (Sprints 115–119 → PR #115; Sprints 122–124 are following the same pattern on `feat/sprint-122`). CI (+ Codex review) still gates that one PR when it opens. Migrations stay additive + back-compat regardless of when the PR opens.
 - Each prompt starts with a sync + a grep GUARD proving the right base, captures the ESLint baseline, applies any new migration to the dev DB before a FE smoke, and ends with an adversarial self-review. Screenshots/smokes via **token-inject** (the e2e login form is flaky).
 - Co-author trailer on commits: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` (the old line here named a different model — verify the current one in `CLAUDE.md` before reusing this, it has changed before).

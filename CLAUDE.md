@@ -32,6 +32,18 @@ The **owner does not write code.** The workflow is:
   `v2026.09-redesign` — the restore point. The stacked-branch train
   ended with that merge; see
   [docs/planning/merge-recipe.md](docs/planning/merge-recipe.md).
+- **At rest, GitHub holds `main` and the tags — nothing else** (P-19).
+  A sprint still gets its own branch: CC branches from `main`, works
+  there, and **pushes that branch to origin — that push is what lets
+  web-Claude verify from `origin` instead of from a report, and it is
+  not optional.** When the sprint is merged, its branch is deleted from
+  origin. So during a sprint GitHub holds `main` plus exactly one live
+  sprint branch; between sprints it holds `main` alone.
+  **Work is NEVER done directly on `main`.** CC commits nothing to
+  `main` except the merge commit itself, and nothing is merged before
+  web-Claude has verified the branch from `origin` and the owner has
+  said so. The one-branch end state is housekeeping — it does not
+  change how sprints run.
 - The owner performs all GitHub UI actions. CC pushes branches — **pushed
   before the report is written. A report about commits that are not on
   `origin` is a report about nothing — web-Claude verifies from `origin`
