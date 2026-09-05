@@ -12,10 +12,23 @@ whichever door planned it.
 
 A5 — "Plan N" is the same two doors, once per row: a refusal on one row
 is that row's, and the other rows land.
+
+P-20 — these tests read the WALL CLOCK and so failed every weekend.
+`WorkPlanFixture` sets `self.today = timezone.localdate()`; the board is
+ONE week, and `is_upcoming()` correctly files anything planned after
+`week_end` under "upcoming". A plan "two days out" is still this week on
+a Tuesday and is NEXT week on a Saturday, so the row left the board and
+the assertion blew up - on Saturday and Sunday only. The product was
+right both times; the test was reading the calendar. The clock is now
+frozen to the middle of the current ISO week (the house pattern from
+`test_p10_review_placement` / `test_p9_schedule_law`), and the crossing
+the failure kept stumbling into is pinned as a test of its own instead
+of being an accident of the day CI happened to run.
 """
 from __future__ import annotations
 
 import datetime
+from unittest import mock
 
 from django.utils import timezone
 from rest_framework import status
@@ -41,6 +54,29 @@ BUCKETS = (
 
 
 class ExtraWorkPlanLeavesTheStripTests(WorkPlanFixture, APITestCase):
+    def setUp(self):
+        super().setUp()
+        # Pin the WEDNESDAY of the current ISO week. Keeping the pin
+        # inside the real week leaves every row the fixture already
+        # created in the week it was built for; only the weekday stops
+        # drifting. Frozen for the whole test, not just the read, so the
+        # write door sees the same day the board does.
+        real = timezone.localdate()
+        self.today = datetime.date.fromisocalendar(*real.isocalendar()[:2], 3)
+        self.week_end = self.today + 4 * DAY  # the Sunday that closes it
+        frozen = mock.patch(
+            "django.utils.timezone.localdate", return_value=self.today
+        )
+        frozen.start()
+        self.addCleanup(frozen.stop)
+
+    def _bucket_of(self, payload, key):
+        """Which bucket holds the row, or None."""
+        for bucket in BUCKETS:
+            if any(e["key"] == key for e in payload.get(bucket, [])):
+                return bucket
+        return None
+
     def _undated_keys(self, payload):
         return {e["key"] for e in payload["undated_entries"]}
 
@@ -84,21 +120,51 @@ class ExtraWorkPlanLeavesTheStripTests(WorkPlanFixture, APITestCase):
         self.assertEqual(after["counts"]["total"], len(after["entries"]))
 
     def test_the_provider_plan_wins_over_the_customers_wish_on_the_board(self):
+        """The wish is Monday, the plan is Friday, and Friday is still
+        this week - so the row sits on the board on the provider's day."""
+        planned = self.today + 2 * DAY  # Friday: inside the week, pinned
+        self.assertLessEqual(planned, self.week_end)
         extra_work = self.make_extra_work(
-            "Wished Monday, planned Thursday",
-            preferred=self.today - 3 * DAY,
+            "Wished Monday, planned Friday",
+            preferred=self.today - 2 * DAY,
+            provider_planned=planned,
             ew_status=ExtraWorkStatus.CUSTOMER_APPROVED,
             assignee=self.worker,
         )
-        extra_work.provider_planned_date = self.today + 2 * DAY
-        extra_work.save(update_fields=["provider_planned_date"])
         payload = self.get_plan(self.company_admin, scope="company")
         card = self._card(payload, f"ew-{extra_work.id}")
-        self.assertEqual(card["day"], (self.today + 2 * DAY).isoformat())
+        self.assertEqual(card["day"], planned.isoformat())
         self.assertEqual(card["placement"], "PLANNED")
         self.assertEqual(card["plan_source"], "PROVIDER_PLAN")
         # Not rolled: the plan is ahead, whatever the wish said.
         self.assertIsNone(card["rolled_from"])
+        self.assertEqual(payload["counts"]["total"], len(payload["entries"]))
+
+    def test_a_provider_plan_past_the_week_is_upcoming_not_on_the_board(self):
+        """The other side of the same rule, and the one the weekend
+        failure kept walking into by accident.
+
+        A plan NEXT week is not on THIS week's board - `is_upcoming()`
+        files it under "upcoming" so the week's counts stay a number the
+        operator can trust. The provider's plan still beats the wish;
+        what changes is where the row is shown, not which date wins.
+        """
+        planned = self.week_end + 1 * DAY  # the Monday after: next week
+        extra_work = self.make_extra_work(
+            "Wished this week, planned next week",
+            preferred=self.today - 2 * DAY,
+            provider_planned=planned,
+            ew_status=ExtraWorkStatus.CUSTOMER_APPROVED,
+            assignee=self.worker,
+        )
+        payload = self.get_plan(self.company_admin, scope="company")
+        key = f"ew-{extra_work.id}"
+        self.assertEqual(self._bucket_of(payload, key), "upcoming_entries")
+        card = self.entry(payload, key, bucket="upcoming_entries")
+        self.assertEqual(card["day"], planned.isoformat())
+        self.assertEqual(card["plan_source"], "PROVIDER_PLAN")
+        self.assertNotIn(key, {e["key"] for e in payload["entries"]})
+        self.assertGreaterEqual(payload["counts"]["upcoming"], 1)
         self.assertEqual(payload["counts"]["total"], len(payload["entries"]))
 
 

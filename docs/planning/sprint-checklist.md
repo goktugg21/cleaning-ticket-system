@@ -59,6 +59,28 @@ defect, which is the argument for D1.
   report). Module parity re-measured independently with Django's own
   loader: **6077 tests in 424 modules** on both sides, with zero modules
   on either side only.
+- **The backend gate was RED every SATURDAY and SUNDAY — found because
+  P-20 made the gate run at all.** The sharded CI's first green run
+  (`main` `8d8c316`, run 33885226099) was a **Friday**; the next two
+  runs, same tickets code, failed on **Saturdays** (18m44s and 18m41s).
+  One test:
+  `tickets.tests.test_p10_bulk_plan.ExtraWorkPlanLeavesTheStripTests.`
+  `test_the_provider_plan_wins_over_the_customers_wish_on_the_board`.
+  `WorkPlanFixture.setUp` reads `timezone.localdate()`, the test plans
+  `today + 2 days`, and the board is ONE week — so on a Saturday the
+  plan is next Monday, `is_upcoming()` correctly files it under
+  "upcoming", and the row leaves the board. **The product was right; the
+  test read the wall clock.** Fixed with the house pattern
+  (`mock.patch("django.utils.timezone.localdate")` pinned to the
+  Wednesday of the current ISO week, as in `test_p10_review_placement`
+  and `test_p9_schedule_law`), frozen for the whole test so the write
+  door and the board agree. **The assertion was kept, not deleted**, and
+  the cross-week path the failure kept stumbling into is now a test of
+  its own — 2 tests became 3, so the sprint gained coverage. Proved by
+  running the class against a simulated calendar for seven consecutive
+  days, with the pre-fix code through the same harness as a negative
+  control: pre-fix fails Sat+Sun only, post-fix passes all seven.
+  Neighbours that share the fixture: 144 tests, OK.
 - **Part B — a soft budget.** Each shard prints its wall time and fails
   at **24 minutes** with "shard {name} is outgrowing its slot - split it
   in ci_shards.json". Chosen over reading previous runs through the API:
