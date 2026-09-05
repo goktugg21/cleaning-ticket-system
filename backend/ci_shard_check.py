@@ -25,9 +25,19 @@ The question is now the one that actually matters: **does this directory
 own a test file?** Not "is it an app". A directory that owns tests and
 is not in a shard fails the run.
 
-A directory that genuinely must not be sharded goes in `"exempt"` with a
+A unit that genuinely must not be sharded goes in `"exempt"` with a
 written reason, and every run PRINTS the exemptions — an exemption
 anybody can see beats a rule nobody can.
+
+The same blind spot exists one level up, so it is closed here too: a
+`test*.py` sitting DIRECTLY in `backend/` belongs to no directory, so a
+guard that iterates directories cannot see it either. Today the only one
+is `test_utils.py`, shared fixtures that define no `TestCase` and
+collect zero tests — harmless, and exempt with that reason written down.
+A real `backend/test_smoke.py` added tomorrow would otherwise be the
+`config` defect again, one directory up. So the unit of coverage is
+"directory that owns a test file, OR root-level test module", and both
+are addressable as a `manage.py test` label.
 """
 from __future__ import annotations
 
@@ -39,41 +49,48 @@ ROOT = Path(__file__).resolve().parent
 SKIP_DIRS = {"__pycache__", ".git", "node_modules", ".venv", "venv"}
 
 
-def dirs_with_tests() -> set[str]:
-    """Every top-level directory under backend/ that owns a test module.
+def units_with_tests() -> set[str]:
+    """Every top-level unit under backend/ that owns a test module.
 
     Deliberately NOT "every app": see the module docstring. `config` has
     no `apps.py` and 12 security tests, and that is the whole point.
+
+    A unit is a directory that owns a `test*.py` anywhere beneath it, or
+    a `test*.py` module sitting directly in `backend/`. Both are valid
+    `manage.py test` labels; both are invisible to app enumeration.
     """
     found = set()
     for entry in ROOT.iterdir():
-        if not entry.is_dir() or entry.name in SKIP_DIRS:
+        if entry.name in SKIP_DIRS:
             continue
-        for test_file in entry.rglob("test*.py"):
-            if "__pycache__" in test_file.parts:
-                continue
-            found.add(entry.name)
-            break
+        if entry.is_dir():
+            for test_file in entry.rglob("test*.py"):
+                if "__pycache__" in test_file.parts:
+                    continue
+                found.add(entry.name)
+                break
+        elif entry.suffix == ".py" and entry.name.startswith("test"):
+            found.add(entry.stem)
     return found
 
 
 def main() -> int:
     plan = json.loads((ROOT / "ci_shards.json").read_text())
     shards = plan["shards"]
-    exempt = {e["dir"]: e["reason"] for e in plan.get("exempt", [])}
+    exempt = {e["unit"]: e["reason"] for e in plan.get("exempt", [])}
 
     planned: list[str] = []
     for shard in shards:
         planned.extend(shard["apps"].split())
 
-    real = dirs_with_tests()
+    real = units_with_tests()
     seen = set(planned)
 
     problems = []
     missing = sorted(real - seen - set(exempt))
     if missing:
         problems.append(
-            "directories that own tests but NO shard runs (they would "
+            "units that own tests but NO shard runs (they would "
             f"silently never be tested): {', '.join(missing)}"
         )
     unknown = sorted(seen - real)
@@ -84,7 +101,7 @@ def main() -> int:
     duplicated = sorted({a for a in planned if planned.count(a) > 1})
     if duplicated:
         problems.append(
-            f"directories listed in more than one shard: {', '.join(duplicated)}"
+            f"units listed in more than one shard: {', '.join(duplicated)}"
         )
     both = sorted(seen & set(exempt))
     if both:
@@ -111,7 +128,7 @@ def main() -> int:
 
     print(
         f"shard plan OK — {len(shards)} shards cover "
-        f"{len(real) - len(exempt)} of {len(real)} directories with tests:"
+        f"{len(real) - len(exempt)} of {len(real)} units with tests:"
     )
     for shard in shards:
         print(f"  {shard['name']:38} {shard['apps']}")
@@ -122,7 +139,7 @@ def main() -> int:
         for d, reason in sorted(exempt.items()):
             print(f"  {d:38} {reason}")
     else:
-        print("exempt from sharding: none — every directory with tests is in a shard")
+        print("exempt from sharding: none — every unit with tests is in a shard")
     return 0
 
 

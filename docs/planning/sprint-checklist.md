@@ -43,6 +43,22 @@ defect, which is the argument for D1.
   **Measured: CI now runs 6077 tests in 424 modules; local discovery
   collects 6077 in 424. Before this fix CI ran 6065 in 422** — exactly
   the two config modules short.
+- **Part A, second pass — the same blind spot one level up.** The
+  widened guard iterated *directories*, so a `test*.py` sitting directly
+  in `backend/` still belonged to no directory and was still invisible
+  by construction — the `config` defect again, one level up. Found by
+  measuring rather than assuming: 426 files match `test*.py` but only
+  425 are under a shard app. The odd one is `backend/test_utils.py`.
+  It costs no coverage today (Django's loader collects **0** tests from
+  it — shared fixtures, no `TestCase`), but a real `backend/test_smoke.py`
+  added tomorrow would be silently never run. The guard's unit is now
+  "directory that owns a test file **OR** root-level test module", both
+  being valid `manage.py test` labels, and `test_utils` is exempt with
+  that reason written down and printed on every run. Negative-tested
+  **seven** ways now, both directions for both shapes (see the P-20
+  report). Module parity re-measured independently with Django's own
+  loader: **6077 tests in 424 modules** on both sides, with zero modules
+  on either side only.
 - **Part B — a soft budget.** Each shard prints its wall time and fails
   at **24 minutes** with "shard {name} is outgrowing its slot - split it
   in ci_shards.json". Chosen over reading previous runs through the API:

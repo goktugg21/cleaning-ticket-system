@@ -9,5 +9,8 @@
     {"name": "sla-notifications-planned", "apps": "sla notifications planned_work"},
     {"name": "buildings-audit-companies-documents", "apps": "buildings audit companies documents"}
   ],
-  "exempt": []
+  "exempt": [
+    {"unit": "test_utils",
+     "reason": "shared test fixtures at backend/ root - defines no TestCase and collects 0 tests, so there is nothing for a shard to run. Verified with Django's own loader, not by eye."}
+  ]
 }
